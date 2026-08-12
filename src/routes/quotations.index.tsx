@@ -56,7 +56,7 @@ function QuotationsList() {
     .map((draft) => {
       const pod = pods.find((p) => p.id === draft.podId);
       const views = viewQuote(draft.podId, draft.items, selections);
-      const history = histories[draft.podId];
+      const history = histories[draft.id];
       return {
         draft,
         pod,
@@ -127,11 +127,11 @@ function QuotationsList() {
               </thead>
               <tbody>
                 {rows.map((r) => (
-                  <tr key={r.draft.podId} className="border-b border-hairline/70 last:border-b-0">
+                  <tr key={r.draft.id} className="border-b border-hairline/70 last:border-b-0">
                     <td className="px-4 py-3">
-                      <div className="font-medium text-ink-900">{r.pod!.buyer}</div>
+                      <div className="font-medium text-ink-900">{r.draft.id}</div>
                       <div className="text-[11.5px] text-ink-500">
-                        {r.pod!.id} · {r.pod!.buyerRef}
+                        {r.pod!.buyer} · {r.pod!.id}
                       </div>
                     </td>
 
@@ -187,17 +187,27 @@ function QuotationsList() {
                     </td>
 
                     <td className="px-4 py-3 text-right">
-                      <Link
-                        to="/quotation/$podId/$articleId"
-                        params={{
-                          podId: r.draft.podId,
-                          articleId: r.draft.items[0]?.articleId ?? "",
-                        }}
-                        search={{ sel: undefined }}
-                        className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-                      >
-                        Open <ArrowRight className="h-3.5 w-3.5" />
-                      </Link>
+                      {r.draft.mode === "multiple" ? (
+                        <Link
+                          to="/quotations/$quotationId"
+                          params={{ quotationId: r.draft.id }}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                        >
+                          Open <ArrowRight className="h-3.5 w-3.5" />
+                        </Link>
+                      ) : (
+                        <Link
+                          to="/quotation/$podId/$articleId"
+                          params={{
+                            podId: r.draft.podId,
+                            articleId: r.draft.items[0]?.articleId ?? "",
+                          }}
+                          search={{ sel: undefined }}
+                          className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                        >
+                          Open <ArrowRight className="h-3.5 w-3.5" />
+                        </Link>
+                      )}
                     </td>
                   </tr>
                 ))}

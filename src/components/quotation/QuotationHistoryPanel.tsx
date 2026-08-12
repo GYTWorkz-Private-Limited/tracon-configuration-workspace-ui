@@ -32,16 +32,16 @@ const TABS: { id: Tab; label: string; icon: React.ComponentType<{ className?: st
 ];
 
 export function QuotationHistoryPanel({
-  podId,
+  quotationId,
   onClose,
   onNewVersion,
 }: {
-  podId: string;
+  quotationId: string;
   onClose: () => void;
   /** offered on a sent quotation — re-open it for re-costing as the next version */
   onNewVersion?: () => void;
 }) {
-  const history = useQuotationHistory(podId);
+  const history = useQuotationHistory(quotationId);
   const [tab, setTab] = useState<Tab>("versions");
 
   return (
@@ -97,7 +97,7 @@ export function QuotationHistoryPanel({
           )}
           {tab === "comments" && (
             <Comments
-              podId={podId}
+              quotationId={quotationId}
               versionNo={
                 history.versions[history.versions.length - 1]?.no ?? workingVersionNo(history)
               }
@@ -206,11 +206,11 @@ export function VersionStatusPill({ status }: { status: VersionStatus }) {
  * ------------------------------------------------------------------ */
 
 function Comments({
-  podId,
+  quotationId,
   versionNo,
   comments,
 }: {
-  podId: string;
+  quotationId: string;
   versionNo: number;
   comments: { id: string; at: string; by: string; text: string; versionNo: number }[];
 }) {
@@ -219,7 +219,7 @@ function Comments({
   const post = (e: React.FormEvent) => {
     e.preventDefault();
     if (!text.trim()) return;
-    addQuotationComment(podId, versionNo, text);
+    addQuotationComment(quotationId, versionNo, text);
     setText("");
   };
 
@@ -262,7 +262,7 @@ function Comments({
                 {/* Anything a user can add, a user can take back. */}
                 <button
                   type="button"
-                  onClick={() => removeQuotationComment(podId, c.id)}
+                  onClick={() => removeQuotationComment(quotationId, c.id)}
                   aria-label="Remove this comment"
                   className="ml-auto rounded p-1 text-ink-300 hover:bg-surface-alt hover:text-[#8f2c22] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
                 >

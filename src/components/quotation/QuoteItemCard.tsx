@@ -52,11 +52,16 @@ import { AddConfigurationMenu } from "./AddConfigurationMenu";
 
 export function QuoteItemCard({
   podId,
+  quotationId,
   item,
   index,
   readOnly = false,
+  showSummary = true,
 }: {
+  /** the POD the article is costed in — where scenarios and variants come from */
   podId: string;
+  /** the quotation this card belongs to — where the commercial edits are saved */
+  quotationId: string;
   item: QuoteItem;
   index: number;
   /**
@@ -65,13 +70,24 @@ export function QuoteItemCard({
    * version is opened.
    */
   readOnly?: boolean;
+  /**
+   * A multi-article quotation is sent as ONE position, so it carries one
+   * combined summary at the end instead of a summary under every article.
+   */
+  showSummary?: boolean;
 }) {
-  return item.kind === "kit" ? (
-    <KitCard podId={podId} item={item} index={index} readOnly={readOnly} />
-  ) : (
-    <ProductCard podId={podId} item={item} index={index} readOnly={readOnly} />
-  );
+  const shared = { podId, quotationId, item, index, readOnly, showSummary };
+  return item.kind === "kit" ? <KitCard {...shared} /> : <ProductCard {...shared} />;
 }
+
+type CardProps = {
+  podId: string;
+  quotationId: string;
+  item: QuoteItem;
+  index: number;
+  readOnly: boolean;
+  showSummary: boolean;
+};
 
 /* ------------------------------------------------------------------ *
  * Variants and options
@@ -98,17 +114,7 @@ function optionsOf(builds: BuildRef[], variantId: string): BuildRef[] {
  * Single product
  * ================================================================== */
 
-function ProductCard({
-  podId,
-  item,
-  index,
-  readOnly,
-}: {
-  podId: string;
-  item: QuoteItem;
-  index: number;
-  readOnly: boolean;
-}) {
+function ProductCard({ podId, quotationId, item, index, readOnly, showSummary }: CardProps) {
   const { scenarios, builds } = useArticleSelection(podId, item.articleId);
 
   const rows: QuoteRow[] = useMemo(
@@ -155,8 +161,8 @@ function ProductCard({
   const uncoveredKey = uncoveredVariantIds.join(",");
   useEffect(() => {
     if (readOnly || !uncoveredKey) return;
-    addVariantRows(podId, item.id, uncoveredKey.split(","));
-  }, [podId, item.id, uncoveredKey, readOnly]);
+    addVariantRows(quotationId, item.id, uncoveredKey.split(","));
+  }, [quotationId, item.id, uncoveredKey, readOnly]);
 
   const quotedId = item.quotedLineId ?? rows[0]?.lineId;
   const quoted = rows.find((r) => r.lineId === quotedId) ?? rows[0];
@@ -168,6 +174,7 @@ function ProductCard({
     <article className="overflow-hidden rounded-xl border border-hairline bg-surface shadow-sm">
       <CardHeader
         podId={podId}
+        quotationId={quotationId}
         item={item}
         index={index}
         kindLabel="Product"
@@ -182,19 +189,21 @@ function ProductCard({
         <QuoteLinesTable
           rows={rows}
           quotedLineId={quotedId}
-          onQuote={(lineId) => setQuotedLine(podId, item.id, lineId)}
+          onQuote={(lineId) => setQuotedLine(quotationId, item.id, lineId)}
           readOnly={readOnly}
           onRemove={
             rows.length > 1 && !readOnly
-              ? (lineId) => removeLine(podId, item.id, lineId)
+              ? (lineId) => removeLine(quotationId, item.id, lineId)
               : undefined
           }
           onMargin={(lineId, marginPct) =>
-            updateLine(podId, item.id, lineId, { targetMarginPct: marginPct })
+            updateLine(quotationId, item.id, lineId, { targetMarginPct: marginPct })
           }
-          onMoq={(lineId, moq) => updateLine(podId, item.id, lineId, { moqOverride: moq })}
-          onResetMoq={(lineId) => updateLine(podId, item.id, lineId, { moqOverride: undefined })}
-          onBuild={(lineId, buildId) => setLineBuild(podId, item.id, lineId, buildId)}
+          onMoq={(lineId, moq) => updateLine(quotationId, item.id, lineId, { moqOverride: moq })}
+          onResetMoq={(lineId) =>
+            updateLine(quotationId, item.id, lineId, { moqOverride: undefined })
+          }
+          onBuild={(lineId, buildId) => setLineBuild(quotationId, item.id, lineId, buildId)}
         />
       </div>
 
@@ -208,7 +217,7 @@ function ProductCard({
             scenarios={scenarios}
             builds={builds}
             usedKeys={usedKeys}
-            onAdd={(input) => addLine(podId, item.id, input)}
+            onAdd={(input) => addLine(quotationId, item.id, input)}
             onCreateScenario={(s) => addScenario(podId, item.articleId, s)}
           />
         )}
@@ -216,19 +225,23 @@ function ProductCard({
 
       <div className="space-y-3 border-t border-hairline bg-canvas p-4">
         <CommercialBreakdown result={quoted.priced.commercial} />
-        <QuoteSummary
-          variant="product"
-          result={quoted.priced.commercial}
-          quantity={quoted.priced.moq}
-          quantityLabel={`${quoted.priced.moq.toLocaleString("en-IN")} pcs`}
-          orderValueUsd={quoted.priced.orderValueUsd}
-          onSaveFinalCost={
-            readOnly ? undefined : (v) => setLineFinalCost(podId, item.id, quoted.lineId, v)
-          }
-          onSaveSellingPrice={
-            readOnly ? undefined : (v) => setLineSellingPrice(podId, item.id, quoted.lineId, v)
-          }
-        />
+        {showSummary && (
+          <QuoteSummary
+            variant="product"
+            result={quoted.priced.commercial}
+            quantity={quoted.priced.moq}
+            quantityLabel={`${quoted.priced.moq.toLocaleString("en-IN")} pcs`}
+            orderValueUsd={quoted.priced.orderValueUsd}
+            onSaveFinalCost={
+              readOnly ? undefined : (v) => setLineFinalCost(quotationId, item.id, quoted.lineId, v)
+            }
+            onSaveSellingPrice={
+              readOnly
+                ? undefined
+                : (v) => setLineSellingPrice(quotationId, item.id, quoted.lineId, v)
+            }
+          />
+        )}
       </div>
     </article>
   );
@@ -238,17 +251,7 @@ function ProductCard({
  * Kit / bundle
  * ================================================================== */
 
-function KitCard({
-  podId,
-  item,
-  index,
-  readOnly,
-}: {
-  podId: string;
-  item: QuoteItem;
-  index: number;
-  readOnly: boolean;
-}) {
+function KitCard({ podId, quotationId, item, index, readOnly, showSummary }: CardProps) {
   // Subscribed once for the whole kit — every member reads off this snapshot,
   // so adding a scenario in Configuration re-prices the set immediately.
   const selections = useCostingSelections();
@@ -306,6 +309,7 @@ function KitCard({
     <article className="overflow-hidden rounded-xl border-2 border-[var(--color-cfg)] bg-surface shadow-sm">
       <CardHeader
         podId={podId}
+        quotationId={quotationId}
         item={item}
         index={index}
         kindLabel="Kit"
@@ -314,7 +318,7 @@ function KitCard({
         headline={usd(kit.commercial.sellingUsd)}
         headlineNote="/ set"
         readOnly={readOnly}
-        onToggle={() => toggleCollapsed(podId, item.id)}
+        onToggle={() => toggleCollapsed(quotationId, item.id)}
         collapsed={collapsed}
       />
 
@@ -336,13 +340,15 @@ function KitCard({
               showQuoteColumn={false}
               identityHeader="Article in this set"
               onMargin={(lineId, marginPct) =>
-                updateLine(podId, item.id, lineId, { targetMarginPct: marginPct })
+                updateLine(quotationId, item.id, lineId, { targetMarginPct: marginPct })
               }
-              onMoq={(lineId, moq) => updateLine(podId, item.id, lineId, { moqOverride: moq })}
+              onMoq={(lineId, moq) =>
+                updateLine(quotationId, item.id, lineId, { moqOverride: moq })
+              }
               onResetMoq={(lineId) =>
-                updateLine(podId, item.id, lineId, { moqOverride: undefined })
+                updateLine(quotationId, item.id, lineId, { moqOverride: undefined })
               }
-              onBuild={(lineId, buildId) => setLineBuild(podId, item.id, lineId, buildId)}
+              onBuild={(lineId, buildId) => setLineBuild(quotationId, item.id, lineId, buildId)}
             />
           </div>
 
@@ -354,17 +360,21 @@ function KitCard({
               title="Kit Commercial Overheads & Provisions"
               caption="Applied once to the set — not twice to two separate quotes."
             />
-            <QuoteSummary
-              variant="kit"
-              result={kit.commercial}
-              quantity={kit.sets}
-              quantityLabel={`${kit.sets.toLocaleString("en-IN")} sets`}
-              orderValueUsd={kit.orderValueUsd}
-              onSaveFinalCost={readOnly ? undefined : (v) => setItemFinalCost(podId, item.id, v)}
-              onSaveSellingPrice={
-                readOnly ? undefined : (v) => setItemSellingPrice(podId, item.id, v)
-              }
-            />
+            {showSummary && (
+              <QuoteSummary
+                variant="kit"
+                result={kit.commercial}
+                quantity={kit.sets}
+                quantityLabel={`${kit.sets.toLocaleString("en-IN")} sets`}
+                orderValueUsd={kit.orderValueUsd}
+                onSaveFinalCost={
+                  readOnly ? undefined : (v) => setItemFinalCost(quotationId, item.id, v)
+                }
+                onSaveSellingPrice={
+                  readOnly ? undefined : (v) => setItemSellingPrice(quotationId, item.id, v)
+                }
+              />
+            )}
           </div>
         </>
       )}
@@ -461,6 +471,7 @@ const emptyRollup = {
 
 function CardHeader({
   podId,
+  quotationId,
   item,
   index,
   kindLabel,
@@ -473,6 +484,7 @@ function CardHeader({
   readOnly,
 }: {
   podId: string;
+  quotationId: string;
   item: QuoteItem;
   index: number;
   kindLabel: string;
@@ -574,7 +586,7 @@ function CardHeader({
           <button
             type="button"
             hidden={readOnly}
-            onClick={() => removeItem(podId, item.id)}
+            onClick={() => removeItem(quotationId, item.id)}
             aria-label={`Remove ${item.name} from this quotation`}
             className="rounded p-1.5 text-ink-300 hover:bg-surface-alt hover:text-[#8f2c22] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
           >

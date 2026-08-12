@@ -61,7 +61,7 @@ import type { ApprovalSnapshot } from "@/lib/approvalsStore";
 import { useChangesGate } from "@/lib/requestedChangesStore";
 import { useIsReadyForQuotation, READY_LABEL, NOT_READY_LABEL } from "@/lib/quotationReadiness";
 import { QuotationEntryFlow } from "@/components/quotation/QuotationEntryFlow";
-import { QuotationStatusMenu } from "@/components/quotation/QuotationStatusMenu";
+import { QuotationReadyAction } from "@/components/quotation/QuotationReadyAction";
 type Tab = "overview" | "variants" | "financial" | "buildup" | "trends" | "ai";
 
 type ReportArticle = { id: string; name: string; size?: string; moq?: string };
@@ -316,28 +316,16 @@ export function CostingIntelligenceReport({
             </button>
             {changesGate.submitted && <RequestedChangesAction />}
             {changesGate.submitted && <RevisionHistoryAction />}
-            {/* Where the costing stands, and what it can do next. The status
-                is a value the user sets and un-sets — a costing that has
-                changed is no longer signed off — so it stays on screen instead
-                of disappearing once it has been marked once. */}
-            <QuotationStatusMenu
+            {/* One decision at a time: mark the costing ready, then quote it.
+                The status shows where it stands once it is set, and stays
+                reversible — a costing that has changed is no longer signed
+                off. */}
+            <QuotationReadyAction
               podId={navPodId}
               articleId={navArticleId}
               articleName={productName}
+              onGenerate={() => setSelectOpen(true)}
             />
-            <button
-              disabled={!navPodId || !navArticleId || !isReady}
-              onClick={() => setSelectOpen(true)}
-              title={
-                isReady
-                  ? "Choose what to quote"
-                  : `Set this costing to ${READY_LABEL} before it can be quoted`
-              }
-              className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Send className="h-4 w-4" /> Continue to Quotation
-              <ArrowRight className="h-3.5 w-3.5" />
-            </button>
           </ActionGroup>
         </div>
       </header>

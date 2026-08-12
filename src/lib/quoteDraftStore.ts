@@ -1,5 +1,12 @@
 /**
- * The quotation draft for a POD.
+ * Quotations.
+ *
+ * A quotation is its OWN object with its own number — QT-2601 — that contains
+ * one or more of a POD's articles. It is not a property of the article you
+ * happened to start from: quoting a Placemat and a Runner together produces
+ * one quotation containing both, not a Placemat quotation with a Runner buried
+ * inside it. A POD can therefore hold several quotations at once, and each
+ * article belongs to at most one of them.
  *
  * This store holds SELECTIONS, never costs. A quote line records which
  * scenario, which variant/option and which quantity the commercial team chose;
@@ -7,7 +14,7 @@
  * Configuration uses. That is what makes Quotation "the commercially selected
  * version of the costing" rather than a second costing system.
  *
- *   Quote (POD)
+ *   Quotation QT-2601 (POD)
  *     ├── Item — a single product
  *     │     └── Line: scenario → variant → option → MOQ
  *     └── Item — a kit
@@ -108,25 +115,32 @@ export type QuoteItem = {
 /**
  * What the user said they were quoting when they left the Costing Report.
  *
- * "single" is one article quoted on its own — the quotation that has always
- * been generated for that article. "multiple" is the same quotation carrying
- * several selected articles and/or a kit. It changes what is ON the quote and
- * how it is navigated, never how anything is priced.
+ * "single" is one article quoted on its own, shown in the article's own
+ * Quotation step exactly as it always was. "multiple" is a parent quotation
+ * carrying several articles, which gets its own workspace — because burying
+ * three articles' quotations under the one you started from is not a
+ * multi-product quotation, it is a display accident.
+ *
+ * It changes where the quotation is shown, never how anything is priced.
  */
 export type QuoteMode = "single" | "multiple";
 
 export type QuoteDraft = {
+  /** the quotation number, e.g. QT-2601 */
+  id: string;
   podId: string;
-  mode?: QuoteMode;
+  mode: QuoteMode;
   items: QuoteItem[];
   /** quote-wide commercial defaults, inherited by every item that has none */
   rates: Partial<ProvisionRates>;
+  createdAt: string;
   updatedAt: string;
 };
 
+/** Keyed by quotation id — a POD can have several. */
 type State = Record<string, QuoteDraft>;
 
-const STORAGE_KEY = "tracon.quoteDraft.v2";
+const STORAGE_KEY = "tracon.quotations.v1";
 
 let state: State = {};
 const listeners = new Set<() => void>();
@@ -172,14 +186,45 @@ function useQuoteDrafts(): State {
   );
 }
 
-export function useQuoteDraft(podId: string): QuoteDraft | undefined {
-  return useQuoteDrafts()[podId];
+/** One quotation by number. */
+export function useQuotation(quotationId?: string): QuoteDraft | undefined {
+  const all = useQuoteDrafts();
+  return quotationId ? all[quotationId] : undefined;
 }
 
 /** Every quotation in the workspace — what the Quotations list reads. */
 export function useAllQuoteDrafts(): QuoteDraft[] {
   const all = useQuoteDrafts();
   return Object.values(all).filter((d) => d.items.length > 0);
+}
+
+/** Every quotation raised against one POD, newest first. */
+export function useQuotationsForPod(podId: string): QuoteDraft[] {
+  const all = useQuoteDrafts();
+  return Object.values(all)
+    .filter((q) => q.podId === podId && q.items.length > 0)
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+}
+
+/**
+ * The quotation an article is on.
+ *
+ * An article belongs to at most one quotation, so returning to it always shows
+ * the same quotation — whether that quotation holds it alone or alongside
+ * others.
+ */
+export function useQuotationForArticle(podId: string, articleId: string): QuoteDraft | undefined {
+  const all = useQuoteDrafts();
+  return Object.values(all).find(
+    (q) => q.podId === podId && q.items.some((i) => i.articleId === articleId),
+  );
+}
+
+/** Unsubscribed lookup — for event handlers, never for render. */
+export function quotationForArticle(podId: string, articleId: string): QuoteDraft | undefined {
+  return Object.values(state).find(
+    (q) => q.podId === podId && q.items.some((i) => i.articleId === articleId),
+  );
 }
 
 let seq = 0;
@@ -193,15 +238,26 @@ const baseLine = (): QuoteLine => ({
   buildId: BASE_BUILD.id,
 });
 
-function write(podId: string, fn: (d: QuoteDraft) => QuoteDraft) {
-  const current: QuoteDraft = state[podId] ?? {
-    podId,
-    items: [],
-    rates: {},
-    updatedAt: stamp(),
-  };
-  state = { ...state, [podId]: { ...fn(current), updatedAt: stamp() } };
+function write(quotationId: string, fn: (d: QuoteDraft) => QuoteDraft) {
+  const current = state[quotationId];
+  if (!current) return;
+  state = { ...state, [quotationId]: { ...fn(current), updatedAt: stamp() } };
   emit();
+}
+
+/**
+ * The next quotation number.
+ *
+ * Sequential and human-quotable — a number somebody reads out on a call has to
+ * be short and ordered, which a random id is not. Starts at 2601 so the demo
+ * looks like a workspace that has been running for a while.
+ */
+function nextQuotationId(): string {
+  const used = Object.keys(state)
+    .map((id) => Number(id.replace(/\D/g, "")))
+    .filter((n) => Number.isFinite(n));
+  const next = used.length > 0 ? Math.max(...used) + 1 : 2601;
+  return `QT-${next}`;
 }
 
 /* ------------------------------------------------------------------ *
@@ -257,81 +313,114 @@ function itemFromArticle(article: Article, podId: string): QuoteItem {
 }
 
 /**
- * Ensure the POD has a draft, and return it.
- *
- * Creates the shell only — it never puts an article on the quote. What gets
- * quoted is an explicit choice made in the selection modal, so landing on the
- * Quotation step can't silently add whatever article the route happened to
- * point at (least of all one nobody has marked ready).
- */
-export function ensureQuoteFor(podId: string): QuoteDraft {
-  write(podId, (d) => d);
-  return state[podId];
-}
-
-/**
- * Put articles on the quote.
+ * Open a new quotation over these articles, and return its number.
  *
  * Readiness is re-checked here rather than trusted from the caller: it is the
  * rule that separates costing from quotation, and a rule enforced only in the
  * UI is a rule that holds until the next caller.
+ *
+ * An article already on another quotation is moved onto this one, keeping the
+ * lines, margins, MOQs and overrides someone worked on — an article belongs to
+ * one quotation, and re-quoting it should not silently start from scratch.
  */
-export function addProducts(podId: string, articleIds: string[]) {
+export function createQuotation(
+  podId: string,
+  articleIds: string[],
+  mode: QuoteMode,
+): string | undefined {
   const pod = getPod(podId);
-  if (!pod) return;
-  write(podId, (d) => {
-    const add = pod.articles
-      .filter((a) => articleIds.includes(a.id))
-      .filter((a) => isReadyForQuotation(podId, a.id))
-      .filter((a) => !d.items.some((i) => i.articleId === a.id));
-    if (add.length === 0) return d;
-    for (const a of add) logQuotationEvent(podId, "item_added", `${a.name} added to the quotation`);
-    return { ...d, items: [...d.items, ...add.map((a) => itemFromArticle(a, podId))] };
-  });
+  if (!pod) return undefined;
+
+  const articles = articleIds
+    .map((id) => pod.articles.find((a) => a.id === id))
+    .filter((a): a is Article => Boolean(a))
+    .filter((a) => isReadyForQuotation(podId, a.id));
+  if (articles.length === 0) return undefined;
+
+  const id = nextQuotationId();
+  const items = articles.map((a) => takeItemFrom(podId, a.id) ?? itemFromArticle(a, podId));
+
+  state = {
+    ...state,
+    [id]: { id, podId, mode, items, rates: {}, createdAt: stamp(), updatedAt: stamp() },
+  };
+  emit();
+
+  logQuotationEvent(
+    id,
+    "quotation_started",
+    `${id} opened for ${items.map((i) => i.name).join(", ")} (${mode === "single" ? "single product" : "multiple products / kit"})`,
+  );
+  return id;
 }
 
 /**
- * Open a quotation for exactly these articles.
+ * Lift an article's existing item off whatever quotation holds it.
  *
- * The entry flow — Single Product or Multiple Products / Kit — is where the
- * composition of the quote is decided, so this SETS the item list rather than
- * appending to it ("Add Product" inside the workspace is what appends). An
- * article already on the draft keeps its existing item, so the lines, margins,
- * MOQs and edited total cost someone worked on survive coming back through the
- * selection.
+ * Returned so the new quotation can adopt it — the work done on a line is the
+ * commercial team's, not the quotation's, and it should survive the article
+ * being re-quoted.
  */
-export function startQuotation(podId: string, articleIds: string[], mode: QuoteMode) {
-  const pod = getPod(podId);
-  if (!pod) return;
-  write(podId, (d) => {
-    const items = articleIds
-      .map((id) => pod.articles.find((a) => a.id === id))
-      .filter((a): a is Article => Boolean(a))
-      .filter((a) => isReadyForQuotation(podId, a.id))
-      .map((a) => d.items.find((i) => i.articleId === a.id) ?? itemFromArticle(a, podId));
-    if (items.length === 0) return { ...d, mode };
-    logQuotationEvent(
-      podId,
-      "quotation_started",
-      `Quotation opened for ${items.map((i) => i.name).join(", ")} (${mode === "single" ? "single product" : "multiple products / kit"})`,
-    );
-    return { ...d, mode, items };
-  });
+function takeItemFrom(podId: string, articleId: string): QuoteItem | undefined {
+  const from = quotationForArticle(podId, articleId);
+  const item = from?.items.find((i) => i.articleId === articleId);
+  if (!from || !item) return undefined;
+  state = {
+    ...state,
+    [from.id]: { ...from, items: from.items.filter((i) => i.id !== item.id), updatedAt: stamp() },
+  };
+  return item;
 }
 
-export function removeItem(podId: string, itemId: string) {
-  const name = itemOf(podId, itemId)?.name;
-  if (name) logQuotationEvent(podId, "item_removed", `${name} removed from the quotation`);
-  write(podId, (d) => ({ ...d, items: d.items.filter((i) => i.id !== itemId) }));
+/**
+ * Put more articles on an existing quotation.
+ *
+ * The "+ Add Product" path inside a quotation workspace — additive, unlike
+ * `createQuotation`, which decides what a NEW quotation contains.
+ */
+export function addProducts(quotationId: string, articleIds: string[]) {
+  const quote = state[quotationId];
+  if (!quote) return;
+  const pod = getPod(quote.podId);
+  if (!pod) return;
+
+  const add = pod.articles
+    .filter((a) => articleIds.includes(a.id))
+    .filter((a) => isReadyForQuotation(quote.podId, a.id))
+    .filter((a) => !quote.items.some((i) => i.articleId === a.id));
+  if (add.length === 0) return;
+
+  const items = add.map((a) => takeItemFrom(quote.podId, a.id) ?? itemFromArticle(a, quote.podId));
+  for (const a of add)
+    logQuotationEvent(quotationId, "item_added", `${a.name} added to ${quotationId}`);
+  write(quotationId, (d) => ({ ...d, items: [...d.items, ...items] }));
+}
+
+/** Take several articles off a quotation at once — the bulk remove. */
+export function removeItems(quotationId: string, itemIds: string[]) {
+  const quote = state[quotationId];
+  if (!quote) return;
+  const going = quote.items.filter((i) => itemIds.includes(i.id));
+  if (going.length === 0) return;
+  for (const i of going) {
+    logQuotationEvent(quotationId, "item_removed", `${i.name} removed from ${quotationId}`);
+  }
+  write(quotationId, (d) => ({ ...d, items: d.items.filter((i) => !itemIds.includes(i.id)) }));
+}
+
+export function removeItem(quotationId: string, itemId: string) {
+  const name = itemOf(quotationId, itemId)?.name;
+  if (name) logQuotationEvent(quotationId, "item_removed", `${name} removed from the quotation`);
+  write(quotationId, (d) => ({ ...d, items: d.items.filter((i) => i.id !== itemId) }));
 }
 
 /** Unsubscribed lookup, so an action can name what it just changed. */
-function itemOf(podId: string, itemId: string): QuoteItem | undefined {
-  return state[podId]?.items.find((i) => i.id === itemId);
+function itemOf(quotationId: string, itemId: string): QuoteItem | undefined {
+  return state[quotationId]?.items.find((i) => i.id === itemId);
 }
 
-export function toggleCollapsed(podId: string, itemId: string) {
-  write(podId, (d) => ({
+export function toggleCollapsed(quotationId: string, itemId: string) {
+  write(quotationId, (d) => ({
     ...d,
     items: d.items.map((i) => (i.id === itemId ? { ...i, collapsed: !i.collapsed } : i)),
   }));
@@ -343,11 +432,11 @@ export function toggleCollapsed(podId: string, itemId: string) {
 
 /** Add an existing costing scenario to a product as a new quotable line. */
 export function addLine(
-  podId: string,
+  quotationId: string,
   itemId: string,
   input: { scenarioId: string; buildId?: string; moqOverride?: number },
 ) {
-  write(podId, (d) => ({
+  write(quotationId, (d) => ({
     ...d,
     items: d.items.map((i) =>
       i.id === itemId
@@ -367,9 +456,9 @@ export function addLine(
     ),
   }));
   logQuotationEvent(
-    podId,
+    quotationId,
     "line_added",
-    `Configuration row added to ${itemOf(podId, itemId)?.name ?? "an item"}`,
+    `Configuration row added to ${itemOf(quotationId, itemId)?.name ?? "an item"}`,
   );
 }
 
@@ -386,8 +475,8 @@ export function addLine(
  * knows which rows sit on an OPTION of a variant and therefore already cover
  * it.
  */
-export function addVariantRows(podId: string, itemId: string, variantIds: string[]) {
-  const item = itemOf(podId, itemId);
+export function addVariantRows(quotationId: string, itemId: string, variantIds: string[]) {
+  const item = itemOf(quotationId, itemId);
   if (!item || item.kind !== "product") return;
   const dismissed = new Set(item.dismissedBuildIds ?? []);
   // Already on the quote wins over "uncovered": the caller computes coverage
@@ -397,7 +486,7 @@ export function addVariantRows(podId: string, itemId: string, variantIds: string
   const add = variantIds.filter((id) => !dismissed.has(id) && !present.has(id));
   if (add.length === 0) return;
 
-  write(podId, (d) => ({
+  write(quotationId, (d) => ({
     ...d,
     items: d.items.map((i) =>
       i.id !== itemId
@@ -411,13 +500,13 @@ export function addVariantRows(podId: string, itemId: string, variantIds: string
 }
 
 export function updateLine(
-  podId: string,
+  quotationId: string,
   itemId: string,
   lineId: string,
   patch: Partial<Omit<QuoteLine, "id">>,
 ) {
-  logLinePatch(podId, itemId, patch);
-  updateLineQuietly(podId, itemId, lineId, patch);
+  logLinePatch(quotationId, itemId, patch);
+  updateLineQuietly(quotationId, itemId, lineId, patch);
 }
 
 /**
@@ -425,13 +514,13 @@ export function updateLine(
  * message of their own, so one change never appears in the audit twice.
  */
 function updateLineQuietly(
-  podId: string,
+  quotationId: string,
   itemId: string,
   lineId: string,
   patch: Partial<Omit<QuoteLine, "id">>,
 ) {
   const apply = (l: QuoteLine) => (l.id === lineId ? { ...l, ...patch } : l);
-  write(podId, (d) => ({
+  write(quotationId, (d) => ({
     ...d,
     items: d.items.map((i) =>
       i.id !== itemId
@@ -452,31 +541,39 @@ function updateLineQuietly(
  * change made from a screen written next year is logged without that screen
  * having to know the audit exists.
  */
-function logLinePatch(podId: string, itemId: string, patch: Partial<Omit<QuoteLine, "id">>) {
-  const name = itemOf(podId, itemId)?.name ?? "an item";
+function logLinePatch(quotationId: string, itemId: string, patch: Partial<Omit<QuoteLine, "id">>) {
+  const name = itemOf(quotationId, itemId)?.name ?? "an item";
   if (patch.moqOverride !== undefined) {
     logQuotationEvent(
-      podId,
+      quotationId,
       "moq_override",
       `${name} — quoted MOQ overridden to ${patch.moqOverride.toLocaleString("en-IN")}`,
     );
   }
   if (patch.targetMarginPct !== undefined) {
-    logQuotationEvent(podId, "margin_changed", `${name} — margin set to ${patch.targetMarginPct}%`);
+    logQuotationEvent(
+      quotationId,
+      "margin_changed",
+      `${name} — margin set to ${patch.targetMarginPct}%`,
+    );
   }
   if ("buildId" in patch && patch.buildId) {
-    logQuotationEvent(podId, "option_changed", `${name} — configuration changed on a quoted row`);
+    logQuotationEvent(
+      quotationId,
+      "option_changed",
+      `${name} — configuration changed on a quoted row`,
+    );
   }
 }
 
-export function removeLine(podId: string, itemId: string, lineId: string) {
+export function removeLine(quotationId: string, itemId: string, lineId: string) {
   logQuotationEvent(
-    podId,
+    quotationId,
     "line_removed",
-    `Configuration row removed from ${itemOf(podId, itemId)?.name ?? "an item"}`,
+    `Configuration row removed from ${itemOf(quotationId, itemId)?.name ?? "an item"}`,
   );
-  const removedBuildId = itemOf(podId, itemId)?.lines.find((l) => l.id === lineId)?.buildId;
-  write(podId, (d) => ({
+  const removedBuildId = itemOf(quotationId, itemId)?.lines.find((l) => l.id === lineId)?.buildId;
+  write(quotationId, (d) => ({
     ...d,
     items: d.items.map((i) => {
       // The last line is what identifies the product on the quote — removing
@@ -510,71 +607,79 @@ const positive = (n: number | undefined) => (n !== undefined && n > 0 ? n : unde
  * is always reversible and the costing underneath is never overwritten.
  */
 export function setLineFinalCost(
-  podId: string,
+  quotationId: string,
   itemId: string,
   lineId: string,
   finalCostInr: number | undefined,
 ) {
   const value = positive(finalCostInr);
-  const name = itemOf(podId, itemId)?.name ?? "an item";
+  const name = itemOf(quotationId, itemId)?.name ?? "an item";
   logQuotationEvent(
-    podId,
+    quotationId,
     value === undefined ? "total_cost_reset" : "total_cost_edited",
     value === undefined
       ? `${name} — total cost returned to the calculated figure`
       : `${name} — total cost set to ₹${value.toLocaleString("en-IN")} / pc`,
   );
-  updateLineQuietly(podId, itemId, lineId, { finalCostOverrideInr: value });
+  updateLineQuietly(quotationId, itemId, lineId, { finalCostOverrideInr: value });
 }
 
 /** Fix (or release) a product line's selling price, $ / pc. */
 export function setLineSellingPrice(
-  podId: string,
+  quotationId: string,
   itemId: string,
   lineId: string,
   sellingUsd: number | undefined,
 ) {
   const value = positive(sellingUsd);
-  const name = itemOf(podId, itemId)?.name ?? "an item";
+  const name = itemOf(quotationId, itemId)?.name ?? "an item";
   logQuotationEvent(
-    podId,
+    quotationId,
     value === undefined ? "selling_price_reset" : "selling_price_edited",
     value === undefined
       ? `${name} — selling price returned to the margin-derived figure`
       : `${name} — selling price set to $${value.toFixed(2)} / pc`,
   );
-  updateLineQuietly(podId, itemId, lineId, { sellingPriceOverrideUsd: value });
+  updateLineQuietly(quotationId, itemId, lineId, { sellingPriceOverrideUsd: value });
 }
 
 /** Fix (or release) a kit's total cost, ₹ / set. */
-export function setItemFinalCost(podId: string, itemId: string, finalCostInr: number | undefined) {
+export function setItemFinalCost(
+  quotationId: string,
+  itemId: string,
+  finalCostInr: number | undefined,
+) {
   const value = positive(finalCostInr);
-  const name = itemOf(podId, itemId)?.name ?? "a kit";
+  const name = itemOf(quotationId, itemId)?.name ?? "a kit";
   logQuotationEvent(
-    podId,
+    quotationId,
     value === undefined ? "total_cost_reset" : "total_cost_edited",
     value === undefined
       ? `${name} — total cost per set returned to the calculated figure`
       : `${name} — total cost set to ₹${value.toLocaleString("en-IN")} / set`,
   );
-  write(podId, (d) => ({
+  write(quotationId, (d) => ({
     ...d,
     items: d.items.map((i) => (i.id === itemId ? { ...i, finalCostOverrideInr: value } : i)),
   }));
 }
 
 /** Fix (or release) a kit's selling price, $ / set. */
-export function setItemSellingPrice(podId: string, itemId: string, sellingUsd: number | undefined) {
+export function setItemSellingPrice(
+  quotationId: string,
+  itemId: string,
+  sellingUsd: number | undefined,
+) {
   const value = positive(sellingUsd);
-  const name = itemOf(podId, itemId)?.name ?? "a kit";
+  const name = itemOf(quotationId, itemId)?.name ?? "a kit";
   logQuotationEvent(
-    podId,
+    quotationId,
     value === undefined ? "selling_price_reset" : "selling_price_edited",
     value === undefined
       ? `${name} — selling price per set returned to the margin-derived figure`
       : `${name} — selling price set to $${value.toFixed(2)} / set`,
   );
-  write(podId, (d) => ({
+  write(quotationId, (d) => ({
     ...d,
     items: d.items.map((i) => (i.id === itemId ? { ...i, sellingPriceOverrideUsd: value } : i)),
   }));
@@ -587,19 +692,19 @@ export function setItemSellingPrice(podId: string, itemId: string, sellingUsd: n
  * variant, so it moves the row it belongs to. Passing the variant's own id is
  * how the row is cleared back to "no option".
  */
-export function setLineBuild(podId: string, itemId: string, lineId: string, buildId: string) {
-  updateLine(podId, itemId, lineId, { buildId });
+export function setLineBuild(quotationId: string, itemId: string, lineId: string, buildId: string) {
+  updateLine(quotationId, itemId, lineId, { buildId });
 }
 
 /** Choose which configured position is the price that goes to the buyer. */
-export function setQuotedLine(podId: string, itemId: string, lineId: string) {
-  const item = itemOf(podId, itemId);
+export function setQuotedLine(quotationId: string, itemId: string, lineId: string) {
+  const item = itemOf(quotationId, itemId);
   logQuotationEvent(
-    podId,
+    quotationId,
     "quoted_line_changed",
     `${item?.name ?? "An item"} — quoted position changed`,
   );
-  write(podId, (d) => ({
+  write(quotationId, (d) => ({
     ...d,
     items: d.items.map((i) => (i.id === itemId ? { ...i, quotedLineId: lineId } : i)),
   }));

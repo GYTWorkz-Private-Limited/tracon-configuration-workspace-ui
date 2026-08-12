@@ -69,10 +69,12 @@ export function ArticleTabsBar({
   /** Stage of the screen rendering this bar — advances the demo flow. */
   stage?: FlowStage;
 }) {
-  const { reached } = useArticleFlow();
+  const { reached, stages } = useArticleFlow();
   const activeName = articles.find((a) => a.id === activeId)?.name ?? "";
+  // Only the article being looked at advances — visiting a Quotation screen
+  // says nothing about the other articles in the same workspace.
   useEffect(() => {
-    if (stage && activeName && !isPendingApproval(activeName)) recordStage(stage);
+    if (stage && activeName && !isPendingApproval(activeName)) recordStage(stage, activeName);
   }, [stage, activeName]);
   return (
     <div
@@ -85,7 +87,7 @@ export function ArticleTabsBar({
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
           {articles.map((a) => {
             const active = a.id === activeId;
-            const aStage = stageOf(a, reached);
+            const aStage = stageOf(a, reached, stages);
             return (
               <Link
                 key={a.id}

@@ -46,7 +46,9 @@ function seed(): State {
     { podId, articleId, at, by },
   ];
   return Object.fromEntries([
-    // POD-2046 (Zara Home, table-top programme) — Napkin left not ready.
+    // POD-2046 (Zara Home, table-top programme). Two products are ready so a
+    // multi-product quotation can be demonstrated straight away; Napkin is
+    // deliberately left not ready so the blocked case stays visible.
     ready("POD-2046", "A-PLACEMAT"),
     ready("POD-2046", "A-RUNNER"),
     ready("POD-2046", "A-KIT-TABLETOP"),

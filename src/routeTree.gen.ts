@@ -16,6 +16,7 @@ import { Route as PodsIndexRouteImport } from './routes/pods.index'
 import { Route as PodsIdRouteImport } from './routes/pods.$id'
 import { Route as PodsNewRouteImport } from './routes/pods.new'
 import { Route as QuotationsIndexRouteImport } from './routes/quotations.index'
+import { Route as QuotationsQuotationIdRouteImport } from './routes/quotations.$quotationId'
 import { Route as ConfigPodIdArticleIdRouteImport } from './routes/config.$podId.$articleId'
 import { Route as ProductPodIdArticleIdRouteImport } from './routes/product.$podId.$articleId'
 import { Route as QuotationPodIdArticleIdRouteImport } from './routes/quotation.$podId.$articleId'
@@ -55,6 +56,11 @@ const QuotationsIndexRoute = QuotationsIndexRouteImport.update({
   path: '/quotations/',
   getParentRoute: () => rootRouteImport,
 } as any)
+const QuotationsQuotationIdRoute = QuotationsQuotationIdRouteImport.update({
+  id: '/quotations/$quotationId',
+  path: '/quotations/$quotationId',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ConfigPodIdArticleIdRoute = ConfigPodIdArticleIdRouteImport.update({
   id: '/config/$podId/$articleId',
   path: '/config/$podId/$articleId',
@@ -77,6 +83,7 @@ export interface FileRoutesByFullPath {
   '/costing/$id': typeof CostingIdRoute
   '/pods/$id': typeof PodsIdRoute
   '/pods/new': typeof PodsNewRoute
+  '/quotations/$quotationId': typeof QuotationsQuotationIdRoute
   '/pods/': typeof PodsIndexRoute
   '/quotations/': typeof QuotationsIndexRoute
   '/config/$podId/$articleId': typeof ConfigPodIdArticleIdRoute
@@ -88,6 +95,7 @@ export interface FileRoutesByTo {
   '/costing/$id': typeof CostingIdRoute
   '/pods/$id': typeof PodsIdRoute
   '/pods/new': typeof PodsNewRoute
+  '/quotations/$quotationId': typeof QuotationsQuotationIdRoute
   '/pods': typeof PodsIndexRoute
   '/quotations': typeof QuotationsIndexRoute
   '/config/$podId/$articleId': typeof ConfigPodIdArticleIdRoute
@@ -101,6 +109,7 @@ export interface FileRoutesById {
   '/costing/$id': typeof CostingIdRoute
   '/pods/$id': typeof PodsIdRoute
   '/pods/new': typeof PodsNewRoute
+  '/quotations/$quotationId': typeof QuotationsQuotationIdRoute
   '/pods/': typeof PodsIndexRoute
   '/quotations/': typeof QuotationsIndexRoute
   '/config/$podId/$articleId': typeof ConfigPodIdArticleIdRoute
@@ -115,6 +124,7 @@ export interface FileRouteTypes {
     | '/costing/$id'
     | '/pods/$id'
     | '/pods/new'
+    | '/quotations/$quotationId'
     | '/pods/'
     | '/quotations/'
     | '/config/$podId/$articleId'
@@ -126,6 +136,7 @@ export interface FileRouteTypes {
     | '/costing/$id'
     | '/pods/$id'
     | '/pods/new'
+    | '/quotations/$quotationId'
     | '/pods'
     | '/quotations'
     | '/config/$podId/$articleId'
@@ -138,6 +149,7 @@ export interface FileRouteTypes {
     | '/costing/$id'
     | '/pods/$id'
     | '/pods/new'
+    | '/quotations/$quotationId'
     | '/pods/'
     | '/quotations/'
     | '/config/$podId/$articleId'
@@ -149,6 +161,7 @@ export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   PodsRoute: typeof PodsRouteWithChildren
   CostingIdRoute: typeof CostingIdRoute
+  QuotationsQuotationIdRoute: typeof QuotationsQuotationIdRoute
   QuotationsIndexRoute: typeof QuotationsIndexRoute
   ConfigPodIdArticleIdRoute: typeof ConfigPodIdArticleIdRoute
   ProductPodIdArticleIdRoute: typeof ProductPodIdArticleIdRoute
@@ -206,6 +219,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof QuotationsIndexRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/quotations/$quotationId': {
+      id: '/quotations/$quotationId'
+      path: '/quotations/$quotationId'
+      fullPath: '/quotations/$quotationId'
+      preLoaderRoute: typeof QuotationsQuotationIdRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/config/$podId/$articleId': {
       id: '/config/$podId/$articleId'
       path: '/config/$podId/$articleId'
@@ -248,6 +268,7 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   PodsRoute: PodsRouteWithChildren,
   CostingIdRoute: CostingIdRoute,
+  QuotationsQuotationIdRoute: QuotationsQuotationIdRoute,
   QuotationsIndexRoute: QuotationsIndexRoute,
   ConfigPodIdArticleIdRoute: ConfigPodIdArticleIdRoute,
   ProductPodIdArticleIdRoute: ProductPodIdArticleIdRoute,

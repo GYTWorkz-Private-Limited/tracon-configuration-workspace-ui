@@ -35,7 +35,6 @@ import { CostLineTable } from "@/components/workspace/CostLineTable";
 import { ComponentInspector } from "@/components/workspace/ComponentInspector";
 import { ComponentLibraryModal } from "@/components/workspace/ComponentLibraryModal";
 import { ConfigurationRail } from "@/components/workspace/ConfigurationRail";
-import { ScenarioBar } from "@/components/workspace/ScenarioBar";
 
 import { cn } from "@/lib/utils";
 import { createMoney } from "@/lib/money";
@@ -793,19 +792,8 @@ export function ArticleCostingWorkspace({
             productCard ? "mt-3" : "",
           )}
         >
-          <ScenarioBar
-            scenarios={scenarios}
-            activeId={activeScenario.id}
-            delta={deltaFor}
-            onSelect={(id) => {
-              setActiveScenarioId(id);
-              setSelectedId(null);
-            }}
-            onClose={closeScenario}
-            available={SCENARIO_PRESETS.filter((p) => !scenarios.some((s) => s.id === p.id))}
-            onAdd={addScenario}
-          />
-
+          {/* Scenario navigation lives in the variant tabs below — a second
+              scenario strip here was duplicate navigation for the same thing. */}
           {/* variants and options inside the active scenario */}
           <VariantTabs
             variants={tabs}

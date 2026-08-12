@@ -15,6 +15,9 @@
  *
  * Nothing here holds a second copy of the LIVE quotation — the working
  * document stays `quoteDraftStore`, priced by `quotationView`.
+ *
+ * Keyed by QUOTATION, not by POD: a POD can carry several quotations at once,
+ * and each has its own versions, comments and audit.
  */
 
 import { useSyncExternalStore } from "react";
@@ -76,7 +79,7 @@ export type VersionLine = {
 export type QuotationVersion = {
   id: string;
   no: number;
-  podId: string;
+  quotationId: string;
   status: VersionStatus;
   sentAt: string;
   sentBy: string;
@@ -87,7 +90,7 @@ export type QuotationVersion = {
 };
 
 export type QuotationHistory = {
-  podId: string;
+  quotationId: string;
   versions: QuotationVersion[];
   audit: AuditEntry[];
   comments: QuotationComment[];
@@ -100,10 +103,10 @@ export type QuotationHistory = {
 
 type State = Record<string, QuotationHistory>;
 
-const STORAGE_KEY = "tracon.quotationHistory.v1";
+const STORAGE_KEY = "tracon.quotationHistory.v2";
 
-const blank = (podId: string): QuotationHistory => ({
-  podId,
+const blank = (quotationId: string): QuotationHistory => ({
+  quotationId,
   versions: [],
   audit: [],
   comments: [],
@@ -154,11 +157,11 @@ function useHistories(): State {
   );
 }
 
-export function useQuotationHistory(podId: string): QuotationHistory {
-  return useHistories()[podId] ?? blank(podId);
+export function useQuotationHistory(quotationId: string): QuotationHistory {
+  return useHistories()[quotationId] ?? blank(quotationId);
 }
 
-/** Every POD that has ever had a quotation version — for the Quotations list. */
+/** Every quotation that has any history — for the Quotations list. */
 export function useAllQuotationHistories(): State {
   return useHistories();
 }
@@ -166,14 +169,14 @@ export function useAllQuotationHistories(): State {
 let seq = 0;
 const uid = (p: string) => `${p}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
 
-function write(podId: string, fn: (h: QuotationHistory) => QuotationHistory) {
-  state = { ...state, [podId]: fn(state[podId] ?? blank(podId)) };
+function write(quotationId: string, fn: (h: QuotationHistory) => QuotationHistory) {
+  state = { ...state, [quotationId]: fn(state[quotationId] ?? blank(quotationId)) };
   emit();
 }
 
 /** Unsubscribed read — for event handlers and stores, never for render. */
-export function historyOf(podId: string): QuotationHistory {
-  return state[podId] ?? blank(podId);
+export function historyOf(quotationId: string): QuotationHistory {
+  return state[quotationId] ?? blank(quotationId);
 }
 
 export const latestVersion = (h: QuotationHistory): QuotationVersion | undefined =>
@@ -192,12 +195,12 @@ export const workingVersionNo = (h: QuotationHistory): number => h.versions.leng
  * having to remember to log it.
  */
 export function logQuotationEvent(
-  podId: string,
+  quotationId: string,
   kind: AuditKind,
   summary: string,
   by = "Gautam Kitclu",
 ) {
-  write(podId, (h) => ({
+  write(quotationId, (h) => ({
     ...h,
     audit: [
       ...h.audit,
@@ -224,17 +227,17 @@ export function logQuotationEvent(
  * `quotationView` — this module stores history, it does not compute money.
  */
 export function sendVersionForApproval(
-  podId: string,
+  quotationId: string,
   snapshot: { lines: VersionLine[]; orderValueUsd: number; blendedMarginPct: number },
   by = "Gautam Kitclu",
   note?: string,
 ): number {
-  const h = historyOf(podId);
+  const h = historyOf(quotationId);
   const no = h.versions.length + 1;
   const version: QuotationVersion = {
     id: uid("QV"),
     no,
-    podId,
+    quotationId,
     status: "sent",
     sentAt: new Date().toISOString(),
     sentBy: by,
@@ -243,7 +246,7 @@ export function sendVersionForApproval(
     orderValueUsd: snapshot.orderValueUsd,
     blendedMarginPct: snapshot.blendedMarginPct,
   };
-  write(podId, (cur) => ({
+  write(quotationId, (cur) => ({
     ...cur,
     versions: [...cur.versions, version],
     locked: true,
@@ -269,8 +272,8 @@ export function sendVersionForApproval(
  * marked superseded — it stays readable, it just stops being the current
  * position — and the working quotation becomes editable again.
  */
-export function startNewVersion(podId: string, by = "Gautam Kitclu") {
-  write(podId, (h) => {
+export function startNewVersion(quotationId: string, by = "Gautam Kitclu") {
+  write(quotationId, (h) => {
     if (h.versions.length === 0) return { ...h, locked: false };
     const no = h.versions.length + 1;
     return {
@@ -294,8 +297,8 @@ export function startNewVersion(podId: string, by = "Gautam Kitclu") {
   });
 }
 
-export function setVersionStatus(podId: string, versionId: string, status: VersionStatus) {
-  write(podId, (h) => {
+export function setVersionStatus(quotationId: string, versionId: string, status: VersionStatus) {
+  write(quotationId, (h) => {
     const v = h.versions.find((x) => x.id === versionId);
     if (!v) return h;
     return {
@@ -321,14 +324,14 @@ export function setVersionStatus(podId: string, versionId: string, status: Versi
  * ------------------------------------------------------------------ */
 
 export function addQuotationComment(
-  podId: string,
+  quotationId: string,
   versionNo: number,
   text: string,
   by = "Gautam Kitclu",
 ) {
   const trimmed = text.trim();
   if (!trimmed) return;
-  write(podId, (h) => ({
+  write(quotationId, (h) => ({
     ...h,
     comments: [
       ...h.comments,
@@ -349,8 +352,8 @@ export function addQuotationComment(
 }
 
 /** Anything a user can add, a user can take back. */
-export function removeQuotationComment(podId: string, commentId: string) {
-  write(podId, (h) => ({ ...h, comments: h.comments.filter((c) => c.id !== commentId) }));
+export function removeQuotationComment(quotationId: string, commentId: string) {
+  write(quotationId, (h) => ({ ...h, comments: h.comments.filter((c) => c.id !== commentId) }));
 }
 
 export const STATUS_LABEL: Record<VersionStatus, string> = {

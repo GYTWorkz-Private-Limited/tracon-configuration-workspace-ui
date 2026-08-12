@@ -73,19 +73,22 @@ function lineOf(v: ViewedItem): VersionLine {
 
 export function QuotationApprovalWorkspace({
   pod,
+  quotationId,
   articleId,
   costingRef,
   views,
   onClose,
 }: {
   pod: Pod;
+  /** the quotation being approved — one request per quotation, never per article */
+  quotationId: string;
   articleId: string;
   costingRef?: string;
   views: ViewedItem[];
   onClose: () => void;
 }) {
-  const approval = useQuotationApproval(pod.id);
-  const history = useQuotationHistory(pod.id);
+  const approval = useQuotationApproval(quotationId);
+  const history = useQuotationHistory(quotationId);
   const totals = totalsOf(views);
   const people = assignedPeople(approval);
   const approvedCount = people.filter((k) => approval.reviewStatus[k] === "approved").length;
@@ -99,13 +102,13 @@ export function QuotationApprovalWorkspace({
    * has an answer that cannot drift afterwards.
    */
   const send = () => {
-    submitQuotationForApproval(pod.id);
-    const no = sendVersionForApproval(pod.id, {
+    submitQuotationForApproval(quotationId);
+    const no = sendVersionForApproval(quotationId, {
       lines: views.map(lineOf),
       orderValueUsd: totals.orderValueUsd,
       blendedMarginPct: totals.blendedMarginPct,
     });
-    if (note.trim()) addQuotationComment(pod.id, no, note);
+    if (note.trim()) addQuotationComment(quotationId, no, note);
     setNote("");
   };
 
@@ -225,7 +228,7 @@ export function QuotationApprovalWorkspace({
                               type="checkbox"
                               checked={checked}
                               disabled={approval.submitted}
-                              onChange={() => toggleReviewer(pod.id, team.id, person)}
+                              onChange={() => toggleReviewer(quotationId, team.id, person)}
                               className="h-3.5 w-3.5 accent-[var(--color-brand-700)] disabled:cursor-not-allowed"
                             />
                             <span className="text-[12.5px] text-ink-700">{person}</span>
@@ -289,7 +292,7 @@ export function QuotationApprovalWorkspace({
       </div>
 
       {historyOpen && (
-        <QuotationHistoryPanel podId={pod.id} onClose={() => setHistoryOpen(false)} />
+        <QuotationHistoryPanel quotationId={quotationId} onClose={() => setHistoryOpen(false)} />
       )}
     </div>
   );

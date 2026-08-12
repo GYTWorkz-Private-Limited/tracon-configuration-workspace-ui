@@ -1,10 +1,18 @@
 /**
- * Quotation Workspace — the step after Costing Report.
+ * The article's own Quotation step.
  *
  * Not a separate module: same shell, same header, same workflow band, same
  * bottom article bar as Configuration and Costing. What changes is the
  * question being answered — Configuration asks "what does it cost to make",
  * this asks "what do we sell it for".
+ *
+ * It always shows ONE article's quotation. When that article is quoted on its
+ * own, this is the whole quotation. When it was quoted together with others,
+ * this still shows only its own position, plus the number of the parent
+ * quotation it belongs to and a way into it — because "Placemat's quotation"
+ * and "the quotation Placemat happens to be on" are different things, and
+ * stacking the second under the first is what made multi-product quotes
+ * unreadable.
  *
  * Everything on screen is the COMMERCIALLY SELECTED version of a costing:
  * scenarios, variants, options, MOQs and cost figures all come from
@@ -13,17 +21,8 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Link } from "@tanstack/react-router";
-import {
-  ArrowLeft,
-  Boxes,
-  FileText,
-  History,
-  Lock,
-  Package,
-  PackagePlus,
-  Send,
-} from "lucide-react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { ArrowLeft, ArrowRight, FileText, History, Layers, Lock, Send } from "lucide-react";
 
 import { ProductHeader } from "@/components/layout/ProductHeader";
 import { WorkflowStepper } from "@/components/layout/WorkflowStepper";
@@ -32,32 +31,18 @@ import { ActionGroup } from "@/components/changes/FlowActions";
 import { cn } from "@/lib/utils";
 import { usePod, type Article, type Pod } from "@/lib/podsStore";
 import { usd } from "@/lib/commercialProvisions";
-import { buildsIn, scenariosIn, useCostingSelections } from "@/lib/costingSelectionStore";
-import {
-  buildById,
-  parseMoq,
-  parseSize,
-  priceKit,
-  priceLine,
-  scenarioById,
-} from "@/lib/quotationPricing";
-import {
-  addProducts,
-  ensureQuoteFor,
-  startQuotation,
-  useQuoteDraft,
-  type QuoteItem,
-} from "@/lib/quoteDraftStore";
+import { useCostingSelections } from "@/lib/costingSelectionStore";
+import { useQuotationForArticle, type QuoteDraft } from "@/lib/quoteDraftStore";
 import {
   latestVersion,
   startNewVersion,
   useQuotationHistory,
   workingVersionNo,
 } from "@/lib/quotationHistory";
-import { viewQuote, type ViewedItem } from "@/lib/quotationView";
+import { totalsOf, viewQuote, type ViewedItem } from "@/lib/quotationView";
 import { QuoteItemCard } from "./QuoteItemCard";
 import { ConfigLegend } from "./ConfigChips";
-import { ArticleSelectionModal } from "./ArticleSelectionModal";
+import { QuotationEntryFlow } from "./QuotationEntryFlow";
 import { QuotationBenchmarkPanels } from "./QuotationBenchmarkPanels";
 import { QuotationPreview } from "./QuotationPreview";
 import { QuotationApprovalWorkspace } from "./QuotationApprovalWorkspace";
@@ -73,41 +58,29 @@ export function QuoteWorkspace({
   sel?: string;
 }) {
   const pod = usePod(podId);
-  const draft = useQuoteDraft(podId);
-  const history = useQuotationHistory(podId);
+  const quotation = useQuotationForArticle(podId, articleId);
+  const history = useQuotationHistory(quotation?.id ?? "");
   const selections = useCostingSelections();
   const [mounted, setMounted] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
+  const [entryOpen, setEntryOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  // Whether the selection modal is composing the next version (start from what
-  // is quoted) or adding to the quotation in hand (offer what is not).
-  const [composing, setComposing] = useState(false);
-  // Which of the quotation's articles is being worked on. "all" is the whole
-  // quotation, and is the only state a single-product quotation ever has.
-  const [focus, setFocus] = useState<string>("all");
 
   useEffect(() => setMounted(true), []);
 
-  // What is ON the quote is decided in the selection modal, so arriving here
-  // only guarantees the draft exists — it never adds an article by itself.
-  useEffect(() => {
-    ensureQuoteFor(podId);
-  }, [podId]);
-
-  const items = draft?.items ?? [];
-
-  // A multi-item quotation names its articles in the route; anything added to
-  // the quote afterwards belongs on the bar too, so the navigation always
-  // shows what the quotation actually contains.
-  const selectedIds = sel
-    ? Array.from(new Set([...sel.split(",").filter(Boolean), ...items.map((i) => i.articleId)]))
-    : (pod?.articles ?? []).map((a) => a.id);
-  const sheets = (pod?.articles ?? []).filter((a) => selectedIds.includes(a.id));
   const article = pod?.articles.find((a) => a.id === articleId) ?? pod?.articles[0];
 
-  const totals = useQuoteTotals(podId, items);
+  // Only this article's position, even when the quotation carries several.
+  const items = useMemo(
+    () => (quotation?.items ?? []).filter((i) => i.articleId === article?.id),
+    [quotation, article?.id],
+  );
+  const views: ViewedItem[] = useMemo(
+    () => (quotation ? viewQuote(quotation.podId, items, selections) : []),
+    [quotation, items, selections],
+  );
+  const totals = totalsOf(views);
 
   if (!pod || !article) {
     return (
@@ -122,34 +95,10 @@ export function QuoteWorkspace({
     );
   }
 
-  const quotedIds = new Set(items.map((i) => i.articleId));
-  const canAddMore = pod.articles.some((a) => !quotedIds.has(a.id));
-
-  // Removing the article being viewed must return to the whole quotation
-  // rather than leave the page looking empty.
-  const activeFocus = focus !== "all" && items.some((i) => i.id === focus) ? focus : "all";
-
-  // A quotation that has been sent is the record of what the buyer received,
-  // so it stops being editable until somebody explicitly opens the next
-  // version. Everything stays visible — it is frozen, not hidden.
   const sent = latestVersion(history);
   const locked = history.locked;
-
-  /**
-   * The buyer has come back. Re-open the quotation as the next version and go
-   * straight to the selection, so articles can be dropped, kept or added
-   * before anything is re-costed.
-   */
-  const openNextVersion = () => {
-    startNewVersion(podId);
-    setComposing(true);
-    setAddOpen(true);
-  };
-
-  // One priced view of the quote, shared by the workspace's own totals, the
-  // customer preview and the approval report — nobody re-derives it.
-  const views: ViewedItem[] = viewQuote(podId, items, selections);
-  const benchmarkView = views.find((v) => v.item.articleId === article.id) ?? views[0];
+  const companions = (quotation?.items ?? []).filter((i) => i.articleId !== article.id);
+  const isMulti = quotation?.mode === "multiple";
 
   return (
     <div className="flex h-screen w-full flex-col bg-canvas">
@@ -170,29 +119,44 @@ export function QuoteWorkspace({
         }
       >
         <ActionGroup>
-          <button
-            type="button"
-            onClick={() => setHistoryOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-          >
-            <History className="h-4 w-4" /> History
-            {history.versions.length > 0 && (
-              <span className="rounded-full bg-ink-100 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-ink-600">
-                v{history.versions.length}
-              </span>
-            )}
-          </button>
-          <button
-            type="button"
-            onClick={() => setPreviewOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-          >
-            <FileText className="h-4 w-4" /> Review Quotation
-          </button>
-          {locked ? (
+          {quotation && (
             <button
               type="button"
-              onClick={openNextVersion}
+              onClick={() => setHistoryOpen(true)}
+              className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              <History className="h-4 w-4" /> History
+              {history.versions.length > 0 && (
+                <span className="rounded-full bg-ink-100 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-ink-600">
+                  v{history.versions.length}
+                </span>
+              )}
+            </button>
+          )}
+          <button
+            type="button"
+            disabled={!quotation}
+            onClick={() => setPreviewOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          >
+            <FileText className="h-4 w-4" /> Preview Quotation
+          </button>
+          {/* A multi-article quotation is sent as one document from its own
+              workspace — sending "half of it" from here would be a second,
+              conflicting approval for the same quotation. */}
+          {isMulti ? (
+            <Link
+              to="/quotations/$quotationId"
+              params={{ quotationId: quotation!.id }}
+              className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800"
+            >
+              <Layers className="h-4 w-4" /> View Full Quotation
+              <ArrowRight className="h-3.5 w-3.5" />
+            </Link>
+          ) : locked ? (
+            <button
+              type="button"
+              onClick={() => quotation && startNewVersion(quotation.id)}
               title="Re-open this quotation to re-cost it as the next version"
               className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800"
             >
@@ -203,9 +167,7 @@ export function QuoteWorkspace({
               type="button"
               disabled={items.length === 0}
               onClick={() => setApprovalOpen(true)}
-              title={
-                items.length === 0 ? "Add at least one item to the quotation first" : undefined
-              }
+              title={items.length === 0 ? "Quote this article first" : undefined}
               className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Send className="h-4 w-4" /> Send for Approval
@@ -227,63 +189,66 @@ export function QuoteWorkspace({
       />
 
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <QuoteTotalsStrip pod={pod} totals={totals} itemCount={items.length} />
+        <ArticleQuoteStrip
+          pod={pod}
+          quotation={quotation}
+          orderValueUsd={totals.orderValueUsd}
+          marginPct={totals.blendedMarginPct}
+          lineCount={items.reduce(
+            (n, i) => n + (i.kind === "kit" ? i.members.length : i.lines.length),
+            0,
+          )}
+        />
 
         <div className="mx-auto max-w-[1320px] px-6 py-4 lg:px-8">
           {sent && (
-            <SentBanner
-              versionNo={sent.no}
-              status={sent.status}
-              sentAt={sent.sentAt}
-              sentBy={sent.sentBy}
-              locked={locked}
-              nextVersionNo={workingVersionNo(history)}
-              onNewVersion={openNextVersion}
-              onHistory={() => setHistoryOpen(true)}
+            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-hairline bg-surface-alt px-4 py-3">
+              <Lock className="h-4 w-4 shrink-0 text-ink-500" aria-hidden />
+              <div className="min-w-0">
+                <p className="flex flex-wrap items-center gap-2 text-[13px] font-semibold text-ink-900">
+                  {quotation?.id} · Version {sent.no}
+                  <VersionStatusPill status={sent.status} />
+                </p>
+                <p className="mt-0.5 text-[11.5px] text-ink-500">
+                  Sent by {sent.sentBy} on {new Date(sent.sentAt).toLocaleDateString()}
+                  {locked && ` — read-only until version ${workingVersionNo(history)} is opened.`}
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHistoryOpen(true)}
+                className="ml-auto rounded-md border border-hairline bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt"
+              >
+                View history
+              </button>
+            </div>
+          )}
+
+          {/* Only shown when there ARE other articles on the quotation —
+              "quoted with 0 others" is not a fact worth a banner. */}
+          {companions.length > 0 && quotation && (
+            <QuotedWithBanner
+              quotationId={quotation.id}
+              companions={companions.map((c) => c.name)}
             />
           )}
 
           <ConfigLegend className="mb-3" />
 
           {items.length === 0 ? (
-            <EmptyState onAdd={() => setAddOpen(true)} />
+            <EmptyState onQuote={() => setEntryOpen(true)} name={article.name} />
           ) : (
-            <>
-              {/* One product needs no navigation — the quotation IS the
-                  product. Several do, and they get the same cards either way. */}
-              {items.length > 1 && (
-                <QuoteArticleNav items={items} active={activeFocus} onSelect={setFocus} />
-              )}
-              <div className="space-y-5">
-                {items.map((item, i) =>
-                  activeFocus === "all" || activeFocus === item.id ? (
-                    <QuoteItemCard
-                      key={item.id}
-                      podId={podId}
-                      item={item}
-                      index={i}
-                      readOnly={locked}
-                    />
-                  ) : null,
-                )}
-              </div>
-            </>
-          )}
-
-          {items.length > 0 && !locked && (
-            <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-ink-200 bg-surface/60 px-4 py-3.5">
-              <p className="min-w-0 flex-1 text-[12.5px] text-ink-500">
-                Each product stays independently priced. Combine articles into a kit in
-                Configuration to quote them as one set.
-              </p>
-              <button
-                type="button"
-                onClick={() => setAddOpen(true)}
-                disabled={!canAddMore}
-                className="inline-flex items-center gap-1.5 rounded-md border border-brand-700 bg-brand-50 px-3.5 py-2 text-[12.5px] font-semibold text-brand-700 hover:bg-brand-100 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-              >
-                <PackagePlus className="h-3.5 w-3.5" /> Add Product
-              </button>
+            <div className="space-y-5">
+              {items.map((item, i) => (
+                <QuoteItemCard
+                  key={item.id}
+                  podId={podId}
+                  quotationId={quotation!.id}
+                  item={item}
+                  index={i}
+                  readOnly={locked}
+                />
+              ))}
             </div>
           )}
 
@@ -292,20 +257,18 @@ export function QuoteWorkspace({
             moves this quotation — the quote never holds its own copy of a cost.
           </p>
 
-          {benchmarkView && (
+          {views[0] && (
             <QuotationBenchmarkPanels
               buyer={pod.buyer}
-              srfRef={benchmarkView.item.srfRef}
-              productName={benchmarkView.item.name}
+              srfRef={views[0].item.srfRef}
+              productName={views[0].item.name}
               sizeLabel={
-                benchmarkView.kind === "kit"
-                  ? `Set of ${benchmarkView.priced.members.length}`
-                  : (benchmarkView.item.size ?? benchmarkView.priced.sizeLabel)
+                views[0].kind === "kit"
+                  ? `Set of ${views[0].priced.members.length}`
+                  : (views[0].item.size ?? views[0].priced.sizeLabel)
               }
-              moq={
-                benchmarkView.kind === "kit" ? benchmarkView.priced.sets : benchmarkView.priced.moq
-              }
-              currentPriceUsd={benchmarkView.priced.commercial.sellingUsd}
+              moq={views[0].kind === "kit" ? views[0].priced.sets : views[0].priced.moq}
+              currentPriceUsd={views[0].priced.commercial.sellingUsd}
             />
           )}
         </div>
@@ -313,88 +276,42 @@ export function QuoteWorkspace({
 
       <ArticleTabsBar
         podId={pod.id}
-        articles={sheets}
+        articles={pod.articles}
         activeId={article.id}
         sel={sel}
         fixed={false}
         stage="Quotation"
-        actions={
-          <button
-            type="button"
-            hidden={locked}
-            onClick={() => setAddOpen(true)}
-            disabled={!canAddMore}
-            className="inline-flex items-center gap-1.5 rounded-full border border-hairline bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-          >
-            <PackagePlus className="h-3.5 w-3.5 text-ink-400" /> Add product to quote
-          </button>
-        }
       />
 
-      {/* The same selection surface the Costing Report opens, so readiness
-          behaves identically wherever an article joins a quotation.
-
-          It does two jobs. Adding a product to the quotation in hand offers
-          only what is not on it yet. Composing the NEXT version starts from
-          what is already quoted, so an article can be dropped as easily as one
-          can be added — which is the whole point of re-costing after the buyer
-          comes back. */}
-      <ArticleSelectionModal
-        open={addOpen}
-        onClose={() => {
-          setAddOpen(false);
-          setComposing(false);
-        }}
+      <QuotationEntryFlow
+        open={entryOpen}
+        onClose={() => setEntryOpen(false)}
         podId={podId}
-        articles={pod.articles}
-        alreadyQuotedIds={composing ? undefined : quotedIds}
-        preselect={composing ? items.map((i) => i.articleId) : undefined}
-        title={
-          composing
-            ? `Select Products & Kits for version ${workingVersionNo(history)}`
-            : "Select Items for Quotation"
-        }
-        confirmLabel={composing ? "Continue" : "Add to Quotation"}
-        onConfirm={(ids) => {
-          if (composing) startQuotation(podId, ids, ids.length > 1 ? "multiple" : "single");
-          else addProducts(podId, ids);
-          setAddOpen(false);
-          setComposing(false);
-        }}
+        articleId={article.id}
+        articleName={article.name}
       />
 
-      {/* Three views, one quotation: `views` is the same priced data this
-          page renders above — the preview and the approval report only ever
-          choose what to show from it, never recompute it. */}
-      <QuotationPreview
-        open={previewOpen}
-        onClose={() => setPreviewOpen(false)}
-        pod={pod}
-        views={views}
-        onSendForApproval={() => {
-          setPreviewOpen(false);
-          setApprovalOpen(true);
-        }}
-      />
-
-      {historyOpen && (
-        <QuotationHistoryPanel
-          podId={podId}
-          onClose={() => setHistoryOpen(false)}
-          onNewVersion={
-            locked
-              ? () => {
-                  setHistoryOpen(false);
-                  openNextVersion();
-                }
-              : undefined
-          }
+      {quotation && (
+        <QuotationPreview
+          open={previewOpen}
+          onClose={() => setPreviewOpen(false)}
+          pod={pod}
+          views={views}
+          onSendForApproval={() => {
+            setPreviewOpen(false);
+            setApprovalOpen(true);
+          }}
         />
       )}
 
-      {approvalOpen && (
+      {historyOpen && quotation && (
+        <QuotationHistoryPanel quotationId={quotation.id} onClose={() => setHistoryOpen(false)} />
+      )}
+
+      {approvalOpen && quotation && (
         <QuotationApprovalWorkspace
           pod={pod}
+          quotationId={quotation.id}
           articleId={article.id}
           costingRef={article.srfRef}
           views={views}
@@ -406,101 +323,37 @@ export function QuoteWorkspace({
 }
 
 /* ------------------------------------------------------------------ *
- * Totals
+ * Strips and banners
  * ------------------------------------------------------------------ */
 
-type Totals = { orderValueUsd: number; lines: number; blendedMarginPct: number };
-
-/**
- * The quote's headline numbers, re-derived from the same pricing calls the
- * cards make so the strip can never disagree with the sections below it.
- */
-function useQuoteTotals(podId: string, items: QuoteItem[]): Totals {
-  const selections = useCostingSelections();
-  return useMemo(() => {
-    let orderValueUsd = 0;
-    let costUsd = 0;
-    let lines = 0;
-
-    for (const item of items) {
-      if (item.kind === "kit") {
-        const kit = priceKit(
-          item.members.map((m) => ({
-            srfRef: m.srfRef,
-            scenario: scenarioById(scenariosIn(selections, podId, m.articleId), m.line.scenarioId),
-            build: buildById(buildsIn(selections, podId, m.articleId), m.line.buildId),
-            defaults: { size: parseSize(m.size), moq: parseMoq(m.moq) },
-            rates: item.rates,
-            targetMarginPct: m.line.targetMarginPct,
-            moqOverride: m.line.moqOverride,
-            finalCostOverrideInr: m.line.finalCostOverrideInr,
-            sellingPriceOverrideUsd: m.line.sellingPriceOverrideUsd,
-            unitsPerSet: m.unitsPerSet,
-            name: m.name,
-            articleId: m.articleId,
-            image: m.image,
-          })),
-          {
-            rates: item.rates,
-            targetMarginPct: item.targetMarginPct,
-            sets: item.sets,
-            finalCostOverrideInr: item.finalCostOverrideInr,
-            sellingPriceOverrideUsd: item.sellingPriceOverrideUsd,
-          },
-        );
-        orderValueUsd += kit.orderValueUsd;
-        costUsd += kit.commercial.finalCostUsd * kit.sets;
-        lines += item.members.length;
-        continue;
-      }
-
-      const line = item.lines.find((l) => l.id === item.quotedLineId) ?? item.lines[0];
-      if (!line) continue;
-      const priced = priceLine({
-        srfRef: item.srfRef,
-        scenario: scenarioById(scenariosIn(selections, podId, item.articleId), line.scenarioId),
-        build: buildById(buildsIn(selections, podId, item.articleId), line.buildId),
-        defaults: { size: parseSize(item.size), moq: parseMoq(item.moq) },
-        rates: item.rates,
-        targetMarginPct: line.targetMarginPct ?? item.targetMarginPct,
-        moqOverride: line.moqOverride,
-        finalCostOverrideInr: line.finalCostOverrideInr,
-        sellingPriceOverrideUsd: line.sellingPriceOverrideUsd,
-      });
-      orderValueUsd += priced.orderValueUsd;
-      costUsd += priced.commercial.finalCostUsd * priced.moq;
-      lines += item.lines.length;
-    }
-
-    return {
-      orderValueUsd: Math.round(orderValueUsd * 100) / 100,
-      lines,
-      blendedMarginPct:
-        orderValueUsd > 0 ? Math.round(((orderValueUsd - costUsd) / orderValueUsd) * 1000) / 10 : 0,
-    };
-  }, [podId, items, selections]);
-}
-
-function QuoteTotalsStrip({
+function ArticleQuoteStrip({
   pod,
-  totals,
-  itemCount,
+  quotation,
+  orderValueUsd,
+  marginPct,
+  lineCount,
 }: {
   pod: Pod;
-  totals: Totals;
-  itemCount: number;
+  quotation?: QuoteDraft;
+  orderValueUsd: number;
+  marginPct: number;
+  lineCount: number;
 }) {
   const cells = [
     { label: "Buyer", value: pod.buyer, note: pod.buyerRef },
-    { label: "Items quoted", value: String(itemCount), note: `${totals.lines} configured lines` },
     {
-      label: "Blended margin",
-      value: `${totals.blendedMarginPct.toFixed(1)}%`,
-      note: "across the quote",
+      label: "Quotation",
+      value: quotation?.id ?? "—",
+      note: quotation
+        ? quotation.mode === "multiple"
+          ? `${quotation.items.length} articles`
+          : "single product"
+        : "not quoted yet",
     },
+    { label: "Margin", value: `${marginPct.toFixed(1)}%`, note: `${lineCount} configured lines` },
     {
-      label: "Total order value",
-      value: usd(totals.orderValueUsd, 0),
+      label: "This article's value",
+      value: usd(orderValueUsd, 0),
       note: "at quoted quantities",
       strong: true,
     },
@@ -530,165 +383,51 @@ function QuoteTotalsStrip({
   );
 }
 
-/* ------------------------------------------------------------------ *
- * Sent versions
- * ------------------------------------------------------------------ */
-
-/**
- * What was sent, and what can be done about it now.
- *
- * A sent quotation is a record, so the workspace says so at the top rather
- * than letting someone edit it and wonder later which figures the buyer
- * actually saw. The way forward is explicit: open the next version.
- */
-function SentBanner({
-  versionNo,
-  status,
-  sentAt,
-  sentBy,
-  locked,
-  nextVersionNo,
-  onNewVersion,
-  onHistory,
+/** This article is part of a bigger quotation, and here is the way into it. */
+function QuotedWithBanner({
+  quotationId,
+  companions,
 }: {
-  versionNo: number;
-  status: React.ComponentProps<typeof VersionStatusPill>["status"];
-  sentAt: string;
-  sentBy: string;
-  locked: boolean;
-  nextVersionNo: number;
-  onNewVersion: () => void;
-  onHistory: () => void;
+  quotationId: string;
+  companions: string[];
 }) {
   return (
-    <div
-      className={cn(
-        "mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-4 py-3",
-        locked ? "border-hairline bg-surface-alt" : "border-hairline bg-surface",
-      )}
-    >
-      {locked ? (
-        <Lock className="h-4 w-4 shrink-0 text-ink-500" aria-hidden />
-      ) : (
-        <History className="h-4 w-4 shrink-0 text-ink-500" aria-hidden />
-      )}
-
+    <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-hairline bg-surface px-4 py-3">
+      <Layers className="h-4 w-4 shrink-0 text-ink-500" aria-hidden />
       <div className="min-w-0">
-        <p className="flex flex-wrap items-center gap-2 text-[13px] font-semibold text-ink-900">
-          Version {versionNo}
-          <VersionStatusPill status={status} />
+        <p className="text-[13px] font-semibold text-ink-900">
+          Quoted with {companions.length} other article{companions.length === 1 ? "" : "s"} on{" "}
+          {quotationId}
         </p>
         <p className="mt-0.5 text-[11.5px] text-ink-500">
-          {locked
-            ? `Sent by ${sentBy} on ${new Date(sentAt).toLocaleDateString()} — read-only until you open version ${nextVersionNo}.`
-            : `Version ${nextVersionNo} is open for editing. It becomes a new version when you send it for approval.`}
+          {companions.join(" + ")} — the full quotation is sent for approval as one document.
         </p>
       </div>
-
-      <div className="ml-auto flex shrink-0 items-center gap-2">
-        <button
-          type="button"
-          onClick={onHistory}
-          className="rounded-md border border-hairline bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-        >
-          View history
-        </button>
-        {locked && (
-          <button
-            type="button"
-            onClick={onNewVersion}
-            className="rounded-md bg-brand-700 px-3.5 py-1.5 text-[12.5px] font-semibold text-white hover:bg-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-          >
-            Re-cost as version {nextVersionNo}
-          </button>
-        )}
-      </div>
+      <Link
+        to="/quotations/$quotationId"
+        params={{ quotationId }}
+        className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-brand-700 bg-brand-50 px-3.5 py-1.5 text-[12.5px] font-semibold text-brand-700 hover:bg-brand-100"
+      >
+        View Full Quotation <ArrowRight className="h-3.5 w-3.5" />
+      </Link>
     </div>
   );
 }
 
-/* ------------------------------------------------------------------ *
- * Article navigation — only when the quotation holds more than one item
- * ------------------------------------------------------------------ */
-
-/**
- * Move between the articles and kits included on this quotation.
- *
- * It filters what is on screen; it does not change what is on the quote. "All
- * items" is the default so a multi-product quotation still reads as ONE
- * document — the same stacked cards a single product shows — and focusing an
- * article is a way to work on it, not a different quotation.
- */
-function QuoteArticleNav({
-  items,
-  active,
-  onSelect,
-}: {
-  items: QuoteItem[];
-  active: string;
-  onSelect: (id: string) => void;
-}) {
-  const pill = (selected: boolean) =>
-    cn(
-      "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-      selected
-        ? "border-brand-700 bg-brand-50 font-semibold text-brand-800"
-        : "border-hairline bg-surface text-ink-600 hover:bg-surface-alt hover:text-ink-900",
-    );
-
-  return (
-    <nav
-      aria-label="Articles on this quotation"
-      className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-hairline bg-surface px-3.5 py-2.5"
-    >
-      <span className="mr-1 text-[10px] font-medium uppercase tracking-[0.12em] text-ink-500">
-        On this quotation
-      </span>
-      <button
-        type="button"
-        onClick={() => onSelect("all")}
-        aria-current={active === "all"}
-        className={pill(active === "all")}
-      >
-        All items
-        <span className="tabular-nums text-ink-400">{items.length}</span>
-      </button>
-      {items.map((item) => (
-        <button
-          key={item.id}
-          type="button"
-          onClick={() => onSelect(item.id)}
-          aria-current={active === item.id}
-          className={pill(active === item.id)}
-        >
-          {item.image ? (
-            <img src={item.image} alt="" className="h-4 w-4 rounded-sm object-cover" />
-          ) : item.kind === "kit" ? (
-            <Boxes className="h-3.5 w-3.5 text-ink-400" aria-hidden />
-          ) : (
-            <Package className="h-3.5 w-3.5 text-ink-400" aria-hidden />
-          )}
-          {item.kind === "kit" ? `Kit — ${item.name}` : item.name}
-        </button>
-      ))}
-    </nav>
-  );
-}
-
-function EmptyState({ onAdd }: { onAdd: () => void }) {
+function EmptyState({ onQuote, name }: { onQuote: () => void; name: string }) {
   return (
     <div className="rounded-xl border border-dashed border-ink-200 bg-surface px-6 py-14 text-center">
-      <h2 className="text-[15px] font-semibold text-ink-900">Nothing on this quotation yet</h2>
+      <h2 className="text-[15px] font-semibold text-ink-900">{name} is not quoted yet</h2>
       <p className="mx-auto mt-1 max-w-[440px] text-[12.5px] text-ink-500">
-        Add a costed product, set or kit. Everything you add keeps the scenarios, variants, options
-        and MOQs it was costed with.
+        Quote it on its own, or together with the other articles in this costing workspace. Whatever
+        you quote keeps the scenarios, variants, options and MOQs it was costed with.
       </p>
       <button
         type="button"
-        onClick={onAdd}
+        onClick={onQuote}
         className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-4 py-2 text-[13px] font-semibold text-white hover:bg-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
       >
-        <PackagePlus className="h-4 w-4" /> Add Product
+        <Send className="h-4 w-4" /> Generate Quotation
       </button>
     </div>
   );
