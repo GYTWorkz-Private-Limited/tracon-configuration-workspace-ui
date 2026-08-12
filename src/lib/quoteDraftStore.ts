@@ -56,6 +56,14 @@ export type QuoteLine = {
    * names a price, the price is the input and the margin is the answer.
    */
   sellingPriceOverrideUsd?: number;
+  /**
+   * This configuration was sent back for recosting.
+   *
+   * Per LINE, not per article: a buyer can question one way of building the
+   * product while the others stay quotable, and freezing all of them because
+   * one was questioned claims more than anybody said.
+   */
+  rejected?: { at: string; by: string; reason: string };
 };
 
 /** One article inside a kit — keeps its own scenario, variant, option and MOQ. */
@@ -491,14 +499,29 @@ export function addLine(
  * it.
  */
 export function addVariantRows(quotationId: string, itemId: string, variantIds: string[]) {
-  const item = itemOf(quotationId, itemId);
-  if (!item || item.kind !== "product") return;
+  const quote = state[quotationId];
+  const item = quote?.items.find((i) => i.id === itemId);
+  if (!quote || !item || item.kind !== "product") return;
+
+  const builds = buildsFor(quote.podId, item.articleId);
+  const nameOf = (buildId: string) => builds.find((b) => b.id === buildId)?.name;
+
   const dismissed = new Set(item.dismissedBuildIds ?? []);
   // Already on the quote wins over "uncovered": the caller computes coverage
   // from a snapshot, so two calls can race before the first write is visible
   // to it — and a variant must never end up with two rows.
   const present = new Set(item.lines.map((l) => l.buildId));
-  const add = variantIds.filter((id) => !dismissed.has(id) && !present.has(id));
+  // Configuration re-publishes variants with fresh ids, so the same variant
+  // can arrive under an id the quote has never seen. Matching on the NAME the
+  // user actually reads is what stops one variant becoming seven identical
+  // rows on every visit.
+  const presentNames = new Set(
+    item.lines.map((l) => nameOf(l.buildId)).filter((n): n is string => Boolean(n)),
+  );
+
+  const add = variantIds.filter(
+    (id) => !dismissed.has(id) && !present.has(id) && !presentNames.has(nameOf(id) ?? `__${id}`),
+  );
   if (add.length === 0) return;
 
   write(quotationId, (d) => ({
@@ -757,6 +780,68 @@ export function rejectItem(quotationId: string, itemId: string, reason: string) 
   rejectItems(quotationId, [itemId], reason);
 }
 
+/** What is going back: which configurations of which articles. */
+export type RejectSelection = { itemId: string; lineIds: string[] }[];
+
+/**
+ * Send specific configurations back for recosting.
+ *
+ * The granularity matters. A buyer questions "the 3,000-piece embroidered
+ * version", not "the Placemat" — so a variant can go back while its siblings
+ * stay quotable. The article-level flag is kept as the summary of that, because
+ * whether the quotation is blocked is an article-level question.
+ *
+ * A kit goes back whole: its members are priced as one set.
+ */
+export function rejectSelection(quotationId: string, selection: RejectSelection, reason: string) {
+  const quote = state[quotationId];
+  if (!quote || selection.length === 0) return;
+
+  const trimmed = reason.trim();
+  const named: string[] = [];
+
+  for (const { itemId, lineIds } of selection) {
+    const item = quote.items.find((i) => i.id === itemId);
+    if (!item) continue;
+    named.push(
+      item.kind === "kit" || lineIds.length === item.lines.length
+        ? item.name
+        : `${item.name} (${lineIds.length} of ${item.lines.length} configurations)`,
+    );
+
+    const articleIds =
+      item.kind === "kit" ? item.members.map((m) => m.articleId) : [item.articleId];
+    for (const articleId of articleIds) {
+      requestRecost({ podId: quote.podId, articleId, quotationId, reason: trimmed });
+    }
+  }
+  if (named.length === 0) return;
+
+  logQuotationEvent(
+    quotationId,
+    "line_rejected",
+    `${named.join(", ")} sent back for recosting — ${trimmed}`,
+  );
+
+  const stampedAt = stamp();
+  const mark = { at: stampedAt, by: "Gautam Kitclu", reason: trimmed };
+
+  write(quotationId, (d) => ({
+    ...d,
+    items: d.items.map((i) => {
+      const pick = selection.find((sx) => sx.itemId === i.id);
+      if (!pick) return i;
+      return {
+        ...i,
+        rejected: mark,
+        lines: i.lines.map((l) =>
+          i.kind === "kit" || pick.lineIds.includes(l.id) ? { ...l, rejected: mark } : l,
+        ),
+      };
+    }),
+  }));
+}
+
 /** Withdraw the request — the costing came back, or it was rejected by mistake. */
 export function clearRejection(quotationId: string, itemId: string) {
   const quote = state[quotationId];
@@ -775,7 +860,11 @@ export function clearRejection(quotationId: string, itemId: string) {
 
   write(quotationId, (d) => ({
     ...d,
-    items: d.items.map((i) => (i.id === itemId ? { ...i, rejected: undefined } : i)),
+    items: d.items.map((i) =>
+      i.id === itemId
+        ? { ...i, rejected: undefined, lines: i.lines.map((l) => ({ ...l, rejected: undefined })) }
+        : i,
+    ),
   }));
 }
 
@@ -796,14 +885,18 @@ export function resolveRejectionForArticle(podId: string, articleId: string) {
         (i.articleId === articleId || i.members.some((m) => m.articleId === articleId)),
     );
     if (!item) continue;
-    logQuotationEvent(
-      quote.id,
-      "line_rejected",
-      `${item.name} re-costed and back on ${quote.id}`,
-    );
+    logQuotationEvent(quote.id, "line_rejected", `${item.name} re-costed and back on ${quote.id}`);
     write(quote.id, (d) => ({
       ...d,
-      items: d.items.map((i) => (i.id === item.id ? { ...i, rejected: undefined } : i)),
+      items: d.items.map((i) =>
+        i.id === item.id
+          ? {
+              ...i,
+              rejected: undefined,
+              lines: i.lines.map((l) => ({ ...l, rejected: undefined })),
+            }
+          : i,
+      ),
     }));
   }
 }

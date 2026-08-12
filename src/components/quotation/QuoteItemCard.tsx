@@ -38,7 +38,7 @@ import {
   setItemSellingPrice,
   setLineBuild,
   clearRejection,
-  rejectItems,
+  rejectSelection,
   setLineFinalCost,
   setLineSellingPrice,
   setQuotedLine,
@@ -47,7 +47,7 @@ import {
   type QuoteItem,
 } from "@/lib/quoteDraftStore";
 import { logQuotationEvent } from "@/lib/quotationHistory";
-import { OverrideDialog, type OverrideResult } from "./OverrideDialog";
+import { OverrideDialog, type RowOverride } from "./OverrideDialog";
 import { RejectDialog } from "./RejectDialog";
 import { CommercialBreakdown } from "./CommercialBreakdown";
 import { QuoteSummary } from "./QuoteSummary";
@@ -123,37 +123,26 @@ function optionsOf(builds: BuildRef[], variantId: string): BuildRef[] {
 }
 
 /**
- * Apply an override set through the SAME store actions the table cells use.
+ * Apply per-row overrides through the SAME store actions the table cells use.
  *
- * One place, so a figure changed from the dialog and the same figure changed
+ * One place, so a figure changed in the dialog and the same figure changed
  * inline can never take different paths into the quotation.
  */
-function applyOverrides(
-  quotationId: string,
-  item: QuoteItem,
-  { lineId, set, cleared }: OverrideResult,
-) {
+function applyOverrides(quotationId: string, item: QuoteItem, overrides: RowOverride[]) {
   const isKit = item.kind === "kit";
-  if (set.moq !== undefined) updateLine(quotationId, item.id, lineId, { moqOverride: set.moq });
-  if (set.marginPct !== undefined) {
-    updateLine(quotationId, item.id, lineId, { targetMarginPct: set.marginPct });
+
+  for (const o of overrides) {
+    if (o.moq !== undefined) updateLine(quotationId, item.id, o.lineId, { moqOverride: o.moq });
+    if (o.marginPct !== undefined) {
+      updateLine(quotationId, item.id, o.lineId, { targetMarginPct: o.marginPct });
+    }
+
+    const price = o.clearSelling ? undefined : o.sellingUsd;
+    if (o.clearSelling || o.sellingUsd !== undefined) {
+      if (isKit) setItemSellingPrice(quotationId, item.id, price);
+      else setLineSellingPrice(quotationId, item.id, o.lineId, price);
+    }
   }
-
-  const setFinalCost = (v: number | undefined) =>
-    isKit
-      ? setItemFinalCost(quotationId, item.id, v)
-      : setLineFinalCost(quotationId, item.id, lineId, v);
-
-  const setSelling = (v: number | undefined) =>
-    isKit
-      ? setItemSellingPrice(quotationId, item.id, v)
-      : setLineSellingPrice(quotationId, item.id, lineId, v);
-
-  if (cleared.includes("finalCostInr")) setFinalCost(undefined);
-  else if (set.finalCostInr !== undefined) setFinalCost(set.finalCostInr);
-
-  if (cleared.includes("sellingUsd")) setSelling(undefined);
-  else if (set.sellingUsd !== undefined) setSelling(set.sellingUsd);
 }
 
 /* ================================================================== *
@@ -192,6 +181,7 @@ function ProductCard({
           variant: variantOf(builds, build),
           options: optionsOf(builds, variantOf(builds, build).id),
           moqOverridden: l.moqOverride !== undefined,
+          rejected: Boolean(l.rejected),
         };
       }),
     [item, scenarios, builds],
@@ -249,8 +239,8 @@ function ProductCard({
           initialLineId={quoted.lineId}
           isKit={false}
           onClose={() => setOverriding(false)}
-          onSave={(result) => {
-            applyOverrides(quotationId, item, result);
+          onSave={(overrides) => {
+            applyOverrides(quotationId, item, overrides);
             setOverriding(false);
           }}
         />
@@ -276,7 +266,10 @@ function ProductCard({
           }
           onBuild={(lineId, buildId) => setLineBuild(quotationId, item.id, lineId, buildId)}
           onSellingPrice={(lineId, v) => setLineSellingPrice(quotationId, item.id, lineId, v)}
-          frozen={Boolean(item.rejected)}
+          // A scoped rejection freezes only the rows that went back; the
+          // article's other configurations are still quotable. The table only
+          // greys out wholesale when nothing on it is left to price.
+          frozen={item.lines.every((l) => Boolean(l.rejected))}
         />
       </div>
 
@@ -451,7 +444,7 @@ function KitCard({ podId, quotationId, item, index, readOnly, showSummary, sibli
               }
               onBuild={(lineId, buildId) => setLineBuild(quotationId, item.id, lineId, buildId)}
               onSellingPrice={(lineId, v) => setLineSellingPrice(quotationId, item.id, lineId, v)}
-              frozen={Boolean(item.rejected)}
+              frozen={item.lines.every((l) => Boolean(l.rejected))}
             />
           </div>
 
@@ -606,6 +599,9 @@ function CardHeader({
   siblings: QuoteItem[];
 }) {
   const isKit = item.kind === "kit";
+  // A scoped rejection leaves the rest of the article quotable, so the article's
+  // own controls only retire once there is nothing left on it to price.
+  const allOut = item.lines.every((l) => Boolean(l.rejected));
   const [rejecting, setRejecting] = useState(false);
 
   return (
@@ -724,7 +720,7 @@ function CardHeader({
             <Settings2 className="h-3.5 w-3.5" />
             Re-cost
           </Link>
-          {!readOnly && !item.rejected && (
+          {!readOnly && !allOut && (
             <button
               type="button"
               onClick={onOverride}
@@ -734,7 +730,7 @@ function CardHeader({
               Override
             </button>
           )}
-          {!readOnly && !item.rejected && (
+          {!readOnly && !allOut && (
             <button
               type="button"
               onClick={() => setRejecting(true)}
@@ -760,11 +756,12 @@ function CardHeader({
       {rejecting && (
         <RejectDialog
           quotationId={quotationId}
+          podId={podId}
           items={siblings}
           preselect={[item.id]}
           onClose={() => setRejecting(false)}
-          onConfirm={(ids, reason) => {
-            rejectItems(quotationId, ids, reason);
+          onConfirm={(selection, reason) => {
+            rejectSelection(quotationId, selection, reason);
             setRejecting(false);
           }}
         />

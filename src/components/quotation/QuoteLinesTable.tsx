@@ -30,6 +30,8 @@ export type QuoteRow = {
   options?: BuildRef[];
   /** the quantity on this row was typed, not inherited from the costing */
   moqOverridden?: boolean;
+  /** this configuration is out for recosting — shown, frozen, not priceable */
+  rejected?: boolean;
 };
 
 /**
@@ -142,6 +144,20 @@ function InlineMoney({
   );
 }
 
+/**
+ * The row-level counterpart of the card's "Sent back for recosting" badge: on a
+ * scoped rejection the article stays priceable, so the row itself has to say
+ * which configuration is the one that left.
+ */
+function OutPill({ on }: { on?: boolean }) {
+  if (!on) return null;
+  return (
+    <span className="mt-1 inline-flex items-center rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-900">
+      Out for recosting
+    </span>
+  );
+}
+
 export function QuoteLinesTable({
   rows,
   quotedLineId,
@@ -223,6 +239,9 @@ export function QuoteLinesTable({
             const c = priced.commercial;
             const isQuoted = row.lineId === quotedLineId;
             const commercialsInr = c.totalPurchaseInr + c.totalSaleInr;
+            // Only the configuration that was questioned is frozen. The rest of
+            // the article is still quotable.
+            const rowFrozen = frozen || Boolean(row.rejected);
 
             return (
               <tr
@@ -230,6 +249,7 @@ export function QuoteLinesTable({
                 className={cn(
                   "border-b border-hairline/70 align-top transition-colors",
                   isQuoted ? "bg-brand-50/40" : "hover:bg-surface-alt/40",
+                  rowFrozen && "opacity-60",
                 )}
               >
                 {showQuoteColumn && (
@@ -267,6 +287,7 @@ export function QuoteLinesTable({
                                 ×{row.leading.unitsPerSet} / set
                               </span>
                             )}
+                            <OutPill on={row.rejected} />
                           </div>
                           <ConfigChips
                             className="mt-1"
@@ -286,12 +307,16 @@ export function QuoteLinesTable({
                           parentBuild={row.parentBuild}
                           size={priced.sizeLabel}
                         />
-                        <OptionPicker row={row} onBuild={readOnly ? undefined : onBuild} />
+                        <OptionPicker
+                          row={row}
+                          onBuild={readOnly || rowFrozen ? undefined : onBuild}
+                        />
+                        <OutPill on={row.rejected} />
                       </div>
                     )}
                   </div>
                   {row.leading && (
-                    <OptionPicker row={row} onBuild={readOnly ? undefined : onBuild} />
+                    <OptionPicker row={row} onBuild={readOnly || rowFrozen ? undefined : onBuild} />
                   )}
                 </td>
 
@@ -301,7 +326,7 @@ export function QuoteLinesTable({
                     min={1}
                     step={100}
                     value={priced.moq}
-                    disabled={readOnly || frozen}
+                    disabled={readOnly || rowFrozen}
                     onChange={(e) => onMoq(row.lineId, Number(e.target.value))}
                     aria-label="Quoted quantity"
                     className={cn(
@@ -354,7 +379,7 @@ export function QuoteLinesTable({
                       value={c.sellingUsd}
                       secondary={inr(c.sellingInr)}
                       edited={c.sellingPriceEdited}
-                      disabled={frozen}
+                      disabled={rowFrozen}
                       format={(n) => usd(n)}
                       label="Selling price"
                       onSave={(n) => onSellingPrice(row.lineId, n)}
@@ -380,7 +405,7 @@ export function QuoteLinesTable({
                       type="number"
                       step="0.5"
                       value={c.marginPct}
-                      disabled={readOnly || frozen}
+                      disabled={readOnly || rowFrozen}
                       onChange={(e) => onMargin(row.lineId, Number(e.target.value))}
                       aria-label="Target margin percent"
                       className="w-14 rounded border border-transparent bg-transparent px-1 py-1 text-right text-[12px] font-medium tabular-nums text-ink-900 hover:border-hairline focus:border-brand-600 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-brand-700/20"
