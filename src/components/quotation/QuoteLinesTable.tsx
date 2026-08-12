@@ -4,7 +4,7 @@
 // is never typed and never stored. Only the commercial decisions (which
 // scenario, which build, what quantity, what margin) belong to the quotation.
 
-import { Trash2 } from "lucide-react";
+import { RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { inr, pct, usd } from "@/lib/commercialProvisions";
 import type { PricedLine } from "@/lib/quotationPricing";
@@ -18,6 +18,17 @@ export type QuoteRow = {
   parentBuild?: BuildRef;
   /** kit members carry their own identity; a product's lines share the card's */
   leading?: { name: string; image?: string; size?: string; unitsPerSet?: number };
+  /**
+   * The variant this row quotes, and the options that branch off it.
+   *
+   * An option is one parameter changed inside a variant, so it is NOT a row of
+   * its own — it is picked on the variant's row, which is where the price it
+   * moves is already shown.
+   */
+  variant?: BuildRef;
+  options?: BuildRef[];
+  /** the quantity on this row was typed, not inherited from the costing */
+  moqOverridden?: boolean;
 };
 
 export function QuoteLinesTable({
@@ -27,8 +38,11 @@ export function QuoteLinesTable({
   onRemove,
   onMargin,
   onMoq,
+  onBuild,
+  onResetMoq,
   showQuoteColumn = true,
   identityHeader = "Configuration",
+  readOnly = false,
 }: {
   rows: QuoteRow[];
   /** the line the summary below is built from */
@@ -37,8 +51,14 @@ export function QuoteLinesTable({
   onRemove?: (lineId: string) => void;
   onMargin: (lineId: string, marginPct: number) => void;
   onMoq: (lineId: string, moq: number) => void;
+  /** pick an option on a row, or clear back to the plain variant */
+  onBuild?: (lineId: string, buildId: string) => void;
+  /** hand the quantity back to the costing's own MOQ */
+  onResetMoq?: (lineId: string) => void;
   showQuoteColumn?: boolean;
   identityHeader?: string;
+  /** a sent version is a record, so every control on it is frozen */
+  readOnly?: boolean;
 }) {
   return (
     <div className="overflow-x-auto">
@@ -98,6 +118,7 @@ export function QuoteLinesTable({
                     <input
                       type="radio"
                       checked={isQuoted}
+                      disabled={readOnly}
                       onChange={() => onQuote?.(row.lineId)}
                       aria-label={`Quote ${priced.scenario.name}`}
                       title="Quote this position"
@@ -139,14 +160,20 @@ export function QuoteLinesTable({
                       </>
                     )}
                     {!row.leading && (
-                      <ConfigChips
-                        scenario={priced.scenario}
-                        build={priced.build}
-                        parentBuild={row.parentBuild}
-                        size={priced.sizeLabel}
-                      />
+                      <div className="min-w-0">
+                        <ConfigChips
+                          scenario={priced.scenario}
+                          build={priced.build}
+                          parentBuild={row.parentBuild}
+                          size={priced.sizeLabel}
+                        />
+                        <OptionPicker row={row} onBuild={readOnly ? undefined : onBuild} />
+                      </div>
                     )}
                   </div>
+                  {row.leading && (
+                    <OptionPicker row={row} onBuild={readOnly ? undefined : onBuild} />
+                  )}
                 </td>
 
                 <td className="px-3 py-2.5 text-right">
@@ -155,10 +182,34 @@ export function QuoteLinesTable({
                     min={1}
                     step={100}
                     value={priced.moq}
+                    disabled={readOnly}
                     onChange={(e) => onMoq(row.lineId, Number(e.target.value))}
                     aria-label="Quoted quantity"
-                    className="w-24 rounded border border-transparent bg-transparent px-1.5 py-1 text-right text-[12px] tabular-nums text-ink-900 hover:border-hairline focus:border-brand-600 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-brand-700/20"
+                    className={cn(
+                      "w-24 rounded border bg-transparent px-1.5 py-1 text-right text-[12px] tabular-nums text-ink-900 hover:border-hairline focus:border-brand-600 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-brand-700/20",
+                      row.moqOverridden ? "border-ink-200 bg-surface" : "border-transparent",
+                    )}
                   />
+                  {/* An override the user cannot undo is a trap, so the way
+                      back to the costing's own MOQ is offered next to it. */}
+                  {row.moqOverridden && !readOnly && (
+                    <span className="mt-0.5 flex items-center justify-end gap-1">
+                      <span className="text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-500">
+                        Override
+                      </span>
+                      {onResetMoq && (
+                        <button
+                          type="button"
+                          onClick={() => onResetMoq(row.lineId)}
+                          aria-label="Use the costed MOQ"
+                          title="Use the costed MOQ"
+                          className="rounded p-0.5 text-ink-400 hover:bg-surface-alt hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                        >
+                          <RotateCcw className="h-3 w-3" />
+                        </button>
+                      )}
+                    </span>
+                  )}
                 </td>
 
                 <td className="px-3 py-2.5 text-right tabular-nums">
@@ -181,6 +232,11 @@ export function QuoteLinesTable({
                 <td className="px-3 py-2.5 text-right tabular-nums">
                   <div className="text-[13px] font-semibold text-ink-900">{usd(c.sellingUsd)}</div>
                   <div className="text-[10.5px] text-ink-400">{inr(c.sellingInr)}</div>
+                  {(c.sellingPriceEdited || c.finalCostEdited) && (
+                    <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-500">
+                      {c.sellingPriceEdited ? "Price override" : "Cost override"}
+                    </div>
+                  )}
                 </td>
 
                 <td className="px-3 py-2.5 text-right">
@@ -189,6 +245,7 @@ export function QuoteLinesTable({
                       type="number"
                       step="0.5"
                       value={c.marginPct}
+                      disabled={readOnly}
                       onChange={(e) => onMargin(row.lineId, Number(e.target.value))}
                       aria-label="Target margin percent"
                       className="w-14 rounded border border-transparent bg-transparent px-1 py-1 text-right text-[12px] font-medium tabular-nums text-ink-900 hover:border-hairline focus:border-brand-600 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-brand-700/20"
@@ -202,7 +259,7 @@ export function QuoteLinesTable({
                   </div>
                 </td>
 
-                {onRemove && (
+                {onRemove && !readOnly && (
                   <td className="px-3 py-2.5 text-right">
                     <button
                       type="button"
@@ -219,6 +276,63 @@ export function QuoteLinesTable({
           })}
         </tbody>
       </table>
+    </div>
+  );
+}
+
+/**
+ * The options branching off this row's variant, picked in place.
+ *
+ * An option changes one parameter inside the variant, so switching it moves
+ * THIS row's cost and price — which is why it belongs on the row rather than
+ * adding a second row that looks like a separate quotation position. "None"
+ * is always offered, so a picked option can always be put back.
+ */
+function OptionPicker({
+  row,
+  onBuild,
+}: {
+  row: QuoteRow;
+  onBuild?: (lineId: string, buildId: string) => void;
+}) {
+  const options = row.options ?? [];
+  if (!onBuild || !row.variant || options.length === 0) return null;
+
+  const activeId = row.priced.build.id;
+
+  const chip = (selected: boolean) =>
+    cn(
+      "rounded-full border px-2 py-0.5 text-[10.5px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
+      selected
+        ? "border-[var(--color-cfg-strong)] bg-[var(--color-cfg-soft)] text-[var(--color-cfg-strong)]"
+        : "border-hairline bg-surface text-ink-600 hover:bg-surface-alt hover:text-ink-900",
+    );
+
+  return (
+    <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+      <span className="text-[10px] font-medium uppercase tracking-[0.1em] text-ink-400">
+        Options
+      </span>
+      <button
+        type="button"
+        onClick={() => onBuild(row.lineId, row.variant!.id)}
+        className={chip(activeId === row.variant.id)}
+        aria-pressed={activeId === row.variant.id}
+      >
+        None
+      </button>
+      {options.map((o) => (
+        <button
+          key={o.id}
+          type="button"
+          onClick={() => onBuild(row.lineId, o.id)}
+          className={chip(activeId === o.id)}
+          aria-pressed={activeId === o.id}
+          title={o.description ?? `Apply ${o.name} to this row`}
+        >
+          {o.name}
+        </button>
+      ))}
     </div>
   );
 }

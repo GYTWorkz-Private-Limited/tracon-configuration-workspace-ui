@@ -18,9 +18,10 @@
 import { useSyncExternalStore } from "react";
 import { getPod, type Article } from "./podsStore";
 import { SCENARIO_PRESETS } from "./scenarios";
-import { BASE_BUILD } from "./costingSelectionStore";
+import { BASE_BUILD, buildsFor } from "./costingSelectionStore";
 import type { ProvisionRates } from "./commercialProvisions";
 import { isReadyForQuotation } from "./quotationReadiness";
+import { logQuotationEvent } from "./quotationHistory";
 
 /** One configured, quotable line: a scenario/variant/option at a quantity. */
 export type QuoteLine = {
@@ -39,6 +40,13 @@ export type QuoteLine = {
    * `commercialProvisions`. Only the total cost they run from is pinned.
    */
   finalCostOverrideInr?: number;
+  /**
+   * Selling price fixed by hand on this line, $ / pc.
+   *
+   * The commercial counterpart of the total-cost override: when the buyer
+   * names a price, the price is the input and the margin is the answer.
+   */
+  sellingPriceOverrideUsd?: number;
 };
 
 /** One article inside a kit — keeps its own scenario, variant, option and MOQ. */
@@ -85,6 +93,8 @@ export type QuoteItem = {
   sets?: number;
   /** a kit's hand-fixed total cost, ₹ / set — the set is priced as one position */
   finalCostOverrideInr?: number;
+  /** a kit's hand-fixed selling price, $ / set */
+  sellingPriceOverrideUsd?: number;
 };
 
 /**
@@ -158,6 +168,12 @@ export function useQuoteDraft(podId: string): QuoteDraft | undefined {
   return useQuoteDrafts()[podId];
 }
 
+/** Every quotation in the workspace — what the Quotations list reads. */
+export function useAllQuoteDrafts(): QuoteDraft[] {
+  const all = useQuoteDrafts();
+  return Object.values(all).filter((d) => d.items.length > 0);
+}
+
 let seq = 0;
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
 
@@ -184,10 +200,23 @@ function write(podId: string, fn: (d: QuoteDraft) => QuoteDraft) {
  * Building the draft
  * ------------------------------------------------------------------ */
 
-/** Turn a POD article into a quote item — kits keep their member structure. */
-function itemFromArticle(article: Article): QuoteItem {
+/**
+ * Turn a POD article into a quote item — kits keep their member structure.
+ *
+ * A product arrives with EVERY variant Configuration has published as its own
+ * quotable row, not just the base build: the commercial team's job is to pick
+ * between the ways the product can be built, and they cannot pick from a list
+ * they have to assemble by hand first. Options are not rows — an option is one
+ * parameter changed inside a variant, so it belongs on that variant's row.
+ */
+function itemFromArticle(article: Article, podId: string): QuoteItem {
   const isKit = article.type === "kit";
-  const lines = isKit ? [] : [baseLine()];
+  const variants = buildsFor(podId, article.id).filter((b) => b.kind === "variant");
+  const lines = isKit
+    ? []
+    : variants.length > 0
+      ? variants.map((v) => ({ ...baseLine(), buildId: v.id }))
+      : [baseLine()];
   return {
     id: uid("QI"),
     kind: isKit ? "kit" : "product",
@@ -248,7 +277,8 @@ export function addProducts(podId: string, articleIds: string[]) {
       .filter((a) => isReadyForQuotation(podId, a.id))
       .filter((a) => !d.items.some((i) => i.articleId === a.id));
     if (add.length === 0) return d;
-    return { ...d, items: [...d.items, ...add.map(itemFromArticle)] };
+    for (const a of add) logQuotationEvent(podId, "item_added", `${a.name} added to the quotation`);
+    return { ...d, items: [...d.items, ...add.map((a) => itemFromArticle(a, podId))] };
   });
 }
 
@@ -270,14 +300,26 @@ export function startQuotation(podId: string, articleIds: string[], mode: QuoteM
       .map((id) => pod.articles.find((a) => a.id === id))
       .filter((a): a is Article => Boolean(a))
       .filter((a) => isReadyForQuotation(podId, a.id))
-      .map((a) => d.items.find((i) => i.articleId === a.id) ?? itemFromArticle(a));
+      .map((a) => d.items.find((i) => i.articleId === a.id) ?? itemFromArticle(a, podId));
     if (items.length === 0) return { ...d, mode };
+    logQuotationEvent(
+      podId,
+      "quotation_started",
+      `Quotation opened for ${items.map((i) => i.name).join(", ")} (${mode === "single" ? "single product" : "multiple products / kit"})`,
+    );
     return { ...d, mode, items };
   });
 }
 
 export function removeItem(podId: string, itemId: string) {
+  const name = itemOf(podId, itemId)?.name;
+  if (name) logQuotationEvent(podId, "item_removed", `${name} removed from the quotation`);
   write(podId, (d) => ({ ...d, items: d.items.filter((i) => i.id !== itemId) }));
+}
+
+/** Unsubscribed lookup, so an action can name what it just changed. */
+function itemOf(podId: string, itemId: string): QuoteItem | undefined {
+  return state[podId]?.items.find((i) => i.id === itemId);
 }
 
 export function toggleCollapsed(podId: string, itemId: string) {
@@ -316,9 +358,28 @@ export function addLine(
         : i,
     ),
   }));
+  logQuotationEvent(
+    podId,
+    "line_added",
+    `Configuration row added to ${itemOf(podId, itemId)?.name ?? "an item"}`,
+  );
 }
 
 export function updateLine(
+  podId: string,
+  itemId: string,
+  lineId: string,
+  patch: Partial<Omit<QuoteLine, "id">>,
+) {
+  logLinePatch(podId, itemId, patch);
+  updateLineQuietly(podId, itemId, lineId, patch);
+}
+
+/**
+ * The same write without the audit line — for callers that log a richer
+ * message of their own, so one change never appears in the audit twice.
+ */
+function updateLineQuietly(
   podId: string,
   itemId: string,
   lineId: string,
@@ -339,7 +400,36 @@ export function updateLine(
   }));
 }
 
+/**
+ * Turn a line patch into one readable audit line.
+ *
+ * Lives beside the mutation rather than in the components that call it, so a
+ * change made from a screen written next year is logged without that screen
+ * having to know the audit exists.
+ */
+function logLinePatch(podId: string, itemId: string, patch: Partial<Omit<QuoteLine, "id">>) {
+  const name = itemOf(podId, itemId)?.name ?? "an item";
+  if (patch.moqOverride !== undefined) {
+    logQuotationEvent(
+      podId,
+      "moq_override",
+      `${name} — quoted MOQ overridden to ${patch.moqOverride.toLocaleString("en-IN")}`,
+    );
+  }
+  if (patch.targetMarginPct !== undefined) {
+    logQuotationEvent(podId, "margin_changed", `${name} — margin set to ${patch.targetMarginPct}%`);
+  }
+  if ("buildId" in patch && patch.buildId) {
+    logQuotationEvent(podId, "option_changed", `${name} — configuration changed on a quoted row`);
+  }
+}
+
 export function removeLine(podId: string, itemId: string, lineId: string) {
+  logQuotationEvent(
+    podId,
+    "line_removed",
+    `Configuration row removed from ${itemOf(podId, itemId)?.name ?? "an item"}`,
+  );
   write(podId, (d) => ({
     ...d,
     items: d.items.map((i) => {
@@ -358,8 +448,10 @@ export function removeLine(podId: string, itemId: string, lineId: string) {
 }
 
 /* ------------------------------------------------------------------ *
- * Total cost — edited by hand, saved explicitly
+ * Overrides — edited by hand, saved explicitly, always reversible
  * ------------------------------------------------------------------ */
+
+const positive = (n: number | undefined) => (n !== undefined && n > 0 ? n : undefined);
 
 /**
  * Fix (or release) the total cost of a product's quoted line, ₹ / pc.
@@ -373,21 +465,90 @@ export function setLineFinalCost(
   lineId: string,
   finalCostInr: number | undefined,
 ) {
-  const value = finalCostInr !== undefined && finalCostInr > 0 ? finalCostInr : undefined;
-  updateLine(podId, itemId, lineId, { finalCostOverrideInr: value });
+  const value = positive(finalCostInr);
+  const name = itemOf(podId, itemId)?.name ?? "an item";
+  logQuotationEvent(
+    podId,
+    value === undefined ? "total_cost_reset" : "total_cost_edited",
+    value === undefined
+      ? `${name} — total cost returned to the calculated figure`
+      : `${name} — total cost set to ₹${value.toLocaleString("en-IN")} / pc`,
+  );
+  updateLineQuietly(podId, itemId, lineId, { finalCostOverrideInr: value });
+}
+
+/** Fix (or release) a product line's selling price, $ / pc. */
+export function setLineSellingPrice(
+  podId: string,
+  itemId: string,
+  lineId: string,
+  sellingUsd: number | undefined,
+) {
+  const value = positive(sellingUsd);
+  const name = itemOf(podId, itemId)?.name ?? "an item";
+  logQuotationEvent(
+    podId,
+    value === undefined ? "selling_price_reset" : "selling_price_edited",
+    value === undefined
+      ? `${name} — selling price returned to the margin-derived figure`
+      : `${name} — selling price set to $${value.toFixed(2)} / pc`,
+  );
+  updateLineQuietly(podId, itemId, lineId, { sellingPriceOverrideUsd: value });
 }
 
 /** Fix (or release) a kit's total cost, ₹ / set. */
 export function setItemFinalCost(podId: string, itemId: string, finalCostInr: number | undefined) {
-  const value = finalCostInr !== undefined && finalCostInr > 0 ? finalCostInr : undefined;
+  const value = positive(finalCostInr);
+  const name = itemOf(podId, itemId)?.name ?? "a kit";
+  logQuotationEvent(
+    podId,
+    value === undefined ? "total_cost_reset" : "total_cost_edited",
+    value === undefined
+      ? `${name} — total cost per set returned to the calculated figure`
+      : `${name} — total cost set to ₹${value.toLocaleString("en-IN")} / set`,
+  );
   write(podId, (d) => ({
     ...d,
     items: d.items.map((i) => (i.id === itemId ? { ...i, finalCostOverrideInr: value } : i)),
   }));
 }
 
+/** Fix (or release) a kit's selling price, $ / set. */
+export function setItemSellingPrice(podId: string, itemId: string, sellingUsd: number | undefined) {
+  const value = positive(sellingUsd);
+  const name = itemOf(podId, itemId)?.name ?? "a kit";
+  logQuotationEvent(
+    podId,
+    value === undefined ? "selling_price_reset" : "selling_price_edited",
+    value === undefined
+      ? `${name} — selling price per set returned to the margin-derived figure`
+      : `${name} — selling price set to $${value.toFixed(2)} / set`,
+  );
+  write(podId, (d) => ({
+    ...d,
+    items: d.items.map((i) => (i.id === itemId ? { ...i, sellingPriceOverrideUsd: value } : i)),
+  }));
+}
+
+/**
+ * Switch a row between its variant and one of that variant's options.
+ *
+ * An option is not a row of its own: it is one parameter changed inside a
+ * variant, so it moves the row it belongs to. Passing the variant's own id is
+ * how the row is cleared back to "no option".
+ */
+export function setLineBuild(podId: string, itemId: string, lineId: string, buildId: string) {
+  updateLine(podId, itemId, lineId, { buildId });
+}
+
 /** Choose which configured position is the price that goes to the buyer. */
 export function setQuotedLine(podId: string, itemId: string, lineId: string) {
+  const item = itemOf(podId, itemId);
+  logQuotationEvent(
+    podId,
+    "quoted_line_changed",
+    `${item?.name ?? "An item"} — quoted position changed`,
+  );
   write(podId, (d) => ({
     ...d,
     items: d.items.map((i) => (i.id === itemId ? { ...i, quotedLineId: lineId } : i)),

@@ -24,6 +24,7 @@ export function QuoteSummary({
   orderValueUsd,
   title,
   onSaveFinalCost,
+  onSaveSellingPrice,
 }: {
   variant: SummaryVariant;
   result: CommercialResult;
@@ -38,6 +39,8 @@ export function QuoteSummary({
    * read-only surfaces — the pencil is then not offered at all.
    */
   onSaveFinalCost?: (finalCostInr: number | undefined) => void;
+  /** Save a hand-fixed selling price ($ / pc or $ / set), or release it. */
+  onSaveSellingPrice?: (sellingUsd: number | undefined) => void;
 }) {
   const isKit = variant === "kit";
   const unit = isKit ? "/ set" : "/ pc";
@@ -84,7 +87,36 @@ export function QuoteSummary({
         </span>
       </header>
 
-      <TotalCostRow result={result} unit={unit} isKit={isKit} onSaveFinalCost={onSaveFinalCost} />
+      {/* The two numbers the commercial team is allowed to fix by hand, side
+          by side because they are two ends of the same calculation: pin the
+          cost and the price follows the margin; pin the price and the margin
+          is what it leaves. */}
+      <div className="grid gap-px border-b border-hairline bg-hairline sm:grid-cols-2">
+        <EditableFigure
+          label={isKit ? "Total Cost / set" : "Total Cost"}
+          unit={unit}
+          currency="inr"
+          value={result.finalCostInr}
+          secondary={usd(result.finalCostUsd)}
+          edited={result.finalCostEdited}
+          calculated={inr(result.calculatedFinalCostInr)}
+          fxRate={result.fxRate}
+          note="Selling price and margin are recalculated from this total cost."
+          onSave={onSaveFinalCost}
+        />
+        <EditableFigure
+          label={isKit ? "Selling Price / set" : "Selling Price"}
+          unit={unit}
+          currency="usd"
+          value={result.sellingUsd}
+          secondary={inr(result.sellingInr)}
+          edited={result.sellingPriceEdited}
+          calculated={usd(result.calculatedSellingUsd)}
+          fxRate={result.fxRate}
+          note="Margin is recalculated from this price against the total cost."
+          onSave={onSaveSellingPrice}
+        />
+      </div>
 
       <dl className="grid grid-cols-2 gap-px bg-hairline sm:grid-cols-4">
         {cells.map((c) => (
@@ -110,32 +142,49 @@ export function QuoteSummary({
 }
 
 /* ------------------------------------------------------------------ *
- * Total cost — the one figure the commercial team may fix by hand
+ * The figures the commercial team may fix by hand
  * ------------------------------------------------------------------ */
 
 /**
- * Editing the total cost is an explicit act: pencil, type, Save. Until Save is
- * pressed nothing about the quotation moves, and once it is saved the selling
- * price and margin above are re-derived by the SAME commercial calculation —
- * this only pins the number that calculation starts the margin from.
+ * One overridable figure: pencil, type, Save.
+ *
+ * Editing is an explicit act — until Save is pressed nothing about the
+ * quotation moves — and it is always reversible, because the calculated figure
+ * stays on screen next to it with a way back to it. What the override does NOT
+ * do is compute anything new: the existing commercial calculation still
+ * produces every other number on this card from it.
  */
-function TotalCostRow({
-  result,
+function EditableFigure({
+  label,
   unit,
-  isKit,
-  onSaveFinalCost,
+  currency,
+  value,
+  secondary,
+  edited,
+  calculated,
+  fxRate,
+  note,
+  onSave,
 }: {
-  result: CommercialResult;
+  label: string;
   unit: string;
-  isKit: boolean;
-  onSaveFinalCost?: (finalCostInr: number | undefined) => void;
+  currency: "inr" | "usd";
+  value: number;
+  /** the same figure in the other currency, for orientation */
+  secondary: string;
+  edited: boolean;
+  /** what the calculation would have produced, formatted */
+  calculated: string;
+  fxRate: number;
+  note: string;
+  onSave?: (value: number | undefined) => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [value, setValue] = useState("");
+  const [draft, setDraft] = useState("");
   const [savedAt, setSavedAt] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  // "Saved" is a confirmation, not a state — it fades so it can never be read
+  // "Saved" is a confirmation, not a state — it fades, so it can never be read
   // as "this quotation has unsaved work".
   useEffect(() => {
     if (!savedAt) return;
@@ -147,112 +196,112 @@ function TotalCostRow({
     if (editing) inputRef.current?.select();
   }, [editing]);
 
-  const label = isKit ? "Total Cost / set" : "Total Cost";
-  const typed = Number(value.replace(/[^\d.]/g, ""));
+  const symbol = currency === "inr" ? "₹" : "$";
+  const format = currency === "inr" ? inr : usd;
+  const typed = Number(draft.replace(/[^\d.]/g, ""));
   const valid = Number.isFinite(typed) && typed > 0;
 
   const open = () => {
-    setValue(String(result.finalCostInr));
+    setDraft(String(value));
     setEditing(true);
   };
 
   const save = () => {
-    if (!valid || !onSaveFinalCost) return;
-    onSaveFinalCost(Math.round(typed * 100) / 100);
+    if (!valid || !onSave) return;
+    onSave(Math.round(typed * 100) / 100);
     setEditing(false);
     setSavedAt(Date.now());
   };
 
   const reset = () => {
-    onSaveFinalCost?.(undefined);
+    onSave?.(undefined);
     setEditing(false);
     setSavedAt(Date.now());
   };
 
+  /** The typed figure in the other currency, so an edit is never blind. */
+  const converted = currency === "inr" ? usd(typed / fxRate) : inr(typed * fxRate);
+
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-2 border-b border-hairline px-4 py-3">
-      <div className="min-w-0">
-        <div className="text-[10px] font-medium uppercase tracking-[0.1em] text-ink-500">
-          {label}
+    <div className="bg-surface px-4 py-3">
+      <div className="text-[10px] font-medium uppercase tracking-[0.1em] text-ink-500">{label}</div>
+
+      {editing ? (
+        <div className="mt-1 flex flex-wrap items-center gap-2">
+          <span className="text-[13px] text-ink-500">{symbol}</span>
+          <input
+            ref={inputRef}
+            type="number"
+            min={0}
+            step="0.01"
+            inputMode="decimal"
+            value={draft}
+            onChange={(e) => setDraft(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.preventDefault();
+                save();
+              }
+              if (e.key === "Escape") setEditing(false);
+            }}
+            aria-label={`${label} in ${currency === "inr" ? "rupees" : "dollars"}`}
+            className="w-28 rounded border border-hairline bg-surface px-2 py-1 text-[15px] font-semibold tabular-nums text-ink-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-700/20"
+          />
+          <span className="text-[11px] tabular-nums text-ink-500">
+            {valid ? `≈ ${converted} ${unit}` : unit}
+          </span>
+          <button
+            type="button"
+            onClick={save}
+            disabled={!valid}
+            className="inline-flex items-center gap-1 rounded-md bg-brand-700 px-2.5 py-1.5 text-[12px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          >
+            <Check className="h-3.5 w-3.5" aria-hidden /> Save
+          </button>
+          <button
+            type="button"
+            onClick={() => setEditing(false)}
+            className="inline-flex items-center gap-1 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          >
+            <X className="h-3.5 w-3.5" aria-hidden /> Cancel
+          </button>
         </div>
-
-        {editing ? (
-          <div className="mt-1 flex flex-wrap items-center gap-2">
-            <span className="text-[13px] text-ink-500">₹</span>
-            <input
-              ref={inputRef}
-              type="number"
-              min={0}
-              step="0.01"
-              inputMode="decimal"
-              value={value}
-              onChange={(e) => setValue(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  save();
-                }
-                if (e.key === "Escape") setEditing(false);
-              }}
-              aria-label={`${label} in rupees`}
-              className="w-32 rounded border border-hairline bg-surface px-2 py-1 text-[15px] font-semibold tabular-nums text-ink-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-700/20"
-            />
-            <span className="text-[11px] tabular-nums text-ink-500">
-              {valid ? `≈ ${usd(typed / result.fxRate)} ${unit}` : `${unit}`}
-            </span>
+      ) : (
+        <div className="mt-0.5 flex flex-wrap items-center gap-2">
+          <span className="text-[17px] font-semibold tabular-nums text-ink-900">
+            {format(value)}
+          </span>
+          <span className="text-[11.5px] tabular-nums text-ink-500">
+            {secondary} {unit}
+          </span>
+          {onSave && (
             <button
               type="button"
-              onClick={save}
-              disabled={!valid}
-              className="inline-flex items-center gap-1 rounded-md bg-brand-700 px-2.5 py-1.5 text-[12px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              onClick={open}
+              aria-label={`Edit ${label}`}
+              title={`Edit ${label}`}
+              className="rounded p-1 text-ink-400 hover:bg-surface-alt hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
             >
-              <Check className="h-3.5 w-3.5" aria-hidden /> Save
+              <Pencil className="h-3.5 w-3.5" aria-hidden />
             </button>
-            <button
-              type="button"
-              onClick={() => setEditing(false)}
-              className="inline-flex items-center gap-1 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[12px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-            >
-              <X className="h-3.5 w-3.5" aria-hidden /> Cancel
-            </button>
-          </div>
-        ) : (
-          <div className="mt-0.5 flex flex-wrap items-center gap-2">
-            <span className="text-[17px] font-semibold tabular-nums text-ink-900">
-              {inr(result.finalCostInr)}
+          )}
+          {savedAt > 0 && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10.5px] font-semibold text-brand-700">
+              <Check className="h-3 w-3" aria-hidden /> Saved
             </span>
-            <span className="text-[11.5px] tabular-nums text-ink-500">
-              {usd(result.finalCostUsd)} {unit}
-            </span>
-            {onSaveFinalCost && (
-              <button
-                type="button"
-                onClick={open}
-                aria-label={`Edit ${label}`}
-                title={`Edit ${label}`}
-                className="rounded p-1 text-ink-400 hover:bg-surface-alt hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-              >
-                <Pencil className="h-3.5 w-3.5" aria-hidden />
-              </button>
-            )}
-            {savedAt > 0 && (
-              <span className="inline-flex items-center gap-1 rounded-full bg-brand-50 px-2 py-0.5 text-[10.5px] font-semibold text-brand-700">
-                <Check className="h-3 w-3" aria-hidden /> Saved
-              </span>
-            )}
-          </div>
-        )}
-      </div>
+          )}
+        </div>
+      )}
 
-      {result.finalCostEdited && !editing && (
-        <div className="flex min-w-0 flex-wrap items-center gap-2 text-[11.5px] text-ink-500">
+      {edited && !editing ? (
+        <div className="mt-1.5 flex flex-wrap items-center gap-2 text-[11.5px] text-ink-500">
           <span className="inline-flex items-center gap-1 rounded-full border border-hairline bg-surface-alt px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ink-600">
             Edited
           </span>
           <span className="tabular-nums">
-            Calculated {inr(result.calculatedFinalCostInr)} {unit}
+            Calculated {calculated} {unit}
           </span>
-          {onSaveFinalCost && (
+          {onSave && (
             <button
               type="button"
               onClick={reset}
@@ -262,11 +311,9 @@ function TotalCostRow({
             </button>
           )}
         </div>
+      ) : (
+        !editing && <p className="mt-1.5 text-[10.5px] text-ink-400">{note}</p>
       )}
-
-      <p className="ml-auto max-w-[280px] text-right text-[10.5px] text-ink-400">
-        Selling price and margin are recalculated from this total cost.
-      </p>
     </div>
   );
 }

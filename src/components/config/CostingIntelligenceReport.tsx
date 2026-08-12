@@ -59,13 +59,9 @@ import { RequestedChangesWorkspace } from "./RequestedChangesWorkspace";
 import type { ApprovalSnapshot } from "@/lib/approvalsStore";
 
 import { useChangesGate } from "@/lib/requestedChangesStore";
-import {
-  markReadyForQuotation,
-  useIsReadyForQuotation,
-  READY_LABEL,
-  NOT_READY_LABEL,
-} from "@/lib/quotationReadiness";
+import { useIsReadyForQuotation, READY_LABEL, NOT_READY_LABEL } from "@/lib/quotationReadiness";
 import { QuotationEntryFlow } from "@/components/quotation/QuotationEntryFlow";
+import { QuotationStatusMenu } from "@/components/quotation/QuotationStatusMenu";
 type Tab = "overview" | "variants" | "financial" | "buildup" | "trends" | "ai";
 
 type ReportArticle = { id: string; name: string; size?: string; moq?: string };
@@ -320,41 +316,28 @@ export function CostingIntelligenceReport({
             </button>
             {changesGate.submitted && <RequestedChangesAction />}
             {changesGate.submitted && <RevisionHistoryAction />}
-            {/* One primary action at a time: confirm the costing is finished,
-                then carry it into the quotation. */}
-            {isReady ? (
-              <button
-                disabled={!navPodId || !navArticleId}
-                onClick={() => setSelectOpen(true)}
-                title="Choose which ready articles to quote"
-                className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <Send className="h-4 w-4" /> Continue to Quotation
-                <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            ) : (
-              <>
-                <span
-                  title="Mark this costing ready before it can be quoted"
-                  className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-300"
-                  aria-disabled="true"
-                >
-                  <Send className="h-4 w-4" /> Continue to Quotation
-                </span>
-                <button
-                  disabled={!navPodId || !navArticleId}
-                  onClick={() => {
-                    if (!navPodId || !navArticleId) return;
-                    markReadyForQuotation(navPodId, navArticleId);
-                    toast.success(`${productName} is ${READY_LABEL}`);
-                  }}
-                  title="Confirm this configuration and costing are ready to be quoted"
-                  className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <CheckCircle2 className="h-4 w-4" /> Mark as Ready for Quotation
-                </button>
-              </>
-            )}
+            {/* Where the costing stands, and what it can do next. The status
+                is a value the user sets and un-sets — a costing that has
+                changed is no longer signed off — so it stays on screen instead
+                of disappearing once it has been marked once. */}
+            <QuotationStatusMenu
+              podId={navPodId}
+              articleId={navArticleId}
+              articleName={productName}
+            />
+            <button
+              disabled={!navPodId || !navArticleId || !isReady}
+              onClick={() => setSelectOpen(true)}
+              title={
+                isReady
+                  ? "Choose what to quote"
+                  : `Set this costing to ${READY_LABEL} before it can be quoted`
+              }
+              className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Send className="h-4 w-4" /> Continue to Quotation
+              <ArrowRight className="h-3.5 w-3.5" />
+            </button>
           </ActionGroup>
         </div>
       </header>

@@ -14,7 +14,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, Boxes, FileText, Package, PackagePlus, Send } from "lucide-react";
+import {
+  ArrowLeft,
+  Boxes,
+  FileText,
+  History,
+  Lock,
+  Package,
+  PackagePlus,
+  Send,
+} from "lucide-react";
 
 import { ProductHeader } from "@/components/layout/ProductHeader";
 import { WorkflowStepper } from "@/components/layout/WorkflowStepper";
@@ -32,7 +41,19 @@ import {
   priceLine,
   scenarioById,
 } from "@/lib/quotationPricing";
-import { addProducts, ensureQuoteFor, useQuoteDraft, type QuoteItem } from "@/lib/quoteDraftStore";
+import {
+  addProducts,
+  ensureQuoteFor,
+  startQuotation,
+  useQuoteDraft,
+  type QuoteItem,
+} from "@/lib/quoteDraftStore";
+import {
+  latestVersion,
+  startNewVersion,
+  useQuotationHistory,
+  workingVersionNo,
+} from "@/lib/quotationHistory";
 import { viewQuote, type ViewedItem } from "@/lib/quotationView";
 import { QuoteItemCard } from "./QuoteItemCard";
 import { ConfigLegend } from "./ConfigChips";
@@ -40,6 +61,7 @@ import { ArticleSelectionModal } from "./ArticleSelectionModal";
 import { QuotationBenchmarkPanels } from "./QuotationBenchmarkPanels";
 import { QuotationPreview } from "./QuotationPreview";
 import { QuotationApprovalWorkspace } from "./QuotationApprovalWorkspace";
+import { QuotationHistoryPanel, VersionStatusPill } from "./QuotationHistoryPanel";
 
 export function QuoteWorkspace({
   podId,
@@ -52,11 +74,16 @@ export function QuoteWorkspace({
 }) {
   const pod = usePod(podId);
   const draft = useQuoteDraft(podId);
+  const history = useQuotationHistory(podId);
   const selections = useCostingSelections();
   const [mounted, setMounted] = useState(false);
   const [addOpen, setAddOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [approvalOpen, setApprovalOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
+  // Whether the selection modal is composing the next version (start from what
+  // is quoted) or adding to the quotation in hand (offer what is not).
+  const [composing, setComposing] = useState(false);
   // Which of the quotation's articles is being worked on. "all" is the whole
   // quotation, and is the only state a single-product quotation ever has.
   const [focus, setFocus] = useState<string>("all");
@@ -102,6 +129,23 @@ export function QuoteWorkspace({
   // rather than leave the page looking empty.
   const activeFocus = focus !== "all" && items.some((i) => i.id === focus) ? focus : "all";
 
+  // A quotation that has been sent is the record of what the buyer received,
+  // so it stops being editable until somebody explicitly opens the next
+  // version. Everything stays visible — it is frozen, not hidden.
+  const sent = latestVersion(history);
+  const locked = history.locked;
+
+  /**
+   * The buyer has come back. Re-open the quotation as the next version and go
+   * straight to the selection, so articles can be dropped, kept or added
+   * before anything is re-costed.
+   */
+  const openNextVersion = () => {
+    startNewVersion(podId);
+    setComposing(true);
+    setAddOpen(true);
+  };
+
   // One priced view of the quote, shared by the workspace's own totals, the
   // customer preview and the approval report — nobody re-derives it.
   const views: ViewedItem[] = viewQuote(podId, items, selections);
@@ -128,20 +172,45 @@ export function QuoteWorkspace({
         <ActionGroup>
           <button
             type="button"
+            onClick={() => setHistoryOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          >
+            <History className="h-4 w-4" /> History
+            {history.versions.length > 0 && (
+              <span className="rounded-full bg-ink-100 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-ink-600">
+                v{history.versions.length}
+              </span>
+            )}
+          </button>
+          <button
+            type="button"
             onClick={() => setPreviewOpen(true)}
             className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
           >
             <FileText className="h-4 w-4" /> Review Quotation
           </button>
-          <button
-            type="button"
-            disabled={items.length === 0}
-            onClick={() => setApprovalOpen(true)}
-            title={items.length === 0 ? "Add at least one item to the quotation first" : undefined}
-            className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
-          >
-            <Send className="h-4 w-4" /> Send for Approval
-          </button>
+          {locked ? (
+            <button
+              type="button"
+              onClick={openNextVersion}
+              title="Re-open this quotation to re-cost it as the next version"
+              className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800"
+            >
+              <Send className="h-4 w-4" /> Create version {workingVersionNo(history)}
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={items.length === 0}
+              onClick={() => setApprovalOpen(true)}
+              title={
+                items.length === 0 ? "Add at least one item to the quotation first" : undefined
+              }
+              className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
+            >
+              <Send className="h-4 w-4" /> Send for Approval
+            </button>
+          )}
         </ActionGroup>
       </ProductHeader>
 
@@ -161,6 +230,19 @@ export function QuoteWorkspace({
         <QuoteTotalsStrip pod={pod} totals={totals} itemCount={items.length} />
 
         <div className="mx-auto max-w-[1320px] px-6 py-4 lg:px-8">
+          {sent && (
+            <SentBanner
+              versionNo={sent.no}
+              status={sent.status}
+              sentAt={sent.sentAt}
+              sentBy={sent.sentBy}
+              locked={locked}
+              nextVersionNo={workingVersionNo(history)}
+              onNewVersion={openNextVersion}
+              onHistory={() => setHistoryOpen(true)}
+            />
+          )}
+
           <ConfigLegend className="mb-3" />
 
           {items.length === 0 ? (
@@ -175,14 +257,20 @@ export function QuoteWorkspace({
               <div className="space-y-5">
                 {items.map((item, i) =>
                   activeFocus === "all" || activeFocus === item.id ? (
-                    <QuoteItemCard key={item.id} podId={podId} item={item} index={i} />
+                    <QuoteItemCard
+                      key={item.id}
+                      podId={podId}
+                      item={item}
+                      index={i}
+                      readOnly={locked}
+                    />
                   ) : null,
                 )}
               </div>
             </>
           )}
 
-          {items.length > 0 && (
+          {items.length > 0 && !locked && (
             <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-ink-200 bg-surface/60 px-4 py-3.5">
               <p className="min-w-0 flex-1 text-[12.5px] text-ink-500">
                 Each product stays independently priced. Combine articles into a kit in
@@ -233,6 +321,7 @@ export function QuoteWorkspace({
         actions={
           <button
             type="button"
+            hidden={locked}
             onClick={() => setAddOpen(true)}
             disabled={!canAddMore}
             className="inline-flex items-center gap-1.5 rounded-full border border-hairline bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
@@ -243,17 +332,34 @@ export function QuoteWorkspace({
       />
 
       {/* The same selection surface the Costing Report opens, so readiness
-          behaves identically wherever an article joins a quotation. */}
+          behaves identically wherever an article joins a quotation.
+
+          It does two jobs. Adding a product to the quotation in hand offers
+          only what is not on it yet. Composing the NEXT version starts from
+          what is already quoted, so an article can be dropped as easily as one
+          can be added — which is the whole point of re-costing after the buyer
+          comes back. */}
       <ArticleSelectionModal
         open={addOpen}
-        onClose={() => setAddOpen(false)}
+        onClose={() => {
+          setAddOpen(false);
+          setComposing(false);
+        }}
         podId={podId}
         articles={pod.articles}
-        alreadyQuotedIds={quotedIds}
-        confirmLabel="Add to Quotation"
+        alreadyQuotedIds={composing ? undefined : quotedIds}
+        preselect={composing ? items.map((i) => i.articleId) : undefined}
+        title={
+          composing
+            ? `Select Products & Kits for version ${workingVersionNo(history)}`
+            : "Select Items for Quotation"
+        }
+        confirmLabel={composing ? "Continue" : "Add to Quotation"}
         onConfirm={(ids) => {
-          addProducts(podId, ids);
+          if (composing) startQuotation(podId, ids, ids.length > 1 ? "multiple" : "single");
+          else addProducts(podId, ids);
           setAddOpen(false);
+          setComposing(false);
         }}
       />
 
@@ -270,6 +376,21 @@ export function QuoteWorkspace({
           setApprovalOpen(true);
         }}
       />
+
+      {historyOpen && (
+        <QuotationHistoryPanel
+          podId={podId}
+          onClose={() => setHistoryOpen(false)}
+          onNewVersion={
+            locked
+              ? () => {
+                  setHistoryOpen(false);
+                  openNextVersion();
+                }
+              : undefined
+          }
+        />
+      )}
 
       {approvalOpen && (
         <QuotationApprovalWorkspace
@@ -313,6 +434,7 @@ function useQuoteTotals(podId: string, items: QuoteItem[]): Totals {
             targetMarginPct: m.line.targetMarginPct,
             moqOverride: m.line.moqOverride,
             finalCostOverrideInr: m.line.finalCostOverrideInr,
+            sellingPriceOverrideUsd: m.line.sellingPriceOverrideUsd,
             unitsPerSet: m.unitsPerSet,
             name: m.name,
             articleId: m.articleId,
@@ -323,6 +445,7 @@ function useQuoteTotals(podId: string, items: QuoteItem[]): Totals {
             targetMarginPct: item.targetMarginPct,
             sets: item.sets,
             finalCostOverrideInr: item.finalCostOverrideInr,
+            sellingPriceOverrideUsd: item.sellingPriceOverrideUsd,
           },
         );
         orderValueUsd += kit.orderValueUsd;
@@ -342,6 +465,7 @@ function useQuoteTotals(podId: string, items: QuoteItem[]): Totals {
         targetMarginPct: line.targetMarginPct ?? item.targetMarginPct,
         moqOverride: line.moqOverride,
         finalCostOverrideInr: line.finalCostOverrideInr,
+        sellingPriceOverrideUsd: line.sellingPriceOverrideUsd,
       });
       orderValueUsd += priced.orderValueUsd;
       costUsd += priced.commercial.finalCostUsd * priced.moq;
@@ -402,6 +526,83 @@ function QuoteTotalsStrip({
           </div>
         ))}
       </dl>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Sent versions
+ * ------------------------------------------------------------------ */
+
+/**
+ * What was sent, and what can be done about it now.
+ *
+ * A sent quotation is a record, so the workspace says so at the top rather
+ * than letting someone edit it and wonder later which figures the buyer
+ * actually saw. The way forward is explicit: open the next version.
+ */
+function SentBanner({
+  versionNo,
+  status,
+  sentAt,
+  sentBy,
+  locked,
+  nextVersionNo,
+  onNewVersion,
+  onHistory,
+}: {
+  versionNo: number;
+  status: React.ComponentProps<typeof VersionStatusPill>["status"];
+  sentAt: string;
+  sentBy: string;
+  locked: boolean;
+  nextVersionNo: number;
+  onNewVersion: () => void;
+  onHistory: () => void;
+}) {
+  return (
+    <div
+      className={cn(
+        "mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-4 py-3",
+        locked ? "border-hairline bg-surface-alt" : "border-hairline bg-surface",
+      )}
+    >
+      {locked ? (
+        <Lock className="h-4 w-4 shrink-0 text-ink-500" aria-hidden />
+      ) : (
+        <History className="h-4 w-4 shrink-0 text-ink-500" aria-hidden />
+      )}
+
+      <div className="min-w-0">
+        <p className="flex flex-wrap items-center gap-2 text-[13px] font-semibold text-ink-900">
+          Version {versionNo}
+          <VersionStatusPill status={status} />
+        </p>
+        <p className="mt-0.5 text-[11.5px] text-ink-500">
+          {locked
+            ? `Sent by ${sentBy} on ${new Date(sentAt).toLocaleDateString()} — read-only until you open version ${nextVersionNo}.`
+            : `Version ${nextVersionNo} is open for editing. It becomes a new version when you send it for approval.`}
+        </p>
+      </div>
+
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        <button
+          type="button"
+          onClick={onHistory}
+          className="rounded-md border border-hairline bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+        >
+          View history
+        </button>
+        {locked && (
+          <button
+            type="button"
+            onClick={onNewVersion}
+            className="rounded-md bg-brand-700 px-3.5 py-1.5 text-[12.5px] font-semibold text-white hover:bg-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          >
+            Re-cost as version {nextVersionNo}
+          </button>
+        )}
+      </div>
     </div>
   );
 }

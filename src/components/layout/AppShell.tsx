@@ -1,8 +1,9 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Calculator, Settings, HelpCircle, Bell, ChevronDown } from "lucide-react";
+import { Calculator, FileText, Settings, HelpCircle, Bell, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePods } from "@/lib/podsStore";
+import { useAllQuoteDrafts } from "@/lib/quoteDraftStore";
 
 const bottomNav = [
   { title: "Settings", url: "/settings", icon: Settings },
@@ -54,15 +55,23 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => setHydrated(true), []);
   const pods = usePods();
+  const quotations = useAllQuoteDrafts();
   const activePods = pods.filter(
     (p) => p.status === "in_progress" || p.status === "pending_approval",
   ).length;
   const badgeOf = (n: number) => (hydrated && n > 0 ? n : undefined);
-  // Quotation is a STEP of the costing workflow, not a destination beside it —
-  // so it is reached from Costing Report, and the sidebar does not offer a
-  // second, parallel way in.
+  // Quotation is still a STEP of the costing workflow — it is reached from the
+  // Costing Report and nothing here creates one. What the sidebar offers is
+  // the register: a way to FIND a quotation once it exists, which the POD it
+  // was built in cannot do.
   const primaryNav: { title: string; url: string; icon: typeof Calculator; badge?: number }[] = [
     { title: "Costing", url: "/pods", icon: Calculator, badge: badgeOf(activePods) },
+    {
+      title: "Quotations",
+      url: "/quotations",
+      icon: FileText,
+      badge: badgeOf(quotations.length),
+    },
   ];
 
   return (

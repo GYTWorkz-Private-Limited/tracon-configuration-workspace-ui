@@ -34,12 +34,16 @@ import {
   removeItem,
   removeLine,
   setItemFinalCost,
+  setItemSellingPrice,
+  setLineBuild,
   setLineFinalCost,
+  setLineSellingPrice,
   setQuotedLine,
   toggleCollapsed,
   updateLine,
   type QuoteItem,
 } from "@/lib/quoteDraftStore";
+import { logQuotationEvent } from "@/lib/quotationHistory";
 import { CommercialBreakdown } from "./CommercialBreakdown";
 import { QuoteSummary } from "./QuoteSummary";
 import { QuoteLinesTable, type QuoteRow } from "./QuoteLinesTable";
@@ -49,23 +53,61 @@ export function QuoteItemCard({
   podId,
   item,
   index,
+  readOnly = false,
 }: {
   podId: string;
   item: QuoteItem;
   index: number;
+  /**
+   * A version that has been sent is the record of what the buyer received, so
+   * it is shown in full and changed nowhere. Editing resumes when the next
+   * version is opened.
+   */
+  readOnly?: boolean;
 }) {
   return item.kind === "kit" ? (
-    <KitCard podId={podId} item={item} index={index} />
+    <KitCard podId={podId} item={item} index={index} readOnly={readOnly} />
   ) : (
-    <ProductCard podId={podId} item={item} index={index} />
+    <ProductCard podId={podId} item={item} index={index} readOnly={readOnly} />
   );
+}
+
+/* ------------------------------------------------------------------ *
+ * Variants and options
+ * ------------------------------------------------------------------ */
+
+/**
+ * The variant a row is really on.
+ *
+ * A row can be sitting on an option, and an option belongs to a variant — so
+ * the row's variant is the option's parent, not the build itself. This is what
+ * lets the row keep showing its sibling options after one has been picked.
+ */
+function variantOf(builds: BuildRef[], build: BuildRef): BuildRef {
+  if (build.kind === "variant") return build;
+  return builds.find((b) => b.id === build.parentId) ?? build;
+}
+
+/** The options branching off one variant. */
+function optionsOf(builds: BuildRef[], variantId: string): BuildRef[] {
+  return builds.filter((b) => b.kind === "option" && b.parentId === variantId);
 }
 
 /* ================================================================== *
  * Single product
  * ================================================================== */
 
-function ProductCard({ podId, item, index }: { podId: string; item: QuoteItem; index: number }) {
+function ProductCard({
+  podId,
+  item,
+  index,
+  readOnly,
+}: {
+  podId: string;
+  item: QuoteItem;
+  index: number;
+  readOnly: boolean;
+}) {
   const { scenarios, builds } = useArticleSelection(podId, item.articleId);
 
   const rows: QuoteRow[] = useMemo(
@@ -83,8 +125,12 @@ function ProductCard({ podId, item, index }: { podId: string; item: QuoteItem; i
             targetMarginPct: l.targetMarginPct ?? item.targetMarginPct,
             moqOverride: l.moqOverride,
             finalCostOverrideInr: l.finalCostOverrideInr,
+            sellingPriceOverrideUsd: l.sellingPriceOverrideUsd,
           }),
           parentBuild: build.parentId ? builds.find((b) => b.id === build.parentId) : undefined,
+          variant: variantOf(builds, build),
+          options: optionsOf(builds, variantOf(builds, build).id),
+          moqOverridden: l.moqOverride !== undefined,
         };
       }),
     [item, scenarios, builds],
@@ -107,6 +153,7 @@ function ProductCard({ podId, item, index }: { podId: string; item: QuoteItem; i
         subtitle={`${item.size ?? quoted.priced.sizeLabel} · ${quoted.priced.gsm} GSM · ${item.srfRef}`}
         headline={usd(quoted.priced.commercial.sellingUsd)}
         headlineNote="/ pc"
+        readOnly={readOnly}
       />
 
       <div className="border-t border-hairline">
@@ -114,11 +161,18 @@ function ProductCard({ podId, item, index }: { podId: string; item: QuoteItem; i
           rows={rows}
           quotedLineId={quotedId}
           onQuote={(lineId) => setQuotedLine(podId, item.id, lineId)}
-          onRemove={rows.length > 1 ? (lineId) => removeLine(podId, item.id, lineId) : undefined}
+          readOnly={readOnly}
+          onRemove={
+            rows.length > 1 && !readOnly
+              ? (lineId) => removeLine(podId, item.id, lineId)
+              : undefined
+          }
           onMargin={(lineId, marginPct) =>
             updateLine(podId, item.id, lineId, { targetMarginPct: marginPct })
           }
           onMoq={(lineId, moq) => updateLine(podId, item.id, lineId, { moqOverride: moq })}
+          onResetMoq={(lineId) => updateLine(podId, item.id, lineId, { moqOverride: undefined })}
+          onBuild={(lineId, buildId) => setLineBuild(podId, item.id, lineId, buildId)}
         />
       </div>
 
@@ -127,13 +181,15 @@ function ProductCard({ podId, item, index }: { podId: string; item: QuoteItem; i
           Costs are pulled live from Configuration & Costing — only the commercial decisions are
           held here.
         </p>
-        <AddConfigurationMenu
-          scenarios={scenarios}
-          builds={builds}
-          usedKeys={usedKeys}
-          onAdd={(input) => addLine(podId, item.id, input)}
-          onCreateScenario={(s) => addScenario(podId, item.articleId, s)}
-        />
+        {!readOnly && (
+          <AddConfigurationMenu
+            scenarios={scenarios}
+            builds={builds}
+            usedKeys={usedKeys}
+            onAdd={(input) => addLine(podId, item.id, input)}
+            onCreateScenario={(s) => addScenario(podId, item.articleId, s)}
+          />
+        )}
       </div>
 
       <div className="space-y-3 border-t border-hairline bg-canvas p-4">
@@ -144,7 +200,12 @@ function ProductCard({ podId, item, index }: { podId: string; item: QuoteItem; i
           quantity={quoted.priced.moq}
           quantityLabel={`${quoted.priced.moq.toLocaleString("en-IN")} pcs`}
           orderValueUsd={quoted.priced.orderValueUsd}
-          onSaveFinalCost={(v) => setLineFinalCost(podId, item.id, quoted.lineId, v)}
+          onSaveFinalCost={
+            readOnly ? undefined : (v) => setLineFinalCost(podId, item.id, quoted.lineId, v)
+          }
+          onSaveSellingPrice={
+            readOnly ? undefined : (v) => setLineSellingPrice(podId, item.id, quoted.lineId, v)
+          }
         />
       </div>
     </article>
@@ -155,7 +216,17 @@ function ProductCard({ podId, item, index }: { podId: string; item: QuoteItem; i
  * Kit / bundle
  * ================================================================== */
 
-function KitCard({ podId, item, index }: { podId: string; item: QuoteItem; index: number }) {
+function KitCard({
+  podId,
+  item,
+  index,
+  readOnly,
+}: {
+  podId: string;
+  item: QuoteItem;
+  index: number;
+  readOnly: boolean;
+}) {
   // Subscribed once for the whole kit — every member reads off this snapshot,
   // so adding a scenario in Configuration re-prices the set immediately.
   const selections = useCostingSelections();
@@ -175,6 +246,7 @@ function KitCard({ podId, item, index }: { podId: string; item: QuoteItem; index
             targetMarginPct: m.line.targetMarginPct,
             moqOverride: m.line.moqOverride,
             finalCostOverrideInr: m.line.finalCostOverrideInr,
+            sellingPriceOverrideUsd: m.line.sellingPriceOverrideUsd,
             unitsPerSet: m.unitsPerSet,
             name: m.name,
             articleId: m.articleId,
@@ -186,6 +258,7 @@ function KitCard({ podId, item, index }: { podId: string; item: QuoteItem; index
           targetMarginPct: item.targetMarginPct,
           sets: item.sets,
           finalCostOverrideInr: item.finalCostOverrideInr,
+          sellingPriceOverrideUsd: item.sellingPriceOverrideUsd,
         },
       ),
     [podId, item, selections],
@@ -198,6 +271,9 @@ function KitCard({ podId, item, index }: { podId: string; item: QuoteItem; index
       lineId: m.line.id,
       priced: kit.members[i],
       parentBuild: build.parentId ? builds.find((b) => b.id === build.parentId) : undefined,
+      variant: variantOf(builds, build),
+      options: optionsOf(builds, variantOf(builds, build).id),
+      moqOverridden: m.line.moqOverride !== undefined,
       leading: { name: m.name, image: m.image, size: m.size, unitsPerSet: m.unitsPerSet },
     };
   });
@@ -215,6 +291,7 @@ function KitCard({ podId, item, index }: { podId: string; item: QuoteItem; index
         subtitle={`${item.members.map((m) => m.name).join(" + ")} · ${item.members.length} article${item.members.length === 1 ? "" : "s"} per set`}
         headline={usd(kit.commercial.sellingUsd)}
         headlineNote="/ set"
+        readOnly={readOnly}
         onToggle={() => toggleCollapsed(podId, item.id)}
         collapsed={collapsed}
       />
@@ -233,12 +310,17 @@ function KitCard({ podId, item, index }: { podId: string; item: QuoteItem; index
           <div className="border-t border-hairline">
             <QuoteLinesTable
               rows={rows}
+              readOnly={readOnly}
               showQuoteColumn={false}
               identityHeader="Article in this set"
               onMargin={(lineId, marginPct) =>
                 updateLine(podId, item.id, lineId, { targetMarginPct: marginPct })
               }
               onMoq={(lineId, moq) => updateLine(podId, item.id, lineId, { moqOverride: moq })}
+              onResetMoq={(lineId) =>
+                updateLine(podId, item.id, lineId, { moqOverride: undefined })
+              }
+              onBuild={(lineId, buildId) => setLineBuild(podId, item.id, lineId, buildId)}
             />
           </div>
 
@@ -256,7 +338,10 @@ function KitCard({ podId, item, index }: { podId: string; item: QuoteItem; index
               quantity={kit.sets}
               quantityLabel={`${kit.sets.toLocaleString("en-IN")} sets`}
               orderValueUsd={kit.orderValueUsd}
-              onSaveFinalCost={(v) => setItemFinalCost(podId, item.id, v)}
+              onSaveFinalCost={readOnly ? undefined : (v) => setItemFinalCost(podId, item.id, v)}
+              onSaveSellingPrice={
+                readOnly ? undefined : (v) => setItemSellingPrice(podId, item.id, v)
+              }
             />
           </div>
         </>
@@ -363,6 +448,7 @@ function CardHeader({
   headlineNote,
   onToggle,
   collapsed,
+  readOnly,
 }: {
   podId: string;
   item: QuoteItem;
@@ -374,6 +460,7 @@ function CardHeader({
   headlineNote: string;
   onToggle?: () => void;
   collapsed?: boolean;
+  readOnly?: boolean;
 }) {
   const isKit = item.kind === "kit";
 
@@ -441,18 +528,30 @@ function CardHeader({
           <div className="text-[10.5px] text-ink-400">{headlineNote}</div>
         </div>
         <div className="flex flex-col gap-1">
+          {/* Re-costing is a real move at this stage: the buyer has pushed
+              back and the article has to be built differently. It goes back to
+              Configuration — the quotation never re-costs anything itself —
+              and says so in the audit before it leaves. */}
           <Link
             to="/config/$podId/$articleId"
             params={{ podId, articleId: item.articleId }}
             search={{ sel: undefined }}
-            title="Open this article in Configuration & Costing"
-            className="rounded p-1.5 text-ink-400 hover:bg-surface-alt hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            onClick={() =>
+              logQuotationEvent(
+                podId,
+                "recost_requested",
+                `${item.name} sent back to Configuration & Costing to be re-costed`,
+              )
+            }
+            title="Re-cost this article in Configuration & Costing"
+            className="inline-flex items-center gap-1 rounded border border-hairline bg-surface px-1.5 py-1 text-[10.5px] font-medium text-ink-600 hover:bg-surface-alt hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
           >
             <Settings2 className="h-3.5 w-3.5" />
-            <span className="sr-only">Open in Configuration</span>
+            Re-cost
           </Link>
           <button
             type="button"
+            hidden={readOnly}
             onClick={() => removeItem(podId, item.id)}
             aria-label={`Remove ${item.name} from this quotation`}
             className="rounded p-1.5 text-ink-300 hover:bg-surface-alt hover:text-[#8f2c22] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"

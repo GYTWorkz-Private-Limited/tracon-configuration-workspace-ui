@@ -62,6 +62,8 @@ export type PricingRequest = {
    * to is replaced, and selling price and margin follow from it as usual.
    */
   finalCostOverrideInr?: number;
+  /** selling price fixed by hand, $ / pc — margin is then derived from it */
+  sellingPriceOverrideUsd?: number;
 };
 
 /**
@@ -188,6 +190,7 @@ export function priceLine(req: PricingRequest): PricedLine {
     targetMarginPct: marginPct,
     buyerTargetUsd: commercialInputs.buyerTargetUsd,
     finalCostOverrideInr: req.finalCostOverrideInr,
+    sellingPriceOverrideUsd: req.sellingPriceOverrideUsd,
   });
 
   const moq = moqOf(variant.parameters);
@@ -253,6 +256,8 @@ export function priceKit(
     sets?: number;
     /** total cost fixed by hand for the SET, ₹ / set */
     finalCostOverrideInr?: number;
+    /** selling price fixed by hand for the SET, $ / set */
+    sellingPriceOverrideUsd?: number;
   },
 ): PricedKit {
   const priced = members.map((m) => ({
@@ -278,6 +283,7 @@ export function priceKit(
       targetMarginPct: marginPct,
       buyerTargetUsd: Math.round(buyerTargetUsd * 100) / 100,
       finalCostOverrideInr: opts.finalCostOverrideInr,
+      sellingPriceOverrideUsd: opts.sellingPriceOverrideUsd,
     },
   );
 

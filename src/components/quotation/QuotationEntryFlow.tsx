@@ -15,7 +15,7 @@ import { useEffect, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
 import { usePod } from "@/lib/podsStore";
 import { isReadyIn, useReadiness } from "@/lib/quotationReadiness";
-import { startQuotation } from "@/lib/quoteDraftStore";
+import { startQuotation, useQuoteDraft } from "@/lib/quoteDraftStore";
 import { QuotationModeModal, type QuotationMode } from "./QuotationModeModal";
 import { ArticleSelectionModal } from "./ArticleSelectionModal";
 
@@ -36,6 +36,7 @@ export function QuotationEntryFlow({
   const navigate = useNavigate();
   const pod = usePod(podId);
   const readiness = useReadiness();
+  const draft = useQuoteDraft(podId);
   const [step, setStep] = useState<"mode" | "items">("mode");
 
   // Every fresh entry starts at the first question, never half-way through the
@@ -46,7 +47,29 @@ export function QuotationEntryFlow({
 
   const articles = pod?.articles ?? [];
   const singleAvailable = Boolean(articleId && isReadyIn(readiness, podId, articleId));
-  const eligibleCount = articles.filter((a) => isReadyIn(readiness, podId, a.id)).length;
+  const eligible = articles.filter((a) => isReadyIn(readiness, podId, a.id));
+  const eligibleCount = eligible.length;
+
+  const quotedIds = new Set((draft?.items ?? []).map((i) => i.articleId));
+
+  /**
+   * Everything quotable is already on the quotation, so there is nothing to
+   * decide — asking "single or multiple?" about a set that cannot change is a
+   * question with one answer. Go straight to the quotation instead.
+   */
+  const nothingLeftToChoose =
+    eligibleCount > 0 && quotedIds.size > 0 && eligible.every((a) => quotedIds.has(a.id));
+
+  useEffect(() => {
+    if (!open || !nothingLeftToChoose) return;
+    onClose();
+    navigate({
+      to: "/quotation/$podId/$articleId",
+      params: { podId, articleId: articleId ?? eligible[0].id },
+      search: { sel: undefined },
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [open, nothingLeftToChoose]);
 
   /** Open the quotation holding exactly the chosen items. */
   const go = (ids: string[], mode: QuotationMode) => {
@@ -64,7 +87,7 @@ export function QuotationEntryFlow({
     });
   };
 
-  if (!open) return null;
+  if (!open || nothingLeftToChoose) return null;
 
   return (
     <>

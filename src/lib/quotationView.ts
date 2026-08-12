@@ -55,6 +55,7 @@ export function viewQuote(
           targetMarginPct: m.line.targetMarginPct,
           moqOverride: m.line.moqOverride,
           finalCostOverrideInr: m.line.finalCostOverrideInr,
+          sellingPriceOverrideUsd: m.line.sellingPriceOverrideUsd,
           unitsPerSet: m.unitsPerSet,
           name: m.name,
           articleId: m.articleId,
@@ -65,6 +66,7 @@ export function viewQuote(
           targetMarginPct: item.targetMarginPct,
           sets: item.sets,
           finalCostOverrideInr: item.finalCostOverrideInr,
+          sellingPriceOverrideUsd: item.sellingPriceOverrideUsd,
         },
       );
       return { kind: "kit", item, priced };
@@ -80,6 +82,7 @@ export function viewQuote(
       targetMarginPct: line.targetMarginPct ?? item.targetMarginPct,
       moqOverride: line.moqOverride,
       finalCostOverrideInr: line.finalCostOverrideInr,
+      sellingPriceOverrideUsd: line.sellingPriceOverrideUsd,
     });
     return { kind: "product", item, priced };
   });
