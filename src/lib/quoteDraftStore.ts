@@ -781,7 +781,16 @@ export function rejectItem(quotationId: string, itemId: string, reason: string) 
 }
 
 /** What is going back: which configurations of which articles. */
-export type RejectSelection = { itemId: string; lineIds: string[] }[];
+export type RejectSelection = {
+  itemId: string;
+  lineIds: string[];
+  /**
+   * Kits only: which member ARTICLES are to be re-costed. The kit's own lines
+   * always freeze whole — it is priced as one set — but the ask that reaches
+   * Costing should name only the articles actually in question.
+   */
+  articleIds?: string[];
+}[];
 
 /**
  * Send specific configurations back for recosting.
@@ -791,7 +800,8 @@ export type RejectSelection = { itemId: string; lineIds: string[] }[];
  * stay quotable. The article-level flag is kept as the summary of that, because
  * whether the quotation is blocked is an article-level question.
  *
- * A kit goes back whole: its members are priced as one set.
+ * A kit's pricing goes back whole — its members are priced as one set — but the
+ * recosting ask still names only the member articles that were selected.
  */
 export function rejectSelection(quotationId: string, selection: RejectSelection, reason: string) {
   const quote = state[quotationId];
@@ -800,17 +810,30 @@ export function rejectSelection(quotationId: string, selection: RejectSelection,
   const trimmed = reason.trim();
   const named: string[] = [];
 
-  for (const { itemId, lineIds } of selection) {
+  for (const { itemId, lineIds, articleIds: picked } of selection) {
     const item = quote.items.find((i) => i.id === itemId);
     if (!item) continue;
+
+    const members = item.kind === "kit" ? item.members : [];
+    const articleIds =
+      item.kind === "kit"
+        ? picked?.length
+          ? picked
+          : members.map((m) => m.articleId)
+        : [item.articleId];
+
     named.push(
-      item.kind === "kit" || lineIds.length === item.lines.length
-        ? item.name
-        : `${item.name} (${lineIds.length} of ${item.lines.length} configurations)`,
+      item.kind === "kit"
+        ? articleIds.length === members.length
+          ? item.name
+          : `${item.name} (${articleIds
+              .map((id) => members.find((m) => m.articleId === id)?.name ?? id)
+              .join(", ")})`
+        : lineIds.length === item.lines.length
+          ? item.name
+          : `${item.name} (${lineIds.length} of ${item.lines.length} configurations)`,
     );
 
-    const articleIds =
-      item.kind === "kit" ? item.members.map((m) => m.articleId) : [item.articleId];
     for (const articleId of articleIds) {
       requestRecost({ podId: quote.podId, articleId, quotationId, reason: trimmed });
     }
