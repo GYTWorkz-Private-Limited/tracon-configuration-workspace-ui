@@ -29,6 +29,8 @@ import { BASE_BUILD, buildsFor } from "./costingSelectionStore";
 import type { ProvisionRates } from "./commercialProvisions";
 import { isReadyForQuotation } from "./quotationReadiness";
 import { logQuotationEvent } from "./quotationHistory";
+import { clearRecost, requestRecost } from "./recostingStore";
+import { markReadyForQuotation } from "./quotationReadiness";
 
 /** One configured, quotable line: a scenario/variant/option at a quantity. */
 export type QuoteLine = {
@@ -716,33 +718,94 @@ export function setLineBuild(quotationId: string, itemId: string, lineId: string
  * quotation records that it asked, and the costing team answers on their own
  * screens. That is the whole reason this is a flag and a reason, not an edit.
  */
-export function rejectItem(quotationId: string, itemId: string, reason: string) {
-  const item = itemOf(quotationId, itemId);
-  if (!item) return;
+export function rejectItems(quotationId: string, itemIds: string[], reason: string) {
+  const quote = state[quotationId];
+  if (!quote || itemIds.length === 0) return;
+  const going = quote.items.filter((i) => itemIds.includes(i.id));
+  if (going.length === 0) return;
+
+  const trimmed = reason.trim();
   logQuotationEvent(
     quotationId,
     "line_rejected",
-    `${item.name} sent back for recosting — ${reason.trim()}`,
+    `${going.map((i) => i.name).join(", ")} sent back for recosting — ${trimmed}`,
   );
+
+  // The costing team has to see this on their own screens, so the status —
+  // never a number — travels back with the reason. A kit asks for every
+  // article in it, because a set cannot be re-costed in halves.
+  for (const item of going) {
+    const articleIds =
+      item.kind === "kit" ? item.members.map((m) => m.articleId) : [item.articleId];
+    for (const articleId of articleIds) {
+      requestRecost({ podId: quote.podId, articleId, quotationId, reason: trimmed });
+    }
+  }
+
   write(quotationId, (d) => ({
     ...d,
     items: d.items.map((i) =>
-      i.id === itemId
-        ? { ...i, rejected: { at: stamp(), by: "Gautam Kitclu", reason: reason.trim() } }
+      itemIds.includes(i.id)
+        ? { ...i, rejected: { at: stamp(), by: "Gautam Kitclu", reason: trimmed } }
         : i,
     ),
   }));
 }
 
-/** Withdraw the request — the costing came back and the line can be quoted. */
+/** One line — the card-level shortcut onto the same path. */
+export function rejectItem(quotationId: string, itemId: string, reason: string) {
+  rejectItems(quotationId, [itemId], reason);
+}
+
+/** Withdraw the request — the costing came back, or it was rejected by mistake. */
 export function clearRejection(quotationId: string, itemId: string) {
-  const item = itemOf(quotationId, itemId);
-  if (!item?.rejected) return;
+  const quote = state[quotationId];
+  const item = quote?.items.find((i) => i.id === itemId);
+  if (!quote || !item?.rejected) return;
   logQuotationEvent(quotationId, "line_rejected", `${item.name} returned to the quotation`);
+
+  // Undoing a rejection puts the article back where it was: no longer waiting
+  // on Costing, and quotable again — otherwise "undo" would leave the article
+  // stranded outside the quotation it is still on.
+  const articleIds = item.kind === "kit" ? item.members.map((m) => m.articleId) : [item.articleId];
+  for (const articleId of articleIds) {
+    clearRecost(quote.podId, articleId);
+    markReadyForQuotation(quote.podId, articleId);
+  }
+
   write(quotationId, (d) => ({
     ...d,
     items: d.items.map((i) => (i.id === itemId ? { ...i, rejected: undefined } : i)),
   }));
+}
+
+/**
+ * The costing came back: put the article's line back on its quotation.
+ *
+ * The other half of `rejectItems`. Without it, re-costing an article and
+ * marking it ready would clear the ask on the Costing side while the quotation
+ * stayed blocked on a line nobody could unblock from there — the loop has to
+ * close in both directions.
+ */
+export function resolveRejectionForArticle(podId: string, articleId: string) {
+  for (const quote of Object.values(state)) {
+    if (quote.podId !== podId) continue;
+    const item = quote.items.find(
+      (i) =>
+        Boolean(i.rejected) &&
+        (i.articleId === articleId || i.members.some((m) => m.articleId === articleId)),
+    );
+    if (!item) continue;
+    logQuotationEvent(
+      quote.id,
+      "line_rejected",
+      `${item.name} re-costed and back on ${quote.id}`,
+    );
+    write(quote.id, (d) => ({
+      ...d,
+      items: d.items.map((i) => (i.id === item.id ? { ...i, rejected: undefined } : i)),
+    }));
+  }
 }
 
 /**

@@ -13,7 +13,7 @@
  * off — but undoing it is a quiet secondary affordance, not the main path.
  */
 
-import { ArrowRight, CheckCircle2, RotateCcw, Send } from "lucide-react";
+import { ArrowRight, CheckCircle2, RotateCcw, Send, TriangleAlert } from "lucide-react";
 import { toast } from "sonner";
 import {
   NOT_READY_LABEL,
@@ -22,6 +22,8 @@ import {
   markReadyForQuotation,
   useIsReadyForQuotation,
 } from "@/lib/quotationReadiness";
+import { RECOSTING_LABEL, clearRecost, useRecostRequest } from "@/lib/recostingStore";
+import { resolveRejectionForArticle } from "@/lib/quoteDraftStore";
 
 export function QuotationReadyAction({
   podId,
@@ -35,23 +37,49 @@ export function QuotationReadyAction({
   onGenerate: () => void;
 }) {
   const ready = useIsReadyForQuotation(podId, articleId);
+  const recost = useRecostRequest(podId, articleId);
   const disabled = !podId || !articleId;
 
   if (!ready) {
     return (
-      <button
-        type="button"
-        disabled={disabled}
-        onClick={() => {
-          if (!podId || !articleId) return;
-          markReadyForQuotation(podId, articleId);
-          toast.success(`${articleName} is ${READY_LABEL}`);
-        }}
-        title="Confirm this configuration and costing are ready to be quoted"
-        className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-      >
-        <CheckCircle2 className="h-4 w-4" /> Mark as Ready
-      </button>
+      <>
+        {/* A quotation has asked for this costing to be redone. Costing sees
+            it here, on the screen where the answer is given. */}
+        {recost && (
+          <span
+            title={recost.reason}
+            className="inline-flex max-w-[280px] items-center gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-[12.5px] font-medium text-amber-900"
+          >
+            <TriangleAlert className="h-4 w-4 shrink-0" aria-hidden />
+            <span className="truncate">
+              {RECOSTING_LABEL} · {recost.quotationId}
+            </span>
+          </span>
+        )}
+        <button
+          type="button"
+          disabled={disabled}
+          onClick={() => {
+            if (!podId || !articleId) return;
+            // Marking it ready again IS the answer to the request, so the ask
+            // is cleared by the same act rather than needing a second one —
+            // and the quotation that asked stops being blocked by it.
+            clearRecost(podId, articleId);
+            resolveRejectionForArticle(podId, articleId);
+            markReadyForQuotation(podId, articleId);
+            toast.success(`${articleName} is ${READY_LABEL}`);
+          }}
+          title={
+            recost
+              ? "Re-costed — mark it ready and the quotation is unblocked"
+              : "Confirm this configuration and costing are ready to be quoted"
+          }
+          className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+        >
+          <CheckCircle2 className="h-4 w-4" />{" "}
+          {recost ? "Re-costed — Mark as Ready" : "Mark as Ready"}
+        </button>
+      </>
     );
   }
 

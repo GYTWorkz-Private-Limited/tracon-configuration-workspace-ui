@@ -17,6 +17,7 @@ import { ArrowRight, Boxes, Check, Info, Lock, Package, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ARTICLE_STATUS_LABEL, type Article } from "@/lib/podsStore";
 import { NOT_READY_LABEL, READY_LABEL, isReadyIn, useReadiness } from "@/lib/quotationReadiness";
+import { RECOSTING_LABEL, recostRequestIn, useRecostRequests } from "@/lib/recostingStore";
 
 export function ArticleSelectionModal({
   open,
@@ -41,6 +42,7 @@ export function ArticleSelectionModal({
   preselect?: string[];
 }) {
   const readiness = useReadiness();
+  const recosts = useRecostRequests();
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -49,9 +51,10 @@ export function ArticleSelectionModal({
       articles.map((a) => {
         const ready = isReadyIn(readiness, podId, a.id);
         const quoted = alreadyQuotedIds?.has(a.id) ?? false;
-        return { article: a, ready, quoted, selectable: ready && !quoted };
+        const recost = recostRequestIn(recosts, podId, a.id);
+        return { article: a, ready, quoted, recost, selectable: ready && !quoted };
       }),
-    [articles, readiness, podId, alreadyQuotedIds],
+    [articles, readiness, recosts, podId, alreadyQuotedIds],
   );
 
   // Opening fresh must not resurrect a stale tick, and the article the user
@@ -194,6 +197,7 @@ function ArticleRow({
   article,
   ready,
   quoted,
+  recost,
   selectable,
   checked,
   onToggle,
@@ -201,6 +205,8 @@ function ArticleRow({
   article: Article;
   ready: boolean;
   quoted: boolean;
+  /** a quotation is waiting on this article being re-costed */
+  recost?: { reason: string; quotationId: string };
   selectable: boolean;
   checked: boolean;
   onToggle: () => void;
@@ -291,8 +297,17 @@ function ArticleRow({
         )}
       </span>
 
-      <span className="shrink-0 self-start">
+      <span className="shrink-0 self-start text-right">
         <StatusPill ready={ready} quoted={quoted} />
+        {/* Not ready is a fact; WHY it is not ready is what the user needs. */}
+        {recost && (
+          <span
+            title={recost.reason}
+            className="mt-1 block max-w-[170px] truncate text-[10.5px] font-medium text-amber-900"
+          >
+            {RECOSTING_LABEL} · {recost.quotationId}
+          </span>
+        )}
       </span>
     </>
   );

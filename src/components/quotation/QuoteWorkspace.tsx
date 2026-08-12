@@ -254,6 +254,9 @@ export function QuoteWorkspace({
                   item={item}
                   index={i}
                   readOnly={locked}
+                  // On an article's own page the quotation may hold more; a
+                  // rejection can still name any of them.
+                  siblings={quotation!.items}
                 />
               ))}
             </div>

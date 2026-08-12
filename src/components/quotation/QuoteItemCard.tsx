@@ -38,7 +38,7 @@ import {
   setItemSellingPrice,
   setLineBuild,
   clearRejection,
-  rejectItem,
+  rejectItems,
   setLineFinalCost,
   setLineSellingPrice,
   setQuotedLine,
@@ -47,6 +47,8 @@ import {
   type QuoteItem,
 } from "@/lib/quoteDraftStore";
 import { logQuotationEvent } from "@/lib/quotationHistory";
+import { OverrideDialog, type OverrideResult } from "./OverrideDialog";
+import { RejectDialog } from "./RejectDialog";
 import { CommercialBreakdown } from "./CommercialBreakdown";
 import { QuoteSummary } from "./QuoteSummary";
 import { QuoteLinesTable, type QuoteRow } from "./QuoteLinesTable";
@@ -59,6 +61,7 @@ export function QuoteItemCard({
   index,
   readOnly = false,
   showSummary = true,
+  siblings = [],
 }: {
   /** the POD the article is costed in — where scenarios and variants come from */
   podId: string;
@@ -77,8 +80,14 @@ export function QuoteItemCard({
    * combined summary at the end instead of a summary under every article.
    */
   showSummary?: boolean;
+  /**
+   * Everything on the quotation. A rejection is usually about the quotation
+   * rather than the card it started from, so the card has to be able to offer
+   * the others.
+   */
+  siblings?: QuoteItem[];
 }) {
-  const shared = { podId, quotationId, item, index, readOnly, showSummary };
+  const shared = { podId, quotationId, item, index, readOnly, showSummary, siblings };
   return item.kind === "kit" ? <KitCard {...shared} /> : <ProductCard {...shared} />;
 }
 
@@ -89,6 +98,7 @@ type CardProps = {
   index: number;
   readOnly: boolean;
   showSummary: boolean;
+  siblings: QuoteItem[];
 };
 
 /* ------------------------------------------------------------------ *
@@ -112,11 +122,53 @@ function optionsOf(builds: BuildRef[], variantId: string): BuildRef[] {
   return builds.filter((b) => b.kind === "option" && b.parentId === variantId);
 }
 
+/**
+ * Apply an override set through the SAME store actions the table cells use.
+ *
+ * One place, so a figure changed from the dialog and the same figure changed
+ * inline can never take different paths into the quotation.
+ */
+function applyOverrides(
+  quotationId: string,
+  item: QuoteItem,
+  { lineId, set, cleared }: OverrideResult,
+) {
+  const isKit = item.kind === "kit";
+  if (set.moq !== undefined) updateLine(quotationId, item.id, lineId, { moqOverride: set.moq });
+  if (set.marginPct !== undefined) {
+    updateLine(quotationId, item.id, lineId, { targetMarginPct: set.marginPct });
+  }
+
+  const setFinalCost = (v: number | undefined) =>
+    isKit
+      ? setItemFinalCost(quotationId, item.id, v)
+      : setLineFinalCost(quotationId, item.id, lineId, v);
+
+  const setSelling = (v: number | undefined) =>
+    isKit
+      ? setItemSellingPrice(quotationId, item.id, v)
+      : setLineSellingPrice(quotationId, item.id, lineId, v);
+
+  if (cleared.includes("finalCostInr")) setFinalCost(undefined);
+  else if (set.finalCostInr !== undefined) setFinalCost(set.finalCostInr);
+
+  if (cleared.includes("sellingUsd")) setSelling(undefined);
+  else if (set.sellingUsd !== undefined) setSelling(set.sellingUsd);
+}
+
 /* ================================================================== *
  * Single product
  * ================================================================== */
 
-function ProductCard({ podId, quotationId, item, index, readOnly, showSummary }: CardProps) {
+function ProductCard({
+  podId,
+  quotationId,
+  item,
+  index,
+  readOnly,
+  showSummary,
+  siblings,
+}: CardProps) {
   const { scenarios, builds } = useArticleSelection(podId, item.articleId);
 
   const rows: QuoteRow[] = useMemo(
@@ -169,6 +221,7 @@ function ProductCard({ podId, quotationId, item, index, readOnly, showSummary }:
   const quotedId = item.quotedLineId ?? rows[0]?.lineId;
   const quoted = rows.find((r) => r.lineId === quotedId) ?? rows[0];
   const usedKeys = new Set(item.lines.map((l) => `${l.scenarioId}::${l.buildId}`));
+  const [overriding, setOverriding] = useState(false);
 
   if (!quoted) return null;
 
@@ -185,7 +238,23 @@ function ProductCard({ podId, quotationId, item, index, readOnly, showSummary }:
         headline={usd(quoted.priced.commercial.sellingUsd)}
         headlineNote="/ pc"
         readOnly={readOnly}
+        onOverride={() => setOverriding(true)}
+        siblings={siblings.length > 0 ? siblings : [item]}
       />
+
+      {overriding && (
+        <OverrideDialog
+          articleName={item.name}
+          rows={rows}
+          initialLineId={quoted.lineId}
+          isKit={false}
+          onClose={() => setOverriding(false)}
+          onSave={(result) => {
+            applyOverrides(quotationId, item, result);
+            setOverriding(false);
+          }}
+        />
+      )}
 
       <div className="border-t border-hairline">
         <QuoteLinesTable
@@ -255,7 +324,7 @@ function ProductCard({ podId, quotationId, item, index, readOnly, showSummary }:
  * Kit / bundle
  * ================================================================== */
 
-function KitCard({ podId, quotationId, item, index, readOnly, showSummary }: CardProps) {
+function KitCard({ podId, quotationId, item, index, readOnly, showSummary, siblings }: CardProps) {
   // Subscribed once for the whole kit — every member reads off this snapshot,
   // so adding a scenario in Configuration re-prices the set immediately.
   const selections = useCostingSelections();
@@ -308,6 +377,7 @@ function KitCard({ podId, quotationId, item, index, readOnly, showSummary }: Car
   });
 
   const collapsed = item.collapsed;
+  const [overriding, setOverriding] = useState(false);
 
   return (
     <article className="overflow-hidden rounded-xl border-2 border-[var(--color-cfg)] bg-surface shadow-sm">
@@ -322,9 +392,36 @@ function KitCard({ podId, quotationId, item, index, readOnly, showSummary }: Car
         headline={usd(kit.commercial.sellingUsd)}
         headlineNote="/ set"
         readOnly={readOnly}
+        onOverride={() => setOverriding(true)}
+        siblings={siblings.length > 0 ? siblings : [item]}
         onToggle={() => toggleCollapsed(quotationId, item.id)}
         collapsed={collapsed}
       />
+
+      {overriding && (
+        <OverrideDialog
+          articleName={item.name}
+          // A kit is one commercial position, so the set's own figures are what
+          // can be overridden — not each member's.
+          rows={[
+            {
+              lineId: rows[0]?.lineId ?? item.id,
+              priced: {
+                ...kit.members[0],
+                commercial: kit.commercial,
+                moq: kit.sets,
+              } as QuoteRow["priced"],
+            },
+          ]}
+          initialLineId={rows[0]?.lineId ?? item.id}
+          isKit
+          onClose={() => setOverriding(false)}
+          onSave={(result) => {
+            applyOverrides(quotationId, item, result);
+            setOverriding(false);
+          }}
+        />
+      )}
 
       {collapsed ? (
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 border-t border-hairline bg-surface-alt/40 px-4 py-3 text-[12px]">
@@ -488,6 +585,8 @@ function CardHeader({
   onToggle,
   collapsed,
   readOnly,
+  onOverride,
+  siblings,
 }: {
   podId: string;
   quotationId: string;
@@ -501,10 +600,13 @@ function CardHeader({
   onToggle?: () => void;
   collapsed?: boolean;
   readOnly?: boolean;
+  /** open the article's override dialog */
+  onOverride: () => void;
+  /** every item on the quotation, so a rejection can name its own scope */
+  siblings: QuoteItem[];
 }) {
   const isKit = item.kind === "kit";
   const [rejecting, setRejecting] = useState(false);
-  const [reason, setReason] = useState("");
 
   return (
     <header
@@ -625,6 +727,16 @@ function CardHeader({
           {!readOnly && !item.rejected && (
             <button
               type="button"
+              onClick={onOverride}
+              title="Override this article's quoted figures"
+              className="rounded border border-hairline bg-surface px-1.5 py-1 text-[10.5px] font-medium text-ink-600 hover:bg-surface-alt hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              Override
+            </button>
+          )}
+          {!readOnly && !item.rejected && (
+            <button
+              type="button"
               onClick={() => setRejecting(true)}
               className="rounded px-1.5 py-1 text-[10.5px] font-medium text-[#8f2c22] hover:bg-[#8f2c22]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
             >
@@ -643,67 +755,19 @@ function CardHeader({
         </div>
       </div>
 
-      {/* Rejecting is a request to another team, so it carries a reason —
-          "this needs recosting" without saying why is a round trip nobody can
-          answer. */}
+      {/* Rejecting asks what is going back before anything moves — most
+          push-back is on the quotation, not on the one card that was clicked. */}
       {rejecting && (
-        <div
-          role="dialog"
-          aria-modal="true"
-          aria-label={`Reject ${item.name} for recosting`}
-          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
-        >
-          <button
-            className="absolute inset-0 bg-ink-900/40"
-            aria-label="Cancel"
-            onClick={() => setRejecting(false)}
-          />
-          <div className="relative w-full max-w-[460px] rounded-xl border border-hairline bg-surface p-5 shadow-2xl">
-            <h2 className="text-[15px] font-semibold text-ink-900">
-              Reject {item.name} for recosting
-            </h2>
-            <p className="mt-1.5 text-[12.5px] text-ink-500">
-              It stays on the quotation, frozen, and the quotation cannot be sent until it comes
-              back. Nothing is written into Costing — this records the ask.
-            </p>
-            <label
-              htmlFor={`reject-${item.id}`}
-              className="mt-3 block text-[11.5px] font-medium text-ink-700"
-            >
-              Reason
-            </label>
-            <textarea
-              id={`reject-${item.id}`}
-              rows={3}
-              autoFocus
-              value={reason}
-              onChange={(e) => setReason(e.target.value)}
-              placeholder="What has to change before this can be quoted?"
-              className="mt-1 w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-[12.5px] text-ink-900 placeholder:text-ink-400 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-700/20"
-            />
-            <div className="mt-4 flex justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setRejecting(false)}
-                className="rounded-md border border-hairline bg-surface px-3.5 py-2 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt"
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                disabled={!reason.trim()}
-                onClick={() => {
-                  rejectItem(quotationId, item.id, reason);
-                  setReason("");
-                  setRejecting(false);
-                }}
-                className="rounded-md bg-[#8f2c22] px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-[#7a251c] disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                Confirm
-              </button>
-            </div>
-          </div>
-        </div>
+        <RejectDialog
+          quotationId={quotationId}
+          items={siblings}
+          preselect={[item.id]}
+          onClose={() => setRejecting(false)}
+          onConfirm={(ids, reason) => {
+            rejectItems(quotationId, ids, reason);
+            setRejecting(false);
+          }}
+        />
       )}
     </header>
   );

@@ -301,6 +301,7 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
                     item={item}
                     index={i}
                     readOnly={locked}
+                    siblings={items}
                     // One quotation, one summary — at the end, over everything.
                     showSummary={false}
                   />

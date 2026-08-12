@@ -171,6 +171,11 @@ function QuotationsList() {
                           <Pencil className="h-3 w-3" aria-hidden /> Draft
                         </span>
                       )}
+                      {r.draft.items.some((i) => i.rejected) && (
+                        <span className="mt-1 flex items-center gap-1 text-[11px] font-medium text-amber-900">
+                          Waiting on recosting
+                        </span>
+                      )}
                       {r.locked && (
                         <span className="mt-1 flex items-center gap-1 text-[11px] text-ink-400">
                           <Lock className="h-3 w-3" aria-hidden /> Read-only
