@@ -4,7 +4,8 @@
 // build. The percentage is the selling-price delta against the base scenario,
 // which is what a commercial team actually compares positions on.
 
-import { MoreVertical, X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Scenario } from "@/lib/scenarios";
 
@@ -15,9 +16,20 @@ type Props = {
   delta: (id: string) => number | null;
   onSelect: (id: string) => void;
   onClose: (id: string) => void;
+  /** standard positions not yet open on this article */
+  available?: Scenario[];
+  onAdd?: (scenario: Scenario) => void;
 };
 
-export function ScenarioBar({ scenarios, activeId, delta, onSelect, onClose }: Props) {
+export function ScenarioBar({
+  scenarios,
+  activeId,
+  delta,
+  onSelect,
+  onClose,
+  available = [],
+  onAdd,
+}: Props) {
   return (
     <div className="relative flex shrink-0 items-stretch border-b border-hairline bg-surface">
       <div className="flex shrink-0 items-center gap-2 border-r border-hairline px-4">
@@ -95,15 +107,73 @@ export function ScenarioBar({ scenarios, activeId, delta, onSelect, onClose }: P
         })}
       </div>
 
-      <div className="flex shrink-0 items-center border-l border-hairline px-2">
-        <button
-          type="button"
-          aria-label="Scenario options"
-          className="rounded-md p-1.5 text-ink-400 transition-colors hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-        >
-          <MoreVertical className="h-4 w-4" />
-        </button>
-      </div>
+      {onAdd && <AddScenarioMenu available={available} onAdd={onAdd} />}
+    </div>
+  );
+}
+
+/**
+ * Opening a scenario is opening a costing POSITION, not a filter — so the menu
+ * offers the standard positions the business quotes on, and whatever is opened
+ * here is what Quotation will later be able to choose between.
+ */
+function AddScenarioMenu({
+  available,
+  onAdd,
+}: {
+  available: Scenario[];
+  onAdd: (s: Scenario) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => e.key === "Escape" && setOpen(false);
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+
+  return (
+    <div className="relative flex shrink-0 items-center border-l border-hairline px-2" ref={ref}>
+      <button
+        type="button"
+        onClick={() => setOpen((o) => !o)}
+        disabled={available.length === 0}
+        aria-expanded={open}
+        aria-haspopup="true"
+        title={available.length ? "Add a costing scenario" : "Every standard scenario is open"}
+        className="inline-flex items-center gap-1 rounded-md px-2 py-1.5 text-[12px] font-medium text-ink-600 transition-colors hover:bg-surface-alt hover:text-ink-900 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+      >
+        <Plus className="h-3.5 w-3.5" aria-hidden /> Scenario
+      </button>
+
+      {open && (
+        <ul className="absolute right-2 top-full z-30 mt-1 w-[260px] overflow-hidden rounded-lg border border-hairline bg-surface py-1 shadow-lg">
+          {available.map((s) => (
+            <li key={s.id}>
+              <button
+                type="button"
+                onClick={() => {
+                  onAdd(s);
+                  setOpen(false);
+                }}
+                className="w-full px-3 py-2 text-left hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
+              >
+                <span className="block text-[12.5px] font-medium text-ink-900">{s.name}</span>
+                <span className="block text-[11px] text-ink-500">{s.subtitle}</span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
     </div>
   );
 }

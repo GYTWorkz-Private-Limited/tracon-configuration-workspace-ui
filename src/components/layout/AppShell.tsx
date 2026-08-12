@@ -1,10 +1,8 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Calculator, Settings, HelpCircle, Bell, ChevronDown, FileText } from "lucide-react";
+import { Calculator, Settings, HelpCircle, Bell, ChevronDown } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePods } from "@/lib/podsStore";
-import { useQuotations } from "@/lib/quotationsStore";
-
 
 const bottomNav = [
   { title: "Settings", url: "/settings", icon: Settings },
@@ -59,22 +57,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const activePods = pods.filter(
     (p) => p.status === "in_progress" || p.status === "pending_approval",
   ).length;
-  // Approval is a stage inside Quotation, not a separate destination — so the
-  // Quotations badge counts everything still live, including quotes awaiting
-  // commercial sign-off.
-  const quotations = useQuotations();
-  const openQuotes = quotations.filter(
-    (q) => q.status !== "converted_to_order" && q.status !== "rejected",
-  ).length;
   const badgeOf = (n: number) => (hydrated && n > 0 ? n : undefined);
+  // Quotation is a STEP of the costing workflow, not a destination beside it —
+  // so it is reached from Costing Report, and the sidebar does not offer a
+  // second, parallel way in.
   const primaryNav: { title: string; url: string; icon: typeof Calculator; badge?: number }[] = [
     { title: "Costing", url: "/pods", icon: Calculator, badge: badgeOf(activePods) },
-    {
-      title: "Quotations",
-      url: "/quotations",
-      icon: FileText,
-      badge: badgeOf(openQuotes),
-    },
   ];
 
   return (
@@ -117,7 +105,6 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               />
             ))}
           </div>
-
         </nav>
 
         <div className="border-t border-hairline p-3 space-y-0.5">
@@ -143,9 +130,11 @@ export function AppShell({ children }: { children: React.ReactNode }) {
             <span className="text-ink-900">Home</span>
           </div>
 
-
           <div className="ml-auto flex items-center gap-3">
-            <button className="rounded-md p-2 text-ink-500 hover:bg-surface-alt hover:text-ink-900" aria-label="Notifications">
+            <button
+              className="rounded-md p-2 text-ink-500 hover:bg-surface-alt hover:text-ink-900"
+              aria-label="Notifications"
+            >
               <Bell className="h-4 w-4" />
               <span className="sr-only">Notifications</span>
             </button>

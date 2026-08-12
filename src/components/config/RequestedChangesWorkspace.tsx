@@ -161,7 +161,7 @@ export function RequestedChangesWorkspace({
         </div>
       </header>
 
-      <WorkflowStepper active="Approval" podId={navPodId} articleId={navArticleId} costingRef={costingRef} />
+      <WorkflowStepper active="Quotation" podId={navPodId} articleId={navArticleId} costingRef={costingRef} />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* LEFT — current product / variant summary */}

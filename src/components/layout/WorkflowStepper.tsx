@@ -3,28 +3,31 @@ import { Link } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 import { useRequestedChanges } from "@/lib/requestedChangesStore";
 
-// Approval is no longer a destination of its own — commercial sign-off happens
-// inside Quotation, so the workflow is three steps end to end.
+// The costing workflow, end to end. Quotation is a STEP in this band, not a
+// module beside it — reaching it must never feel like leaving the workspace.
+// Approval is the same: an overlay reached from Quotation, not a route of
+// its own, so it has no entry in `linkFor` below — only `onStepClick` can
+// take you there.
 export const WORKFLOW_STEPS = [
   "Configuration & Costing",
   "Costing Report",
   "Quotation",
+  "Approval",
 ] as const;
 
+/** Steps that have a screen behind them today. */
+const IMPLEMENTED: ReadonlySet<string> = new Set([
+  "Configuration & Costing",
+  "Costing Report",
+  "Quotation",
+  "Approval",
+]);
+
 /** Legacy step names kept so existing screens keep highlighting the right band. */
-export type WorkflowStep =
-  | (typeof WORKFLOW_STEPS)[number]
-  | "Configuration"
-  | "Costing"
-  | "Approval";
+export type WorkflowStep = (typeof WORKFLOW_STEPS)[number] | "Configuration" | "Costing";
 
 const normalize = (s: WorkflowStep): (typeof WORKFLOW_STEPS)[number] =>
-  s === "Configuration" || s === "Costing"
-    ? "Configuration & Costing"
-    : s === "Approval"
-      ? "Quotation"
-      : s;
-
+  s === "Configuration" || s === "Costing" ? "Configuration & Costing" : s;
 
 /** Full-width workflow band shown directly below the page header on every step. */
 export function WorkflowStepper({
@@ -66,9 +69,7 @@ export function WorkflowStepper({
         search: { podId, articleId, report: true },
       } as const;
     return null;
-
   };
-
 
   return (
     <div className="border-b border-hairline bg-surface">
@@ -76,22 +77,28 @@ export function WorkflowStepper({
         {WORKFLOW_STEPS.map((step, i) => {
           const isActive = i === activeIndex;
           const isDone = i < activeIndex;
-          // Demo mode: every step is reachable, forward and back.
-          const link = linkFor(step);
-          const clickable = !isActive && (!!link || !!onStepClick);
+          // Approval is shown so the user can see where the workflow goes, but
+          // it has no screen yet — it must not behave like a destination.
+          const isFuture = !IMPLEMENTED.has(step);
+          // Demo mode: every built step is reachable, forward and back.
+          const link = isFuture ? null : linkFor(step);
+          const clickable = !isActive && !isFuture && (!!link || !!onStepClick);
 
           const inner = (
             <div
+              title={isFuture ? "Approval comes after Quotation — not built yet." : undefined}
               className={cn(
                 "flex items-center gap-2 whitespace-nowrap rounded-full px-3 py-1.5 text-[13px] transition-colors",
                 isActive
                   ? "bg-ink-900 font-medium text-white"
-                  : isDone
-                    ? cn(
-                        "bg-brand-50 text-brand-700",
-                        clickable && "hover:bg-brand-100 hover:text-brand-800",
-                      )
-                    : cn("text-ink-400", clickable && "hover:bg-surface-alt hover:text-ink-700"),
+                  : isFuture
+                    ? "text-ink-300"
+                    : isDone
+                      ? cn(
+                          "bg-brand-50 text-brand-700",
+                          clickable && "hover:bg-brand-100 hover:text-brand-800",
+                        )
+                      : cn("text-ink-400", clickable && "hover:bg-surface-alt hover:text-ink-700"),
               )}
             >
               <span
@@ -141,7 +148,7 @@ export function WorkflowStepper({
                 >
                   {inner}
                 </Link>
-              ) : !isActive && onStepClick ? (
+              ) : !isActive && !isFuture && onStepClick ? (
                 <button
                   onClick={() => onStepClick(step)}
                   title={`Go to ${step}`}
@@ -162,4 +169,3 @@ export function WorkflowStepper({
     </div>
   );
 }
-

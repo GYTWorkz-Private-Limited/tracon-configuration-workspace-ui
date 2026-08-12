@@ -1,65 +1,34 @@
 /**
- * Flow entry into Quotation from the workflow stepper.
+ * Quotation — the step after Costing Report.
  *
- * Quotation is POD-level, not article-level: a buyer gets one quote covering a
- * mix of articles, sets and kits. This route resolves the POD's open quotation
- * (creating one seeded with this article if there is none) and hands over to
- * the single Quotation Workspace, so a user can never end up on two different
- * quotation surfaces.
+ * This is a workflow destination, not a module: it lives on the POD/article
+ * route the rest of the workflow uses, keeps the same header, workflow band
+ * and bottom article bar, and carries the costing forward rather than asking
+ * the user to find it again.
  */
 
-import { createFileRoute, useNavigate } from "@tanstack/react-router";
-import { useEffect, useState } from "react";
-import { AppShell } from "@/components/layout/AppShell";
-import { QuotationWorkspace } from "@/components/quotation/QuotationWorkspace";
-import {
-  draftForPod,
-  quotationsForPod,
-  sendForQuotationReview,
-  useQuotation,
-} from "@/lib/quotationsStore";
+import { createFileRoute } from "@tanstack/react-router";
+import { QuoteWorkspace } from "@/components/quotation/QuoteWorkspace";
 
 export const Route = createFileRoute("/quotation/$podId/$articleId")({
+  validateSearch: (s: Record<string, unknown>) => ({
+    sel: typeof s.sel === "string" ? s.sel : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Quotation · Tracon" },
-      { name: "description", content: "Commercial quotation for this POD." },
+      {
+        name: "description",
+        content:
+          "Quote the commercially selected version of a costing — scenarios, variants, options, MOQs, kits and the full commercial stack.",
+      },
     ],
   }),
-  component: QuotationFlowEntry,
+  component: QuotationStep,
 });
 
-function QuotationFlowEntry() {
+function QuotationStep() {
   const { podId, articleId } = Route.useParams();
-  const navigate = useNavigate();
-  const [resolvedId, setResolvedId] = useState<string | null>(null);
-  const quotation = useQuotation(resolvedId ?? "");
-
-  useEffect(() => {
-    const open = draftForPod(podId) ?? quotationsForPod(podId)[0];
-    if (open) {
-      setResolvedId(open.id);
-      return;
-    }
-    const { quotationId } = sendForQuotationReview(podId, articleId);
-    setResolvedId(quotationId);
-  }, [podId, articleId]);
-
-  useEffect(() => {
-    if (resolvedId) {
-      navigate({ to: "/quotations/$id", params: { id: resolvedId }, replace: true });
-    }
-  }, [resolvedId, navigate]);
-
-  return (
-    <AppShell>
-      {quotation ? (
-        <QuotationWorkspace quotation={quotation} />
-      ) : (
-        <div className="mx-auto max-w-[640px] py-20 text-center text-[13px] text-ink-500">
-          Opening the quotation for {podId}…
-        </div>
-      )}
-    </AppShell>
-  );
+  const { sel } = Route.useSearch();
+  return <QuoteWorkspace podId={podId} articleId={articleId} sel={sel} />;
 }

@@ -79,7 +79,7 @@ export type Pod = {
   articles: Article[];
 };
 
-const STORAGE_KEY = "tracon.pods.v5";
+const STORAGE_KEY = "tracon.pods.v6";
 
 function now() {
   return new Date().toISOString();
@@ -109,6 +109,48 @@ function seed(): Pod[] {
     };
   };
 
+  /**
+   * A set the buyer orders as one unit. Its members are the SAME articles that
+   * sit beside it in the POD, so a kit is never a separate costing — each
+   * member is costed on its own article and the set is their sum.
+   */
+  const tableTopKit: Article = {
+    id: "A-KIT-TABLETOP",
+    name: "Placemat + Runner",
+    description: "Table-top set — printed placemat with coordinated runner",
+    size: "Set of 2",
+    moq: "1,500 sets",
+    status: "not_started",
+    srfRef: "SRF-1042",
+    updatedAt: "just now",
+    type: "kit",
+    collection: EXCEL_POD.season,
+    currency: EXCEL_POD.currency,
+    image: ARTICLE_IMAGES.placemat,
+    kitItems: [
+      {
+        id: "A-PLACEMAT",
+        srfRef: "SRF-1042",
+        name: "Placemat",
+        image: ARTICLE_IMAGES.placemat,
+        size: '13" × 19"',
+        moq: "3,000 pcs",
+        qty: 1,
+        status: "not_started",
+      },
+      {
+        id: "A-RUNNER",
+        srfRef: "SRF-1031",
+        name: "Runner",
+        image: ARTICLE_IMAGES.runner,
+        size: '14" × 72"',
+        moq: "1,500 pcs",
+        qty: 1,
+        status: "not_started",
+      },
+    ],
+  };
+
   const excelPod: Pod = {
     id: EXCEL_POD.id,
     buyerRef: EXCEL_POD.buyerRef,
@@ -118,29 +160,32 @@ function seed(): Pod[] {
     owner: EXCEL_POD.preparedBy,
     createdAt: now(),
     updatedAt: "just now",
-    articles: EXCEL_ARTICLES.map((a) => ({
-      id: `A-${a.key.toUpperCase()}`,
-      name: a.name,
-      description: a.description,
-      size: a.size,
-      moq: a.moq,
-      style: a.name,
-      image: ARTICLE_IMAGES[a.key],
-      status: "not_started" as ArticleStatus,
-      srfRef: a.srfRef,
-      updatedAt: "just now",
-      articleNo: a.articleNo,
-      designNo: a.designNo,
-      styleNo: a.styleNo,
-      colour: a.colour,
-      supplier: a.supplier,
-      composition: a.composition,
-      construction: a.construction,
-      currency: EXCEL_POD.currency,
-      fxRate: EXCEL_POD.fxRate,
-      costSheetVersion: EXCEL_POD.costSheetVersion,
-      remarks: a.remarks,
-    })),
+    articles: [
+      ...EXCEL_ARTICLES.map((a): Article => ({
+        id: `A-${a.key.toUpperCase()}`,
+        name: a.name,
+        description: a.description,
+        size: a.size,
+        moq: a.moq,
+        style: a.name,
+        image: ARTICLE_IMAGES[a.key],
+        status: "not_started" as ArticleStatus,
+        srfRef: a.srfRef,
+        updatedAt: "just now",
+        articleNo: a.articleNo,
+        designNo: a.designNo,
+        styleNo: a.styleNo,
+        colour: a.colour,
+        supplier: a.supplier,
+        composition: a.composition,
+        construction: a.construction,
+        currency: EXCEL_POD.currency,
+        fxRate: EXCEL_POD.fxRate,
+        costSheetVersion: EXCEL_POD.costSheetVersion,
+        remarks: a.remarks,
+      })),
+      tableTopKit,
+    ],
   };
 
   return [
