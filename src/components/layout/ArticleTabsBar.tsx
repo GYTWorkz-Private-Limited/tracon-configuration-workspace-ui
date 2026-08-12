@@ -43,10 +43,13 @@ function linkFor(podId: string, a: TabArticle, stage: FlowStage, sel?: string) {
       params: { id: a.srfRef },
       search: { podId, articleId: a.id, report: true, approval: true },
     } as const;
+  // "Costing" is the costing sheet, which lives on the configuration route —
+  // the same screen the Configuration stage opens. The Costing REPORT is a
+  // separate step and keeps its own link above.
   return {
-    to: "/costing/$id",
-    params: { id: a.srfRef },
-    search: { podId, articleId: a.id },
+    to: "/config/$podId/$articleId",
+    params: { podId, articleId: a.id },
+    search: { sel },
   } as const;
 }
 

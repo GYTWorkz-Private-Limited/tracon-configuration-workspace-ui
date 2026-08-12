@@ -231,10 +231,8 @@ export function CostingIntelligenceReport({
           <div className="flex items-start gap-3">
             <button
               onClick={() => {
-                // `onClose` only hides this overlay in place — on the legacy
-                // /costing/$id host that leaves the stale canvas underneath
-                // showing through. Back should land on the actual
-                // Configuration & Costing table, not on that relic.
+                // Back means the costing this report is about — the sheet on
+                // the configuration route.
                 if (navPodId && navArticleId) {
                   navigate({
                     to: "/config/$podId/$articleId",

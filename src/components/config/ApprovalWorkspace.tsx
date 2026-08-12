@@ -868,16 +868,20 @@ function ChangesPanel({
       return {
         to: "/product/$podId/$articleId",
         params: { podId: navPodId, articleId: navArticleId },
+        search: { sel: undefined },
       } as const;
     if (stage === "Configuration")
       return {
         to: "/config/$podId/$articleId",
         params: { podId: navPodId, articleId: navArticleId },
+        search: { sel: undefined },
       } as const;
+    // Costing is the sheet on the configuration route; the Costing REPORT is
+    // the separate step above.
     return {
-      to: "/costing/$id",
-      params: { id: costingRef },
-      search: { podId: navPodId, articleId: navArticleId },
+      to: "/config/$podId/$articleId",
+      params: { podId: navPodId, articleId: navArticleId },
+      search: { sel: undefined },
     } as const;
   };
 

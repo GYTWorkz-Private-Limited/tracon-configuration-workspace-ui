@@ -289,6 +289,7 @@ function PodDetail() {
                   ) : (
                     <ArticleRow
                       key={a.id}
+                      podId={pod.id}
                       article={a}
                       selected={selected.has(a.id)}
                       expanded={expanded.has(a.id)}
@@ -383,6 +384,7 @@ function PodDetail() {
 }
 
 function ArticleRow({
+  podId,
   article,
   selected,
   expanded,
@@ -392,6 +394,7 @@ function ArticleRow({
   onDelete,
   onClone,
 }: {
+  podId: string;
   article: Article;
   selected: boolean;
   expanded: boolean;
@@ -484,8 +487,9 @@ function ArticleRow({
           <div className="flex items-center justify-end gap-1">
             {article.status !== "not_started" && (
               <Link
-                to="/costing/$id"
-                params={{ id: article.srfRef }}
+                to="/config/$podId/$articleId"
+                params={{ podId, articleId: article.id }}
+                search={{ sel: undefined }}
                 className="inline-flex items-center gap-1 rounded px-2 py-1 text-[12px] text-brand-700 hover:bg-brand-50"
               >
                 Open <ArrowUpRight className="h-3 w-3" />
