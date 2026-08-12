@@ -32,6 +32,12 @@ import { CompareWorkspace, type CompareRow } from "@/components/configuration/Co
 import { CostBreakdownStrip, type CostCategory } from "@/components/workspace/CostBreakdownStrip";
 import { CategoryComposition } from "@/components/workspace/CategoryComposition";
 import { CostLineTable } from "@/components/workspace/CostLineTable";
+import { usePod } from "@/lib/podsStore";
+import {
+  fabricRateOverrides,
+  fabricRequirementsFor,
+  type FabricRequirement,
+} from "@/lib/fabricRequirement";
 import { ComponentInspector } from "@/components/workspace/ComponentInspector";
 import { ComponentLibraryModal } from "@/components/workspace/ComponentLibraryModal";
 import { ConfigurationRail } from "@/components/workspace/ConfigurationRail";
@@ -239,11 +245,20 @@ export function ArticleCostingWorkspace({
     [bundle.product, identity, buyer, buyerRef],
   );
 
+  /**
+   * What the fabric costs at THIS POD's volume. The same greige cut for a
+   * placemat and a runner is one purchase, so the price break is earned by the
+   * order, not by the article — see `fabricRequirement`.
+   */
+  const pod = usePod(podId);
+  const fabricReqs = useMemo(() => fabricRequirementsFor(pod), [pod]);
+  const fabricRates = useMemo(() => fabricRateOverrides(fabricReqs), [fabricReqs]);
+
   /** base variant → scenario overrides → parameter application. All pure. */
   const pricedVariant = useMemo(() => {
     const scoped = applyScenario(activeVariant, activeScenario);
-    return applyParameters(scoped, scoped.parameters, bundle.masters);
-  }, [activeVariant, activeScenario, bundle.masters]);
+    return applyParameters(scoped, scoped.parameters, bundle.masters, fabricRates);
+  }, [activeVariant, activeScenario, bundle.masters, fabricRates]);
 
   /** One roll-up — the single computation every column reads from. */
   const rollup: CostRollup = useMemo(
@@ -305,12 +320,12 @@ export function ArticleCostingWorkspace({
     const out: Record<string, number> = {};
     for (const s of scenarios) {
       const scoped = applyScenario(activeVariant, s);
-      const priced = applyParameters(scoped, scoped.parameters, bundle.masters);
+      const priced = applyParameters(scoped, scoped.parameters, bundle.masters, fabricRates);
       const roll = rollupVariant(priced, bundle.masters);
       out[s.id] = commercialOutput(roll.directCost, priced.commercial).sellingUsd;
     }
     return out;
-  }, [scenarios, activeVariant, bundle.masters]);
+  }, [scenarios, activeVariant, bundle.masters, fabricRates]);
 
   const baseScenarioId = scenarios.find((s) => s.isBase)?.id ?? scenarios[0]?.id;
   const deltaFor = (id: string) =>
@@ -322,13 +337,15 @@ export function ArticleCostingWorkspace({
     const v = variants.find((x) => x.id === id);
     if (!v) return 0;
     const scoped = applyScenario(v, activeScenario);
-    return rollupVariant(applyParameters(scoped, scoped.parameters, bundle.masters), bundle.masters)
-      .directCost;
+    return rollupVariant(
+      applyParameters(scoped, scoped.parameters, bundle.masters, fabricRates),
+      bundle.masters,
+    ).directCost;
   };
 
   const priceUnder = (v: Variant, scenario: Scenario) => {
     const scoped = applyScenario(v, scenario);
-    const priced = applyParameters(scoped, scoped.parameters, bundle.masters);
+    const priced = applyParameters(scoped, scoped.parameters, bundle.masters, fabricRates);
     const roll = rollupVariant(priced, bundle.masters);
     return { priced, roll, out: commercialOutput(roll.directCost, priced.commercial) };
   };
@@ -872,6 +889,7 @@ export function ArticleCostingWorkspace({
             total={categoryTotal}
             live={live}
             compact={Boolean(selected)}
+            fabricRollups={fabricReqs}
           />
         </div>
 

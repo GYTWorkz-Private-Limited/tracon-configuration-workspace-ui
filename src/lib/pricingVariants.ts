@@ -20,6 +20,7 @@
  */
 
 import {
+  finalOf,
   sourced,
   withOverride,
   type MaterialMaster,
@@ -198,6 +199,13 @@ export function applyParameters(
   variant: Variant,
   params: VariantParameter[],
   masters: { materials: Record<string, MaterialMaster> },
+  /**
+   * Fabric rates earned by the ORDER rather than by this variant — the metre
+   * total across every article sharing the fabric clears a price break. Passed
+   * in because that total is a POD-level fact this function cannot see, and
+   * omitted wherever an article is being read on its own.
+   */
+  fabricRates?: Record<string, { factor: number; note: string }>,
 ): Variant {
   const [w, l] = sizeOf(params);
   const gsm = gsmOf(params);
@@ -264,6 +272,25 @@ export function applyParameters(
               rateForGsm(master, gsm),
               `Quality parameter — ${gsm} GSM`,
             ),
+          },
+        };
+      }
+    }
+
+    /* ---- order volume → fabric price break ----
+       Applied after quality, because quality decides WHICH cloth and the tier
+       only decides what that cloth costs at this volume. Recorded as an
+       override like every other derived rate, so the sheet can still show the
+       master's own number underneath it. */
+    if (fabricRates && next.material?.materialMasterId) {
+      const tier = fabricRates[next.material.materialMasterId];
+      if (tier && tier.factor !== 1) {
+        const discounted = Math.round(finalOf(next.material.rate) * tier.factor * 100) / 100;
+        next = {
+          ...next,
+          material: {
+            ...next.material,
+            rate: withOverride(next.material.rate, discounted, tier.note),
           },
         };
       }

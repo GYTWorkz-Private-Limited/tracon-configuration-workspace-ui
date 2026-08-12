@@ -8,11 +8,12 @@
 // Accessories → Packaging → Testing) with its own subtotal, so the sheet reads
 // the same way the roll-up is computed.
 
-import { useState } from "react";
-import { BookOpen, Check, ChevronDown, Plus, Settings2, Trash2 } from "lucide-react";
+import { Fragment, useState } from "react";
+import { BookOpen, Check, ChevronDown, Layers, Plus, Settings2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MoneyFormatter } from "@/lib/money";
 import type { CostLine, LineSection, OptionGroup } from "@/lib/costLines";
+import { metres, tierLabel, type FabricRequirement } from "@/lib/fabricRequirement";
 
 type Props = {
   sections: LineSection[];
@@ -42,7 +43,91 @@ type Props = {
   compact?: boolean;
   /** the sheet is being read, not edited (e.g. a member article inside a set) */
   readOnly?: boolean;
+  /**
+   * The POD's fabric requirement, so each fabric can state its aggregated
+   * metres and the tier that bought it, under the rows that consume it.
+   */
+  fabricRollups?: FabricRequirement[];
 };
+
+/**
+ * Fabric rows regrouped so every component cut from one cloth sits together,
+ * with that cloth's order-level total closing the group.
+ *
+ * The sheet is per piece; the purchase is not. Without this the metre total
+ * that decided the rate would exist only in a report somewhere else, and the
+ * rate on these rows would look like it came from nowhere.
+ */
+function groupByFabric(
+  section: LineSection,
+  rollups: FabricRequirement[] | undefined,
+): { key: string; lines: CostLine[]; rollup?: FabricRequirement }[] {
+  if (section.id !== "material" || !rollups?.length) {
+    return [{ key: section.id, lines: section.lines }];
+  }
+
+  const blocks: { key: string; lines: CostLine[]; rollup?: FabricRequirement }[] = [];
+  const taken = new Set<string>();
+
+  for (const line of section.lines) {
+    const req = line.libraryId ? rollups.find((r) => r.masterId === line.libraryId) : undefined;
+    if (!req) continue;
+    if (taken.has(req.masterId)) continue;
+    taken.add(req.masterId);
+    blocks.push({
+      key: req.masterId,
+      lines: section.lines.filter((l) => l.libraryId === req.masterId),
+      rollup: req,
+    });
+  }
+
+  // Anything not cut from a tiered fabric keeps its place at the end rather
+  // than being dropped — a trim is still a raw material.
+  const rest = section.lines.filter((l) => !l.libraryId || !taken.has(l.libraryId));
+  if (rest.length) blocks.push({ key: `${section.id}-rest`, lines: rest });
+  return blocks;
+}
+
+const discountPct = (r: FabricRequirement) =>
+  r.baseRate > 0 ? Math.round((1 - r.tier.rate / r.baseRate) * 100) : 0;
+
+function FabricRollupRow({
+  req,
+  cols,
+  compact,
+}: {
+  req: FabricRequirement;
+  cols: number;
+  compact?: boolean;
+}) {
+  return (
+    <tr className="border-b border-hairline bg-surface-alt/50">
+      <td colSpan={cols - 2} className="px-5 py-1.5">
+        <span className="inline-flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+          <Layers className="h-3 w-3 shrink-0 self-center text-ink-400" aria-hidden />
+          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-700">
+            {req.name}
+          </span>
+          <span className="text-[11px] text-ink-500">
+            {metres(req.metres)} for this POD · {tierLabel(req.tier)}
+          </span>
+          {!compact && req.nextTier && (
+            <span className="text-[11px] text-ink-400">
+              {metres(req.nextTier.metresAway)} more → next tier
+            </span>
+          )}
+        </span>
+      </td>
+      {/* The rate COLUMN above already carries the discounted number on every
+          row; repeating the master's list rate here would read as a second,
+          contradictory price. What the roll-up adds is the size of the break. */}
+      <td className="px-3 py-1.5 text-right text-[11.5px] font-semibold tabular-nums text-ink-700">
+        {discountPct(req) > 0 ? `−${discountPct(req)}%` : "list rate"}
+      </td>
+      <td className="px-3 pr-5 py-1.5" />
+    </tr>
+  );
+}
 
 const HEAD =
   "px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-400 whitespace-nowrap";
@@ -62,6 +147,7 @@ export function CostLineTable({
   live,
   compact,
   readOnly,
+  fabricRollups,
 }: Props) {
   const [dense, setDense] = useState(false);
   // + 1 for the row-actions column
@@ -171,20 +257,27 @@ export function CostLineTable({
                   <td className="px-3 pr-5 py-1.5" />
                 </tr>
               )}
-              {section.lines.map((line) => (
-                <LineRow
-                  key={line.id}
-                  line={line}
-                  dense={dense}
-                  compact={compact}
-                  money={money}
-                  live={live}
-                  selected={selectedId === line.componentId}
-                  onSelect={() => onSelect(line.componentId)}
-                  onSelectOption={onSelectOption}
-                  onRemove={() => onRemove(line)}
-                  readOnly={readOnly}
-                />
+              {groupByFabric(section, fabricRollups).map((block) => (
+                <Fragment key={block.key}>
+                  {block.lines.map((line) => (
+                    <LineRow
+                      key={line.id}
+                      line={line}
+                      dense={dense}
+                      compact={compact}
+                      money={money}
+                      live={live}
+                      selected={selectedId === line.componentId}
+                      onSelect={() => onSelect(line.componentId)}
+                      onSelectOption={onSelectOption}
+                      onRemove={() => onRemove(line)}
+                      readOnly={readOnly}
+                    />
+                  ))}
+                  {block.rollup && (
+                    <FabricRollupRow req={block.rollup} cols={cols} compact={compact} />
+                  )}
+                </Fragment>
               ))}
               {!readOnly && (
                 <tr className="border-b border-hairline">

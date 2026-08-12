@@ -34,6 +34,9 @@ import {
   type ProvisionRates,
 } from "./commercialProvisions";
 import { BASE_BUILD, type BuildRef } from "./costingSelectionStore";
+// Type-only: `fabricRequirement` reaches back into this module for size/MOQ
+// parsing, and a value import would close that loop at runtime.
+import type { FabricRateOverrides } from "./fabricRequirement";
 
 /** Everything needed to price one configured line. */
 export type PricingRequest = {
@@ -56,6 +59,12 @@ export type PricingRequest = {
   targetMarginPct?: number;
   /** quantity actually being quoted, when it differs from the build's MOQ */
   moqOverride?: number;
+  /**
+   * Fabric rates the whole POD's order earns. Passed through so a quotation
+   * shows the same fabric rate the Costing sheet does — the price break belongs
+   * to the purchase, and both screens are looking at the same purchase.
+   */
+  fabricRates?: FabricRateOverrides;
   /**
    * Total cost fixed by hand on the quotation, ₹ / pc. Direct cost and the
    * provisions are still computed and still shown — only the total they add up
@@ -170,7 +179,12 @@ export function buildPricedVariant(req: PricingRequest): {
 
   // 4 — apply them to the component model
   return {
-    variant: applyParameters({ ...scoped, parameters }, parameters, bundle.masters),
+    variant: applyParameters(
+      { ...scoped, parameters },
+      parameters,
+      bundle.masters,
+      req.fabricRates,
+    ),
     masters: bundle.masters,
   };
 }

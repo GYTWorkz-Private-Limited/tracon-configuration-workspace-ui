@@ -5,6 +5,8 @@
 // benchmarks and AI recommendations.
 
 import { useMemo, useState } from "react";
+import { usePod } from "@/lib/podsStore";
+import { fabricRequirementsFor, metres, tierInsight, tierLabel } from "@/lib/fabricRequirement";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { SensitivityAnalysis } from "./SensitivityAnalysis";
@@ -430,6 +432,7 @@ export function CostingIntelligenceReport({
                 bestValue={bestValue}
                 targetPriceUsd={targetPriceUsd}
                 productName={productName}
+                podId={navPodId}
                 onApplySensitivity={onApplySensitivity}
                 promoted={promoted}
                 onPromote={(id) => {
@@ -791,6 +794,7 @@ function OverviewTab({
   onApplySensitivity,
   promoted,
   onPromote,
+  podId,
 }: {
   active: Entry;
   metricsByVariant: Entry[];
@@ -802,6 +806,8 @@ function OverviewTab({
   onApplySensitivity?: (patch: Partial<CushionInputs>) => void;
   promoted: string;
   onPromote: (id: string) => void;
+  /** the POD whose fabric requirement this article shares */
+  podId?: string;
 }) {
   const gap = active.metrics.suggestedQuoteUsd - targetPriceUsd;
   const onTarget = gap <= 0.02;
@@ -874,6 +880,9 @@ function OverviewTab({
           tone="neutral"
         />
       </div>
+
+      {/* Fabric requirement — the purchase behind the per-piece rate */}
+      <FabricRequirementStrip podId={podId} />
 
       {/* Recommendations */}
       <section className="col-span-8 rounded-2xl border border-hairline bg-white p-4">
@@ -954,6 +963,78 @@ function OverviewTab({
         />
       </section>
     </div>
+  );
+}
+
+/**
+ * What the mill is actually being asked for.
+ *
+ * Every other number on this page is per piece; fabric is not bought that way.
+ * The same cloth cut for several articles is one order, and it is the ORDER's
+ * metre count that decides the rate every one of those pieces pays — so the
+ * count, the band it reached, and the distance to the next one are stated
+ * together, in the same tiles as the rest of the summary.
+ */
+function FabricRequirementStrip({ podId }: { podId?: string }) {
+  const pod = usePod(podId ?? "");
+  const reqs = useMemo(() => fabricRequirementsFor(pod), [pod]);
+  if (reqs.length === 0) return null;
+
+  // The best offer still on the table — the one worth writing a note about.
+  const prompt = reqs
+    .filter((r) => r.nextTier)
+    .sort(
+      (a, b) =>
+        (b.nextTier?.savingPerMetre ?? 0) * b.metres - (a.nextTier?.savingPerMetre ?? 0) * a.metres,
+    )[0];
+
+  return (
+    <section className="col-span-12 rounded-2xl border border-hairline bg-white p-4">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <h3 className="text-[11px] font-medium uppercase tracking-[0.14em] text-ink-500">
+          Fabric requirement
+        </h3>
+        <p className="min-w-0 flex-1 text-[12px] text-ink-500">
+          Metres this POD needs of each cloth, and the price break that total buys. Fabric rows are
+          costed at the tier shown.
+        </p>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-3">
+        {reqs.map((r) => (
+          <div key={r.masterId} className="rounded-2xl border border-hairline bg-white p-3">
+            <div className="truncate text-[10.5px] font-medium uppercase tracking-[0.14em] text-ink-500">
+              {r.name}
+            </div>
+            <div className="mt-1 text-[22px] font-semibold tabular-nums text-ink-900">
+              {metres(r.metres)}
+            </div>
+            <div className="text-[11.5px] text-ink-500">
+              {tierLabel(r.tier)} · list ₹{r.tier.rate}/m
+              {r.tier.rate < r.baseRate && (
+                <span className="ml-1 text-emerald-700">
+                  −{Math.round((1 - r.tier.rate / r.baseRate) * 100)}% vs ₹{r.baseRate}
+                </span>
+              )}
+            </div>
+            <div className="mt-1 text-[11.5px] text-ink-400">
+              {r.nextTier
+                ? `${metres(r.nextTier.metresAway)} more → ₹${r.nextTier.tier.rate}/m`
+                : "Cheapest tier reached"}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {prompt && (
+        <div className="mt-3 rounded-lg bg-brand-50 p-3">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.1em] text-brand-700">
+            <Sparkles className="h-3 w-3" /> AI recommendation
+          </div>
+          <p className="mt-1 text-[12px] leading-relaxed text-ink-600">{tierInsight(prompt)}</p>
+        </div>
+      )}
+    </section>
   );
 }
 

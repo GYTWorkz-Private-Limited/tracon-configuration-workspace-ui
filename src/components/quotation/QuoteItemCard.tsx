@@ -21,6 +21,7 @@ import {
   scenarioById,
   type PricedKit,
 } from "@/lib/quotationPricing";
+import { podFabricRates } from "@/lib/fabricRequirement";
 import {
   addScenario,
   buildsIn,
@@ -159,6 +160,8 @@ function ProductCard({
   siblings,
 }: CardProps) {
   const { scenarios, builds } = useArticleSelection(podId, item.articleId);
+  // Same fabric order, same price break, whichever screen is reading it.
+  const fabricRates = useMemo(() => podFabricRates(podId), [podId]);
 
   const rows: QuoteRow[] = useMemo(
     () =>
@@ -176,6 +179,7 @@ function ProductCard({
             moqOverride: l.moqOverride,
             finalCostOverrideInr: l.finalCostOverrideInr,
             sellingPriceOverrideUsd: l.sellingPriceOverrideUsd,
+            fabricRates,
           }),
           parentBuild: build.parentId ? builds.find((b) => b.id === build.parentId) : undefined,
           variant: variantOf(builds, build),
