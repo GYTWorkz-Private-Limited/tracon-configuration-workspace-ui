@@ -19,6 +19,24 @@ import { ARTICLE_STATUS_LABEL, type Article } from "@/lib/podsStore";
 import { NOT_READY_LABEL, READY_LABEL, isReadyIn, useReadiness } from "@/lib/quotationReadiness";
 import { RECOSTING_LABEL, recostRequestIn, useRecostRequests } from "@/lib/recostingStore";
 
+/**
+ * Articles and kits are two different decisions, so they are two different
+ * groups: quoting a kit prices a set as one line, quoting its members prices
+ * them separately, and a flat list invites doing both by accident.
+ */
+const SECTIONS = [
+  {
+    key: "product" as const,
+    heading: "Individual articles",
+    blurb: "Each one priced on its own line.",
+  },
+  {
+    key: "kit" as const,
+    heading: "Bundles / Kits",
+    blurb: "Costed and priced as one set.",
+  },
+];
+
 export function ArticleSelectionModal({
   open,
   onClose,
@@ -83,8 +101,20 @@ export function ArticleSelectionModal({
     setPicked(next);
   };
 
+  /** Tick or clear a whole group at once — "quote the lot" is a real intent. */
+  const setAll = (group: typeof rows, on: boolean) => {
+    const next = new Set(picked);
+    for (const r of group) {
+      if (on) next.add(r.article.id);
+      else next.delete(r.article.id);
+    }
+    setPicked(next);
+  };
+
   const chosen = rows.filter((r) => picked.has(r.article.id));
-  const eligibleCount = rows.filter((r) => r.selectable).length;
+  const eligible = rows.filter((r) => r.selectable);
+  const eligibleCount = eligible.length;
+  const allOn = eligibleCount > 0 && eligible.every((r) => picked.has(r.article.id));
 
   return (
     <div
@@ -105,11 +135,20 @@ export function ArticleSelectionModal({
               Report can be quoted.
             </p>
           </div>
+          {eligibleCount > 1 && (
+            <button
+              type="button"
+              onClick={() => setAll(eligible, !allOn)}
+              className="ml-auto shrink-0 self-center rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              {allOn ? "Clear all" : `Select everything ready (${eligibleCount})`}
+            </button>
+          )}
           <button
             ref={closeRef}
             onClick={onClose}
             aria-label="Close"
-            className="ml-auto shrink-0 rounded-md p-1.5 text-ink-500 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            className="shrink-0 rounded-md p-1.5 text-ink-500 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
           >
             <X className="h-4 w-4" />
           </button>
@@ -121,16 +160,49 @@ export function ArticleSelectionModal({
               This POD has no articles yet.
             </p>
           ) : (
-            <ul className="space-y-2">
-              {rows.map((row) => (
-                <ArticleRow
-                  key={row.article.id}
-                  {...row}
-                  checked={picked.has(row.article.id)}
-                  onToggle={() => toggle(row.article.id)}
-                />
-              ))}
-            </ul>
+            <div className="space-y-5">
+              {SECTIONS.map(({ key, heading, blurb }) => {
+                const section = rows.filter((r) =>
+                  key === "kit" ? r.article.type === "kit" : r.article.type !== "kit",
+                );
+                if (section.length === 0) return null;
+                const eligible = section.filter((r) => r.selectable);
+                const allOn =
+                  eligible.length > 0 && eligible.every((r) => picked.has(r.article.id));
+
+                return (
+                  <section key={key}>
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <h3 className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-ink-500">
+                        {heading}
+                      </h3>
+                      <p className="min-w-0 flex-1 text-[11.5px] text-ink-500">{blurb}</p>
+                      {eligible.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setAll(eligible, !allOn)}
+                          className="shrink-0 rounded-md border border-hairline bg-surface px-2.5 py-1 text-[11.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                        >
+                          {allOn
+                            ? `Clear ${heading.toLowerCase()}`
+                            : `Select all ${eligible.length}`}
+                        </button>
+                      )}
+                    </div>
+                    <ul className="mt-2 space-y-2">
+                      {section.map((row) => (
+                        <ArticleRow
+                          key={row.article.id}
+                          {...row}
+                          checked={picked.has(row.article.id)}
+                          onToggle={() => toggle(row.article.id)}
+                        />
+                      ))}
+                    </ul>
+                  </section>
+                );
+              })}
+            </div>
           )}
 
           {eligibleCount === 0 && rows.length > 0 && (

@@ -1,7 +1,7 @@
 /**
  * The two questions between a finished costing and a quotation.
  *
- *   1. Single Product, or Multiple Products / Kit?     (QuotationModeModal)
+ *   1. This article alone, or several articles / a bundle?  (QuotationModeModal)
  *   2. If multiple — which of them?                    (ArticleSelectionModal)
  *
  * Kept in one component so every entry point into Quotation — the Costing

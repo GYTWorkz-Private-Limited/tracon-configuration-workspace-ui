@@ -70,7 +70,8 @@ export function QuotationModeModal({
           <div className="min-w-0">
             <h2 className="text-[16px] font-semibold text-ink-900">What are you quoting?</h2>
             <p className="mt-0.5 text-[12px] text-ink-500">
-              A quotation can carry one article or several from this costing workspace.
+              One quotation can carry a single article, or any mix of articles and bundles from this
+              POD.
             </p>
           </div>
           <button
@@ -90,7 +91,7 @@ export function QuotationModeModal({
             onSelect={() => setMode("single")}
             disabled={!singleAvailable}
             icon={<Package className="h-4 w-4" aria-hidden />}
-            title="Single Product"
+            title="This article on its own"
             description={
               singleAvailable
                 ? `Quote ${articleName ?? "this article"} on its own, exactly as it is costed today.`
@@ -102,11 +103,11 @@ export function QuotationModeModal({
             checked={mode === "multiple"}
             onSelect={() => setMode("multiple")}
             icon={<Boxes className="h-4 w-4" aria-hidden />}
-            title="Multiple Products / Kit"
+            title="Several articles / a bundle"
             description={
               eligibleCount !== undefined
-                ? `Pick the articles and kits to quote together — ${eligibleCount} ready to select.`
-                : "Pick the articles and kits from this costing workspace to quote together."
+                ? `Choose which articles and bundles from this POD go on one quotation — ${eligibleCount} ready to pick, or take them all.`
+                : "Choose which articles and bundles from this POD go on one quotation."
             }
           />
         </div>
