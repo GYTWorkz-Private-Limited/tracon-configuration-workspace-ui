@@ -71,10 +71,10 @@ export function ApprovalModeBanner({
       >
         <div className="mx-auto flex max-w-[1600px] flex-wrap items-center gap-3 px-4 py-2.5 lg:px-6">
           <Link
-            to="/quotations"
+            to="/pods"
             className="inline-flex items-center gap-1 text-[11px] text-ink-500 hover:text-ink-900"
           >
-            ← Quotations
+            ← Costing
           </Link>
 
           <div className="flex items-center gap-2">
@@ -235,7 +235,7 @@ export function ApprovalModeBanner({
               approveApproval(approval.id);
               toast.success("Approved");
               setDialog(null);
-              navigate({ to: "/quotations" });
+              navigate({ to: "/pods" });
             }}
           />
         </Dialog>
@@ -281,7 +281,7 @@ export function ApprovalModeBanner({
               sendBackApproval(approval.id, comment.trim());
               toast.success("Sent back for revision");
               setDialog(null);
-              navigate({ to: "/quotations" });
+              navigate({ to: "/pods" });
             }}
           />
         </Dialog>
@@ -314,7 +314,7 @@ export function ApprovalModeBanner({
               rejectApproval(approval.id, comment.trim());
               toast.success("Rejected");
               setDialog(null);
-              navigate({ to: "/quotations" });
+              navigate({ to: "/pods" });
             }}
           />
         </Dialog>

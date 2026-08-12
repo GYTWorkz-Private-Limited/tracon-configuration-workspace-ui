@@ -6,6 +6,7 @@
 
 import { useMemo, useState } from "react";
 import { useNavigate } from "@tanstack/react-router";
+import { toast } from "sonner";
 import { SensitivityAnalysis } from "./SensitivityAnalysis";
 import {
   X,
@@ -24,6 +25,7 @@ import {
   Wand2,
   ArrowUpRight,
   ArrowDownRight,
+  ArrowRight,
   Download,
   Send,
   Target,
@@ -57,7 +59,15 @@ import { RequestedChangesWorkspace } from "./RequestedChangesWorkspace";
 import type { ApprovalSnapshot } from "@/lib/approvalsStore";
 
 import { useChangesGate } from "@/lib/requestedChangesStore";
-import { sendForQuotationReview } from "@/lib/quotationsStore";
+import { addProducts, ensureQuoteFor, useQuoteDraft } from "@/lib/quoteDraftStore";
+import { usePod } from "@/lib/podsStore";
+import {
+  markReadyForQuotation,
+  useIsReadyForQuotation,
+  READY_LABEL,
+  NOT_READY_LABEL,
+} from "@/lib/quotationReadiness";
+import { ArticleSelectionModal } from "@/components/quotation/ArticleSelectionModal";
 type Tab = "overview" | "variants" | "financial" | "buildup" | "trends" | "ai";
 
 type ReportArticle = { id: string; name: string; size?: string; moq?: string };
@@ -124,7 +134,18 @@ export function CostingIntelligenceReport({
   const [revisionsOpen, setRevisionsOpen] = useState(false);
   const [copilotOpen, setCopilotOpen] = useState(false);
   const [changesOpen, setChangesOpen] = useState(false);
+  const [selectOpen, setSelectOpen] = useState(false);
   useActionHost();
+
+  /**
+   * Readiness is the gate between costing and quotation. Until this article is
+   * marked ready, "Continue to Quotation" is not the action on offer — the
+   * decision in front of the user is whether the costing is finished at all.
+   */
+  const pod = usePod(navPodId ?? "");
+  const isReady = useIsReadyForQuotation(navPodId, navArticleId);
+  const draft = useQuoteDraft(navPodId ?? "");
+  const quotedIds = new Set((draft?.items ?? []).map((i) => i.articleId));
 
   const metricsByVariant = useMemo(
     () =>
@@ -218,8 +239,22 @@ export function CostingIntelligenceReport({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3">
             <button
-              onClick={onClose}
-              aria-label="Back to costing"
+              onClick={() => {
+                // `onClose` only hides this overlay in place — on the legacy
+                // /costing/$id host that leaves the stale canvas underneath
+                // showing through. Back should land on the actual
+                // Configuration & Costing table, not on that relic.
+                if (navPodId && navArticleId) {
+                  navigate({
+                    to: "/config/$podId/$articleId",
+                    params: { podId: navPodId, articleId: navArticleId },
+                    search: { sel: undefined },
+                  });
+                  return;
+                }
+                onClose();
+              }}
+              aria-label="Back to Configuration & Costing"
               className="mt-1 rounded-md p-1 text-ink-500 hover:bg-surface-alt hover:text-ink-900"
             >
               <ArrowLeft className="h-4 w-4" />
@@ -235,8 +270,26 @@ export function CostingIntelligenceReport({
                 >
                   {podRef ?? srfId}
                 </span>
+                {/* Two different facts, deliberately both shown: how the
+                    costing itself stands, and whether it has been released to
+                    be quoted. */}
                 <span className="rounded-full bg-ink-100 px-2 py-0.5 text-[11px] font-medium text-ink-700">
                   {statusLabel ?? "Costing report"}
+                </span>
+                <span
+                  className={cn(
+                    "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                    isReady
+                      ? "bg-brand-50 text-brand-700"
+                      : "border border-hairline bg-surface text-ink-500",
+                  )}
+                >
+                  {isReady ? (
+                    <CheckCircle2 className="h-3 w-3" aria-hidden />
+                  ) : (
+                    <AlertTriangle className="h-3 w-3" aria-hidden />
+                  )}
+                  {isReady ? READY_LABEL : NOT_READY_LABEL}
                 </span>
               </div>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-5 gap-y-1 text-[12px] text-ink-500">
@@ -272,24 +325,41 @@ export function CostingIntelligenceReport({
             </button>
             {changesGate.submitted && <RequestedChangesAction />}
             {changesGate.submitted && <RevisionHistoryAction />}
-            <button
-              onClick={() => setApprovalOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt"
-            >
-              <CheckCircle2 className="h-4 w-4" /> Costing sign-off
-            </button>
-            <button
-              disabled={!navPodId || !navArticleId}
-              onClick={() => {
-                if (!navPodId || !navArticleId) return;
-                const { quotationId } = sendForQuotationReview(navPodId, navArticleId);
-                navigate({ to: "/quotations/$id", params: { id: quotationId } });
-              }}
-              title="Push this costed article into the POD's quotation for commercial review"
-              className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
-            >
-              <Send className="h-4 w-4" /> Send for Quotation Review
-            </button>
+            {/* One primary action at a time: confirm the costing is finished,
+                then carry it into the quotation. */}
+            {isReady ? (
+              <button
+                disabled={!navPodId || !navArticleId}
+                onClick={() => setSelectOpen(true)}
+                title="Choose which ready articles to quote"
+                className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Send className="h-4 w-4" /> Continue to Quotation
+                <ArrowRight className="h-3.5 w-3.5" />
+              </button>
+            ) : (
+              <>
+                <span
+                  title="Mark this costing ready before it can be quoted"
+                  className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-300"
+                  aria-disabled="true"
+                >
+                  <Send className="h-4 w-4" /> Continue to Quotation
+                </span>
+                <button
+                  disabled={!navPodId || !navArticleId}
+                  onClick={() => {
+                    if (!navPodId || !navArticleId) return;
+                    markReadyForQuotation(navPodId, navArticleId);
+                    toast.success(`${productName} is ${READY_LABEL}`);
+                  }}
+                  title="Confirm this configuration and costing are ready to be quoted"
+                  className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
+                >
+                  <CheckCircle2 className="h-4 w-4" /> Mark as Ready for Quotation
+                </button>
+              </>
+            )}
           </ActionGroup>
         </div>
       </header>
@@ -347,7 +417,10 @@ export function CostingIntelligenceReport({
                 active.variant.inputs.fabricGsm ? `${active.variant.inputs.fabricGsm} GSM` : "—"
               }
             />
-            <VContextCell label="Status" value={statusLabel ?? "Costing complete"} />
+            <VContextCell
+              label="Quotation status"
+              value={isReady ? READY_LABEL : NOT_READY_LABEL}
+            />
           </div>
         </div>
 
@@ -445,6 +518,31 @@ export function CostingIntelligenceReport({
 
       {/* Bottom — shared article tabs */}
       <PodArticleTabs podId={navPodId} activeId={activeArticleId ?? navArticleId} stage="Costing" />
+
+      {/*
+       * Continuing to Quotation is two decisions, not one: this costing is
+       * ready (settled above), and THESE are the ready items worth quoting.
+       */}
+      {navPodId && (
+        <ArticleSelectionModal
+          open={selectOpen}
+          onClose={() => setSelectOpen(false)}
+          podId={navPodId}
+          articles={pod?.articles ?? []}
+          alreadyQuotedIds={quotedIds}
+          preselect={navArticleId ? [navArticleId] : undefined}
+          onConfirm={(ids) => {
+            ensureQuoteFor(navPodId);
+            addProducts(navPodId, ids);
+            setSelectOpen(false);
+            navigate({
+              to: "/quotation/$podId/$articleId",
+              params: { podId: navPodId, articleId: ids[0] },
+              search: { sel: undefined },
+            });
+          }}
+        />
+      )}
     </div>
   );
 }

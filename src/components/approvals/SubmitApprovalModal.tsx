@@ -83,7 +83,7 @@ export function SubmitApprovalModal({
     });
     toast.success(`Sent for costing sign-off — ${created.id}`);
     onClose();
-    navigate({ to: "/quotations" });
+    navigate({ to: "/pods" });
   };
 
   const saveDraft = () => {

@@ -288,7 +288,7 @@ export function ApprovalWorkspace({
               <Link
                 to="/quotation/$podId/$articleId"
                 params={{ podId: navPodId, articleId: navArticleId }}
-                search={{ sel: undefined, kit: undefined }}
+                search={{ sel: undefined }}
 
                 replace
                 className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white transition-colors hover:bg-brand-800"
