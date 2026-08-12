@@ -31,6 +31,14 @@ export type QuoteLine = {
   moqOverride?: number;
   /** margin held on this line, when it differs from the quote default */
   targetMarginPct?: number;
+  /**
+   * Total cost the commercial team fixed by hand on this line, ₹ / pc.
+   *
+   * A saved decision like every other field here — the costing is still read
+   * live from Configuration, and selling price and margin are still derived by
+   * `commercialProvisions`. Only the total cost they run from is pinned.
+   */
+  finalCostOverrideInr?: number;
 };
 
 /** One article inside a kit — keeps its own scenario, variant, option and MOQ. */
@@ -75,10 +83,23 @@ export type QuoteItem = {
   targetMarginPct?: number;
   /** sets being quoted, for a kit */
   sets?: number;
+  /** a kit's hand-fixed total cost, ₹ / set — the set is priced as one position */
+  finalCostOverrideInr?: number;
 };
+
+/**
+ * What the user said they were quoting when they left the Costing Report.
+ *
+ * "single" is one article quoted on its own — the quotation that has always
+ * been generated for that article. "multiple" is the same quotation carrying
+ * several selected articles and/or a kit. It changes what is ON the quote and
+ * how it is navigated, never how anything is priced.
+ */
+export type QuoteMode = "single" | "multiple";
 
 export type QuoteDraft = {
   podId: string;
+  mode?: QuoteMode;
   items: QuoteItem[];
   /** quote-wide commercial defaults, inherited by every item that has none */
   rates: Partial<ProvisionRates>;
@@ -231,6 +252,30 @@ export function addProducts(podId: string, articleIds: string[]) {
   });
 }
 
+/**
+ * Open a quotation for exactly these articles.
+ *
+ * The entry flow — Single Product or Multiple Products / Kit — is where the
+ * composition of the quote is decided, so this SETS the item list rather than
+ * appending to it ("Add Product" inside the workspace is what appends). An
+ * article already on the draft keeps its existing item, so the lines, margins,
+ * MOQs and edited total cost someone worked on survive coming back through the
+ * selection.
+ */
+export function startQuotation(podId: string, articleIds: string[], mode: QuoteMode) {
+  const pod = getPod(podId);
+  if (!pod) return;
+  write(podId, (d) => {
+    const items = articleIds
+      .map((id) => pod.articles.find((a) => a.id === id))
+      .filter((a): a is Article => Boolean(a))
+      .filter((a) => isReadyForQuotation(podId, a.id))
+      .map((a) => d.items.find((i) => i.articleId === a.id) ?? itemFromArticle(a));
+    if (items.length === 0) return { ...d, mode };
+    return { ...d, mode, items };
+  });
+}
+
 export function removeItem(podId: string, itemId: string) {
   write(podId, (d) => ({ ...d, items: d.items.filter((i) => i.id !== itemId) }));
 }
@@ -309,6 +354,35 @@ export function removeLine(podId: string, itemId: string, lineId: string) {
         quotedLineId: i.quotedLineId === lineId ? lines[0]?.id : i.quotedLineId,
       };
     }),
+  }));
+}
+
+/* ------------------------------------------------------------------ *
+ * Total cost — edited by hand, saved explicitly
+ * ------------------------------------------------------------------ */
+
+/**
+ * Fix (or release) the total cost of a product's quoted line, ₹ / pc.
+ *
+ * Passing `undefined` hands the line back to the calculated figure, so an edit
+ * is always reversible and the costing underneath is never overwritten.
+ */
+export function setLineFinalCost(
+  podId: string,
+  itemId: string,
+  lineId: string,
+  finalCostInr: number | undefined,
+) {
+  const value = finalCostInr !== undefined && finalCostInr > 0 ? finalCostInr : undefined;
+  updateLine(podId, itemId, lineId, { finalCostOverrideInr: value });
+}
+
+/** Fix (or release) a kit's total cost, ₹ / set. */
+export function setItemFinalCost(podId: string, itemId: string, finalCostInr: number | undefined) {
+  const value = finalCostInr !== undefined && finalCostInr > 0 ? finalCostInr : undefined;
+  write(podId, (d) => ({
+    ...d,
+    items: d.items.map((i) => (i.id === itemId ? { ...i, finalCostOverrideInr: value } : i)),
   }));
 }
 

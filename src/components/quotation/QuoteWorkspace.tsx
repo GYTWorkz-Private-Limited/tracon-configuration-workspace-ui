@@ -14,7 +14,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Link } from "@tanstack/react-router";
-import { ArrowLeft, FileText, PackagePlus, Send } from "lucide-react";
+import { ArrowLeft, Boxes, FileText, Package, PackagePlus, Send } from "lucide-react";
 
 import { ProductHeader } from "@/components/layout/ProductHeader";
 import { WorkflowStepper } from "@/components/layout/WorkflowStepper";
@@ -57,6 +57,9 @@ export function QuoteWorkspace({
   const [addOpen, setAddOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [approvalOpen, setApprovalOpen] = useState(false);
+  // Which of the quotation's articles is being worked on. "all" is the whole
+  // quotation, and is the only state a single-product quotation ever has.
+  const [focus, setFocus] = useState<string>("all");
 
   useEffect(() => setMounted(true), []);
 
@@ -66,11 +69,17 @@ export function QuoteWorkspace({
     ensureQuoteFor(podId);
   }, [podId]);
 
-  const selectedIds = sel ? sel.split(",").filter(Boolean) : (pod?.articles ?? []).map((a) => a.id);
+  const items = draft?.items ?? [];
+
+  // A multi-item quotation names its articles in the route; anything added to
+  // the quote afterwards belongs on the bar too, so the navigation always
+  // shows what the quotation actually contains.
+  const selectedIds = sel
+    ? Array.from(new Set([...sel.split(",").filter(Boolean), ...items.map((i) => i.articleId)]))
+    : (pod?.articles ?? []).map((a) => a.id);
   const sheets = (pod?.articles ?? []).filter((a) => selectedIds.includes(a.id));
   const article = pod?.articles.find((a) => a.id === articleId) ?? pod?.articles[0];
 
-  const items = draft?.items ?? [];
   const totals = useQuoteTotals(podId, items);
 
   if (!pod || !article) {
@@ -88,6 +97,10 @@ export function QuoteWorkspace({
 
   const quotedIds = new Set(items.map((i) => i.articleId));
   const canAddMore = pod.articles.some((a) => !quotedIds.has(a.id));
+
+  // Removing the article being viewed must return to the whole quotation
+  // rather than leave the page looking empty.
+  const activeFocus = focus !== "all" && items.some((i) => i.id === focus) ? focus : "all";
 
   // One priced view of the quote, shared by the workspace's own totals, the
   // customer preview and the approval report — nobody re-derives it.
@@ -153,11 +166,20 @@ export function QuoteWorkspace({
           {items.length === 0 ? (
             <EmptyState onAdd={() => setAddOpen(true)} />
           ) : (
-            <div className="space-y-5">
-              {items.map((item, i) => (
-                <QuoteItemCard key={item.id} podId={podId} item={item} index={i} />
-              ))}
-            </div>
+            <>
+              {/* One product needs no navigation — the quotation IS the
+                  product. Several do, and they get the same cards either way. */}
+              {items.length > 1 && (
+                <QuoteArticleNav items={items} active={activeFocus} onSelect={setFocus} />
+              )}
+              <div className="space-y-5">
+                {items.map((item, i) =>
+                  activeFocus === "all" || activeFocus === item.id ? (
+                    <QuoteItemCard key={item.id} podId={podId} item={item} index={i} />
+                  ) : null,
+                )}
+              </div>
+            </>
           )}
 
           {items.length > 0 && (
@@ -290,12 +312,18 @@ function useQuoteTotals(podId: string, items: QuoteItem[]): Totals {
             rates: item.rates,
             targetMarginPct: m.line.targetMarginPct,
             moqOverride: m.line.moqOverride,
+            finalCostOverrideInr: m.line.finalCostOverrideInr,
             unitsPerSet: m.unitsPerSet,
             name: m.name,
             articleId: m.articleId,
             image: m.image,
           })),
-          { rates: item.rates, targetMarginPct: item.targetMarginPct, sets: item.sets },
+          {
+            rates: item.rates,
+            targetMarginPct: item.targetMarginPct,
+            sets: item.sets,
+            finalCostOverrideInr: item.finalCostOverrideInr,
+          },
         );
         orderValueUsd += kit.orderValueUsd;
         costUsd += kit.commercial.finalCostUsd * kit.sets;
@@ -313,6 +341,7 @@ function useQuoteTotals(podId: string, items: QuoteItem[]): Totals {
         rates: item.rates,
         targetMarginPct: line.targetMarginPct ?? item.targetMarginPct,
         moqOverride: line.moqOverride,
+        finalCostOverrideInr: line.finalCostOverrideInr,
       });
       orderValueUsd += priced.orderValueUsd;
       costUsd += priced.commercial.finalCostUsd * priced.moq;
@@ -374,6 +403,74 @@ function QuoteTotalsStrip({
         ))}
       </dl>
     </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Article navigation — only when the quotation holds more than one item
+ * ------------------------------------------------------------------ */
+
+/**
+ * Move between the articles and kits included on this quotation.
+ *
+ * It filters what is on screen; it does not change what is on the quote. "All
+ * items" is the default so a multi-product quotation still reads as ONE
+ * document — the same stacked cards a single product shows — and focusing an
+ * article is a way to work on it, not a different quotation.
+ */
+function QuoteArticleNav({
+  items,
+  active,
+  onSelect,
+}: {
+  items: QuoteItem[];
+  active: string;
+  onSelect: (id: string) => void;
+}) {
+  const pill = (selected: boolean) =>
+    cn(
+      "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
+      selected
+        ? "border-brand-700 bg-brand-50 font-semibold text-brand-800"
+        : "border-hairline bg-surface text-ink-600 hover:bg-surface-alt hover:text-ink-900",
+    );
+
+  return (
+    <nav
+      aria-label="Articles on this quotation"
+      className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-hairline bg-surface px-3.5 py-2.5"
+    >
+      <span className="mr-1 text-[10px] font-medium uppercase tracking-[0.12em] text-ink-500">
+        On this quotation
+      </span>
+      <button
+        type="button"
+        onClick={() => onSelect("all")}
+        aria-current={active === "all"}
+        className={pill(active === "all")}
+      >
+        All items
+        <span className="tabular-nums text-ink-400">{items.length}</span>
+      </button>
+      {items.map((item) => (
+        <button
+          key={item.id}
+          type="button"
+          onClick={() => onSelect(item.id)}
+          aria-current={active === item.id}
+          className={pill(active === item.id)}
+        >
+          {item.image ? (
+            <img src={item.image} alt="" className="h-4 w-4 rounded-sm object-cover" />
+          ) : item.kind === "kit" ? (
+            <Boxes className="h-3.5 w-3.5 text-ink-400" aria-hidden />
+          ) : (
+            <Package className="h-3.5 w-3.5 text-ink-400" aria-hidden />
+          )}
+          {item.kind === "kit" ? `Kit — ${item.name}` : item.name}
+        </button>
+      ))}
+    </nav>
   );
 }
 

@@ -56,6 +56,12 @@ export type PricingRequest = {
   targetMarginPct?: number;
   /** quantity actually being quoted, when it differs from the build's MOQ */
   moqOverride?: number;
+  /**
+   * Total cost fixed by hand on the quotation, ₹ / pc. Direct cost and the
+   * provisions are still computed and still shown — only the total they add up
+   * to is replaced, and selling price and margin follow from it as usual.
+   */
+  finalCostOverrideInr?: number;
 };
 
 /**
@@ -181,6 +187,7 @@ export function priceLine(req: PricingRequest): PricedLine {
     fxRate,
     targetMarginPct: marginPct,
     buyerTargetUsd: commercialInputs.buyerTargetUsd,
+    finalCostOverrideInr: req.finalCostOverrideInr,
   });
 
   const moq = moqOf(variant.parameters);
@@ -240,7 +247,13 @@ export type PricedKit = {
  */
 export function priceKit(
   members: KitMemberRequest[],
-  opts: { rates?: Partial<ProvisionRates>; targetMarginPct?: number; sets?: number },
+  opts: {
+    rates?: Partial<ProvisionRates>;
+    targetMarginPct?: number;
+    sets?: number;
+    /** total cost fixed by hand for the SET, ₹ / set */
+    finalCostOverrideInr?: number;
+  },
 ): PricedKit {
   const priced = members.map((m) => ({
     ...priceLine(m),
@@ -264,6 +277,7 @@ export function priceKit(
       fxRate,
       targetMarginPct: marginPct,
       buyerTargetUsd: Math.round(buyerTargetUsd * 100) / 100,
+      finalCostOverrideInr: opts.finalCostOverrideInr,
     },
   );
 

@@ -59,15 +59,13 @@ import { RequestedChangesWorkspace } from "./RequestedChangesWorkspace";
 import type { ApprovalSnapshot } from "@/lib/approvalsStore";
 
 import { useChangesGate } from "@/lib/requestedChangesStore";
-import { addProducts, ensureQuoteFor, useQuoteDraft } from "@/lib/quoteDraftStore";
-import { usePod } from "@/lib/podsStore";
 import {
   markReadyForQuotation,
   useIsReadyForQuotation,
   READY_LABEL,
   NOT_READY_LABEL,
 } from "@/lib/quotationReadiness";
-import { ArticleSelectionModal } from "@/components/quotation/ArticleSelectionModal";
+import { QuotationEntryFlow } from "@/components/quotation/QuotationEntryFlow";
 type Tab = "overview" | "variants" | "financial" | "buildup" | "trends" | "ai";
 
 type ReportArticle = { id: string; name: string; size?: string; moq?: string };
@@ -142,10 +140,7 @@ export function CostingIntelligenceReport({
    * marked ready, "Continue to Quotation" is not the action on offer — the
    * decision in front of the user is whether the costing is finished at all.
    */
-  const pod = usePod(navPodId ?? "");
   const isReady = useIsReadyForQuotation(navPodId, navArticleId);
-  const draft = useQuoteDraft(navPodId ?? "");
-  const quotedIds = new Set((draft?.items ?? []).map((i) => i.articleId));
 
   const metricsByVariant = useMemo(
     () =>
@@ -521,26 +516,15 @@ export function CostingIntelligenceReport({
 
       {/*
        * Continuing to Quotation is two decisions, not one: this costing is
-       * ready (settled above), and THESE are the ready items worth quoting.
+       * ready (settled above), and then — one product, or several?
        */}
       {navPodId && (
-        <ArticleSelectionModal
+        <QuotationEntryFlow
           open={selectOpen}
           onClose={() => setSelectOpen(false)}
           podId={navPodId}
-          articles={pod?.articles ?? []}
-          alreadyQuotedIds={quotedIds}
-          preselect={navArticleId ? [navArticleId] : undefined}
-          onConfirm={(ids) => {
-            ensureQuoteFor(navPodId);
-            addProducts(navPodId, ids);
-            setSelectOpen(false);
-            navigate({
-              to: "/quotation/$podId/$articleId",
-              params: { podId: navPodId, articleId: ids[0] },
-              search: { sel: undefined },
-            });
-          }}
+          articleId={navArticleId}
+          articleName={productName}
         />
       )}
     </div>

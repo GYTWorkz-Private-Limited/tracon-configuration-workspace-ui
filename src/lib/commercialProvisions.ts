@@ -195,6 +195,16 @@ export type CommercialSettings = {
   targetMarginPct: number;
   /** what the buyer has said they want to pay, $ / pc */
   buyerTargetUsd: number;
+  /**
+   * A total cost the commercial team has fixed by hand before sending the
+   * quotation for approval, ₹ / pc (or ₹ / set for a kit).
+   *
+   * It replaces the calculated final cost and nothing else: the provisions are
+   * still computed and still shown, and selling price and margin keep running
+   * off the SAME formula below. This is an override of one number, not a
+   * second pricing system.
+   */
+  finalCostOverrideInr?: number;
 };
 
 export type ProvisionLine = ProvisionDef & {
@@ -224,9 +234,13 @@ export type CommercialResult = {
   otherIndirectInr: number;
   provisionsInr: number;
 
-  /** direct cost + every provision, ₹ / pc */
+  /** direct cost + every provision, ₹ / pc — the edited figure when one is held */
   finalCostInr: number;
   finalCostUsd: number;
+  /** what direct cost + provisions comes to, before any hand-edit */
+  calculatedFinalCostInr: number;
+  /** the total cost above was typed by the commercial team, not calculated */
+  finalCostEdited: boolean;
 
   fxRate: number;
   marginPct: number;
@@ -291,7 +305,14 @@ export function computeCommercials(
   const otherIndirectInr = pick(OTHER_INDIRECT);
   const provisionsInr = totalSaleInr;
 
-  const finalCostInr = round2(directCostInr + totalPurchaseInr + totalSaleInr);
+  const calculatedFinalCostInr = round2(directCostInr + totalPurchaseInr + totalSaleInr);
+
+  // A hand-fixed total cost replaces the calculated one and then flows through
+  // exactly the same arithmetic — so an edited quote is still priced by this
+  // module, never alongside it.
+  const override = settings.finalCostOverrideInr;
+  const finalCostEdited = typeof override === "number" && Number.isFinite(override) && override > 0;
+  const finalCostInr = finalCostEdited ? round2(override) : calculatedFinalCostInr;
 
   // Margin is quoted on the selling price, not as a mark-up on cost — which is
   // how the commercial team states it and how the buyer reads it back.
@@ -314,6 +335,8 @@ export function computeCommercials(
     provisionsInr,
     finalCostInr,
     finalCostUsd: round2(finalCostInr / fxRate),
+    calculatedFinalCostInr,
+    finalCostEdited,
     fxRate,
     marginPct: settings.targetMarginPct,
     sellingInr,

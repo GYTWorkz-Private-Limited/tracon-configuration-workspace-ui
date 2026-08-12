@@ -54,12 +54,18 @@ export function viewQuote(
           rates: item.rates,
           targetMarginPct: m.line.targetMarginPct,
           moqOverride: m.line.moqOverride,
+          finalCostOverrideInr: m.line.finalCostOverrideInr,
           unitsPerSet: m.unitsPerSet,
           name: m.name,
           articleId: m.articleId,
           image: m.image,
         })),
-        { rates: item.rates, targetMarginPct: item.targetMarginPct, sets: item.sets },
+        {
+          rates: item.rates,
+          targetMarginPct: item.targetMarginPct,
+          sets: item.sets,
+          finalCostOverrideInr: item.finalCostOverrideInr,
+        },
       );
       return { kind: "kit", item, priced };
     }
@@ -73,6 +79,7 @@ export function viewQuote(
       rates: item.rates,
       targetMarginPct: line.targetMarginPct ?? item.targetMarginPct,
       moqOverride: line.moqOverride,
+      finalCostOverrideInr: line.finalCostOverrideInr,
     });
     return { kind: "product", item, priced };
   });

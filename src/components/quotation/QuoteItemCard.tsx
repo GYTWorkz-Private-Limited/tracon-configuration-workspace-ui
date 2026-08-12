@@ -33,6 +33,8 @@ import {
   addLine,
   removeItem,
   removeLine,
+  setItemFinalCost,
+  setLineFinalCost,
   setQuotedLine,
   toggleCollapsed,
   updateLine,
@@ -80,6 +82,7 @@ function ProductCard({ podId, item, index }: { podId: string; item: QuoteItem; i
             rates: item.rates,
             targetMarginPct: l.targetMarginPct ?? item.targetMarginPct,
             moqOverride: l.moqOverride,
+            finalCostOverrideInr: l.finalCostOverrideInr,
           }),
           parentBuild: build.parentId ? builds.find((b) => b.id === build.parentId) : undefined,
         };
@@ -141,6 +144,7 @@ function ProductCard({ podId, item, index }: { podId: string; item: QuoteItem; i
           quantity={quoted.priced.moq}
           quantityLabel={`${quoted.priced.moq.toLocaleString("en-IN")} pcs`}
           orderValueUsd={quoted.priced.orderValueUsd}
+          onSaveFinalCost={(v) => setLineFinalCost(podId, item.id, quoted.lineId, v)}
         />
       </div>
     </article>
@@ -170,13 +174,19 @@ function KitCard({ podId, item, index }: { podId: string; item: QuoteItem; index
             rates: item.rates,
             targetMarginPct: m.line.targetMarginPct,
             moqOverride: m.line.moqOverride,
+            finalCostOverrideInr: m.line.finalCostOverrideInr,
             unitsPerSet: m.unitsPerSet,
             name: m.name,
             articleId: m.articleId,
             image: m.image,
           };
         }),
-        { rates: item.rates, targetMarginPct: item.targetMarginPct, sets: item.sets },
+        {
+          rates: item.rates,
+          targetMarginPct: item.targetMarginPct,
+          sets: item.sets,
+          finalCostOverrideInr: item.finalCostOverrideInr,
+        },
       ),
     [podId, item, selections],
   );
@@ -246,6 +256,7 @@ function KitCard({ podId, item, index }: { podId: string; item: QuoteItem; index
               quantity={kit.sets}
               quantityLabel={`${kit.sets.toLocaleString("en-IN")} sets`}
               orderValueUsd={kit.orderValueUsd}
+              onSaveFinalCost={(v) => setItemFinalCost(podId, item.id, v)}
             />
           </div>
         </>
