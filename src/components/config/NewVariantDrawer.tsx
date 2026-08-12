@@ -14,14 +14,14 @@ import {
 type Method = "blank" | "duplicate" | "template" | "ai";
 
 type TemplateKey =
-  | "balanced"
-  | "lowest-cost"
-  | "premium"
-  | "value-engineered"
-  | "sustainable"
-  | "fast-delivery";
+  "balanced" | "lowest-cost" | "premium" | "value-engineered" | "sustainable" | "fast-delivery";
 
-const TEMPLATES: { key: TemplateKey; name: string; tagline: string; patch: Partial<CushionInputs> }[] = [
+const TEMPLATES: {
+  key: TemplateKey;
+  name: string;
+  tagline: string;
+  patch: Partial<CushionInputs>;
+}[] = [
   { key: "balanced", name: "Balanced", tagline: "Neutral commercial baseline", patch: {} },
   {
     key: "lowest-cost",
@@ -98,7 +98,14 @@ const CERT_OPTIONS: { label: string; rate: number }[] = [
   { label: "BCI Cotton", rate: 3 },
 ];
 
-export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "variant", parents = [] }: Props) {
+export function NewVariantDrawer({
+  open,
+  onClose,
+  active,
+  onCreate,
+  mode = "variant",
+  parents = [],
+}: Props) {
   const [method, setMethod] = useState<Method>("blank");
 
   // Blank state
@@ -163,7 +170,6 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
   }, [open, onClose]);
 
   if (!open) return null;
-
 
   const makeId = (prefix: string) => `v-${prefix}-${Date.now()}`;
 
@@ -283,10 +289,25 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
     });
   };
 
-  const methods: { key: Method; label: string; icon: React.ComponentType<{ className?: string }>; desc: string }[] = [
-    { key: "blank", label: "Create blank", icon: FilePlus2, desc: "Start fresh · commercials only" },
+  const methods: {
+    key: Method;
+    label: string;
+    icon: React.ComponentType<{ className?: string }>;
+    desc: string;
+  }[] = [
+    {
+      key: "blank",
+      label: "Create blank",
+      icon: FilePlus2,
+      desc: "Start fresh · commercials only",
+    },
     { key: "duplicate", label: "Duplicate current", icon: Copy, desc: `Copy of ${active.name}` },
-    { key: "template", label: "Start from template", icon: LayoutTemplate, desc: "Balanced · Premium · Value…" },
+    {
+      key: "template",
+      label: "Start from template",
+      icon: LayoutTemplate,
+      desc: "Balanced · Premium · Value…",
+    },
     { key: "ai", label: "Ask AI", icon: Sparkles, desc: "Describe the variant you want" },
   ];
 
@@ -344,10 +365,19 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
                     : "border-line-200 bg-white text-ink-800 hover:border-ink-300",
                 )}
               >
-                <Icon className={cn("mt-0.5 h-4 w-4 shrink-0", active ? "text-brand-700" : "text-ink-600")} />
+                <Icon
+                  className={cn(
+                    "mt-0.5 h-4 w-4 shrink-0",
+                    active ? "text-brand-700" : "text-ink-600",
+                  )}
+                />
                 <div>
                   <div className="text-[13px] font-semibold leading-tight">{m.label}</div>
-                  <div className={cn("mt-0.5 text-[11px]", active ? "text-brand-700" : "text-ink-500")}>{m.desc}</div>
+                  <div
+                    className={cn("mt-0.5 text-[11px]", active ? "text-brand-700" : "text-ink-500")}
+                  >
+                    {m.desc}
+                  </div>
                 </div>
               </button>
             );
@@ -365,7 +395,9 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
                   className="w-full rounded-md border border-line-200 bg-white px-3 py-2 text-[13px] text-ink-900 outline-none focus:border-ink-400"
                 >
                   {variantParents.map((p) => (
-                    <option key={p.id} value={p.id}>{p.name}</option>
+                    <option key={p.id} value={p.id}>
+                      {p.name}
+                    </option>
                   ))}
                 </select>
               </Field>
@@ -379,7 +411,9 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
                 />
               </Field>
               <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-500">Option type</div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-500">
+                  Option type
+                </div>
                 <div className="flex flex-wrap gap-1.5">
                   {OPTION_TYPES.map((t) => {
                     const on = optType === t;
@@ -449,7 +483,9 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
                     className="w-full rounded-md border border-line-200 bg-white px-3 py-2 text-[13px] text-ink-900 outline-none focus:border-ink-400"
                   >
                     {PACKAGING_OPTIONS.map((o) => (
-                      <option key={o.label} value={o.label}>{o.label} · ₹{o.rate}/pc</option>
+                      <option key={o.label} value={o.label}>
+                        {o.label} · ₹{o.rate}/pc
+                      </option>
                     ))}
                   </select>
                 </Field>
@@ -462,7 +498,9 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
                     className="w-full rounded-md border border-line-200 bg-white px-3 py-2 text-[13px] text-ink-900 outline-none focus:border-ink-400"
                   >
                     {TESTING_PROFILES.map((o) => (
-                      <option key={o.label} value={o.label}>{o.label} · ₹{o.rate}/pc</option>
+                      <option key={o.label} value={o.label}>
+                        {o.label} · ₹{o.rate}/pc
+                      </option>
                     ))}
                   </select>
                 </Field>
@@ -475,7 +513,9 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
                     className="w-full rounded-md border border-line-200 bg-white px-3 py-2 text-[13px] text-ink-900 outline-none focus:border-ink-400"
                   >
                     {CERT_OPTIONS.map((o) => (
-                      <option key={o.label} value={o.label}>{o.label} · ₹{o.rate}/pc</option>
+                      <option key={o.label} value={o.label}>
+                        {o.label} · ₹{o.rate}/pc
+                      </option>
                     ))}
                   </select>
                 </Field>
@@ -493,8 +533,9 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
               )}
 
               <p className="text-[11px] text-ink-500">
-                An option inherits everything from <span className="font-medium text-ink-700">{parent.name}</span> and
-                stores only the values you change here.
+                An option inherits everything from{" "}
+                <span className="font-medium text-ink-700">{parent.name}</span> and stores only the
+                values you change here.
               </p>
             </div>
           ) : null}
@@ -518,7 +559,9 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
                     className="w-full rounded-md border border-line-200 bg-white px-3 py-2 text-[13px] text-ink-900 outline-none focus:border-ink-400"
                   >
                     {[16, 18, 20, 24].map((s) => (
-                      <option key={s} value={s}>{s}" × {s}"</option>
+                      <option key={s} value={s}>
+                        {s}" × {s}"
+                      </option>
                     ))}
                   </select>
                 </Field>
@@ -537,7 +580,9 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
                     className="w-full rounded-md border border-line-200 bg-white px-3 py-2 text-[13px] text-ink-900 outline-none focus:border-ink-400"
                   >
                     {[185, 200, 240, 350].map((g) => (
-                      <option key={g} value={g}>{g} GSM</option>
+                      <option key={g} value={g}>
+                        {g} GSM
+                      </option>
                     ))}
                   </select>
                 </Field>
@@ -568,7 +613,8 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
                 </Field>
               </div>
               <p className="text-[11px] text-ink-500">
-                Fabric, process, trims and packaging can be set inside the configurator after creation.
+                Fabric, process, trims and packaging can be set inside the configurator after
+                creation.
               </p>
             </div>
           )}
@@ -576,7 +622,9 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
           {mode !== "option" && method === "duplicate" && (
             <div className="space-y-4">
               <div className="rounded-lg border border-line-200 bg-surface-alt px-3 py-2.5">
-                <div className="text-[11px] uppercase tracking-wider text-ink-500">Source variant</div>
+                <div className="text-[11px] uppercase tracking-wider text-ink-500">
+                  Source variant
+                </div>
                 <div className="mt-0.5 text-[13px] font-semibold text-ink-900">{active.name}</div>
                 <div className="text-[11px] text-ink-500">{active.tagline}</div>
               </div>
@@ -606,7 +654,9 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
                 />
               </Field>
               <div>
-                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-500">Template</div>
+                <div className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-ink-500">
+                  Template
+                </div>
                 <div className="grid grid-cols-2 gap-2">
                   {TEMPLATES.map((t) => {
                     const on = tplKey === t.key;
@@ -622,7 +672,12 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
                         )}
                       >
                         <div className="text-[13px] font-semibold">{t.name}</div>
-                        <div className={cn("mt-0.5 text-[11px]", on ? "text-brand-700" : "text-ink-500")}>
+                        <div
+                          className={cn(
+                            "mt-0.5 text-[11px]",
+                            on ? "text-brand-700" : "text-ink-500",
+                          )}
+                        >
                           {t.tagline}
                         </div>
                       </button>
@@ -656,7 +711,6 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
                   "Lower MOQ · faster delivery",
                   "Value engineered under $5",
                 ].map((s) => (
-
                   <button
                     key={s}
                     onClick={() => setAiPrompt(s)}
@@ -716,7 +770,11 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
               disabled={aiLoading || !aiPrompt.trim()}
               className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-semibold text-white shadow-sm hover:bg-brand-800 disabled:opacity-60"
             >
-              {aiLoading ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Sparkles className="h-3.5 w-3.5" />}
+              {aiLoading ? (
+                <Loader2 className="h-3.5 w-3.5 animate-spin" />
+              ) : (
+                <Sparkles className="h-3.5 w-3.5" />
+              )}
               {aiLoading ? "Generating…" : "Generate variant"}
             </button>
           )}
@@ -726,12 +784,24 @@ export function NewVariantDrawer({ open, onClose, active, onCreate, mode = "vari
   );
 }
 
-function Field({ label, optional, children }: { label: string; optional?: boolean; children: React.ReactNode }) {
+function Field({
+  label,
+  optional,
+  children,
+}: {
+  label: string;
+  optional?: boolean;
+  children: React.ReactNode;
+}) {
   return (
     <label className="block">
       <div className="mb-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-ink-500">
         {label}
-        {optional && <span className="text-[10px] font-normal normal-case tracking-normal text-ink-400">optional</span>}
+        {optional && (
+          <span className="text-[10px] font-normal normal-case tracking-normal text-ink-400">
+            optional
+          </span>
+        )}
       </div>
       {children}
     </label>

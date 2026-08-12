@@ -6,8 +6,8 @@
 // sees is a single combined position computed once for the set, not two
 // unrelated quotes sitting next to each other.
 
-import { useEffect, useMemo } from "react";
-import { Boxes, ChevronDown, Package, Settings2, Trash2 } from "lucide-react";
+import { useEffect, useMemo, useState } from "react";
+import { ArrowRight, Boxes, ChevronDown, Package, Settings2, Trash2, Undo2 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 import { inr, usd } from "@/lib/commercialProvisions";
@@ -37,6 +37,8 @@ import {
   setItemFinalCost,
   setItemSellingPrice,
   setLineBuild,
+  clearRejection,
+  rejectItem,
   setLineFinalCost,
   setLineSellingPrice,
   setQuotedLine,
@@ -204,6 +206,8 @@ function ProductCard({ podId, quotationId, item, index, readOnly, showSummary }:
             updateLine(quotationId, item.id, lineId, { moqOverride: undefined })
           }
           onBuild={(lineId, buildId) => setLineBuild(quotationId, item.id, lineId, buildId)}
+          onSellingPrice={(lineId, v) => setLineSellingPrice(quotationId, item.id, lineId, v)}
+          frozen={Boolean(item.rejected)}
         />
       </div>
 
@@ -349,6 +353,8 @@ function KitCard({ podId, quotationId, item, index, readOnly, showSummary }: Car
                 updateLine(quotationId, item.id, lineId, { moqOverride: undefined })
               }
               onBuild={(lineId, buildId) => setLineBuild(quotationId, item.id, lineId, buildId)}
+              onSellingPrice={(lineId, v) => setLineSellingPrice(quotationId, item.id, lineId, v)}
+              frozen={Boolean(item.rejected)}
             />
           </div>
 
@@ -497,6 +503,8 @@ function CardHeader({
   readOnly?: boolean;
 }) {
   const isKit = item.kind === "kit";
+  const [rejecting, setRejecting] = useState(false);
+  const [reason, setReason] = useState("");
 
   return (
     <header
@@ -549,8 +557,39 @@ function CardHeader({
             {kindIcon}
             {kindLabel}
           </span>
+          {item.rejected && (
+            <span className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.06em] text-amber-900">
+              Sent back for recosting
+            </span>
+          )}
         </div>
         <p className="mt-0.5 text-[11.5px] text-ink-500">{subtitle}</p>
+
+        {/* Sent back for recosting: the line stays visible and stays on the
+            quotation — what changed is that it can no longer be priced, and
+            the quotation cannot go out while it is like this. */}
+        {item.rejected && (
+          <div className="mt-1.5 flex flex-wrap items-center gap-2">
+            <Link
+              to="/config/$podId/$articleId"
+              params={{ podId, articleId: item.articleId }}
+              search={{ sel: undefined }}
+              className="inline-flex items-center gap-1 text-[11.5px] font-medium text-brand-700 hover:underline"
+            >
+              View in Costing <ArrowRight className="h-3 w-3" aria-hidden />
+            </Link>
+            <span className="text-[11.5px] text-ink-500">{item.rejected.reason}</span>
+            {!readOnly && (
+              <button
+                type="button"
+                onClick={() => clearRejection(quotationId, item.id)}
+                className="inline-flex items-center gap-1 rounded border border-hairline bg-surface px-1.5 py-0.5 text-[11px] font-medium text-ink-600 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                <Undo2 className="h-3 w-3" aria-hidden /> Undo
+              </button>
+            )}
+          </div>
+        )}
       </div>
 
       <div className="flex shrink-0 items-start gap-3">
@@ -583,6 +622,15 @@ function CardHeader({
             <Settings2 className="h-3.5 w-3.5" />
             Re-cost
           </Link>
+          {!readOnly && !item.rejected && (
+            <button
+              type="button"
+              onClick={() => setRejecting(true)}
+              className="rounded px-1.5 py-1 text-[10.5px] font-medium text-[#8f2c22] hover:bg-[#8f2c22]/10 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              Reject
+            </button>
+          )}
           <button
             type="button"
             hidden={readOnly}
@@ -594,6 +642,69 @@ function CardHeader({
           </button>
         </div>
       </div>
+
+      {/* Rejecting is a request to another team, so it carries a reason —
+          "this needs recosting" without saying why is a round trip nobody can
+          answer. */}
+      {rejecting && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label={`Reject ${item.name} for recosting`}
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+        >
+          <button
+            className="absolute inset-0 bg-ink-900/40"
+            aria-label="Cancel"
+            onClick={() => setRejecting(false)}
+          />
+          <div className="relative w-full max-w-[460px] rounded-xl border border-hairline bg-surface p-5 shadow-2xl">
+            <h2 className="text-[15px] font-semibold text-ink-900">
+              Reject {item.name} for recosting
+            </h2>
+            <p className="mt-1.5 text-[12.5px] text-ink-500">
+              It stays on the quotation, frozen, and the quotation cannot be sent until it comes
+              back. Nothing is written into Costing — this records the ask.
+            </p>
+            <label
+              htmlFor={`reject-${item.id}`}
+              className="mt-3 block text-[11.5px] font-medium text-ink-700"
+            >
+              Reason
+            </label>
+            <textarea
+              id={`reject-${item.id}`}
+              rows={3}
+              autoFocus
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="What has to change before this can be quoted?"
+              className="mt-1 w-full rounded-lg border border-hairline bg-surface px-3 py-2 text-[12.5px] text-ink-900 placeholder:text-ink-400 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-700/20"
+            />
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setRejecting(false)}
+                className="rounded-md border border-hairline bg-surface px-3.5 py-2 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                disabled={!reason.trim()}
+                onClick={() => {
+                  rejectItem(quotationId, item.id, reason);
+                  setReason("");
+                  setRejecting(false);
+                }}
+                className="rounded-md bg-[#8f2c22] px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-[#7a251c] disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </header>
   );
 }

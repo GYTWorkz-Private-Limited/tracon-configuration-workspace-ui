@@ -55,27 +55,60 @@ const PILLS: Pill[] = [
   {
     id: "margin30",
     label: "Reach 30% margin",
-    recipe: () => ({ marginPct: 30, qty: 5000, fabricPct: -3, packaging: "standard", testing: "standard" }),
+    recipe: () => ({
+      marginPct: 30,
+      qty: 5000,
+      fabricPct: -3,
+      packaging: "standard",
+      testing: "standard",
+    }),
   },
   {
     id: "reduce-price",
     label: "Reduce selling price",
-    recipe: (b) => ({ marginPct: Math.max(18, b.marginPct - 4), qty: 5000, fabricPct: -5, printingPct: -4, packaging: "basic" }),
+    recipe: (b) => ({
+      marginPct: Math.max(18, b.marginPct - 4),
+      qty: 5000,
+      fabricPct: -5,
+      printingPct: -4,
+      packaging: "basic",
+    }),
   },
   {
     id: "buyer-target",
     label: "Match buyer target",
-    recipe: () => ({ qty: 5000, fabricPct: -4, printingPct: -3, mfgPct: -2, packaging: "standard", testing: "standard" }),
+    recipe: () => ({
+      qty: 5000,
+      fabricPct: -4,
+      printingPct: -3,
+      mfgPct: -2,
+      packaging: "standard",
+      testing: "standard",
+    }),
   },
   {
     id: "lowest-cost",
     label: "Lowest cost",
-    recipe: () => ({ qty: 10000, fabricPct: -8, printingPct: -8, mfgPct: -6, packaging: "basic", testing: "none", certification: "none" }),
+    recipe: () => ({
+      qty: 10000,
+      fabricPct: -8,
+      printingPct: -8,
+      mfgPct: -6,
+      packaging: "basic",
+      testing: "none",
+      certification: "none",
+    }),
   },
   {
     id: "highest-profit",
     label: "Highest profit",
-    recipe: () => ({ marginPct: 34, qty: 5000, fabricPct: -2, packaging: "premium", certification: "oeko" }),
+    recipe: () => ({
+      marginPct: 34,
+      qty: 5000,
+      fabricPct: -2,
+      packaging: "premium",
+      certification: "oeko",
+    }),
   },
 ];
 
@@ -95,7 +128,14 @@ export function SensitivityAnalysis({ active, productName, targetPriceUsd, onApp
       certification: nearestKey(CERTIFICATION, base.certPerPc ?? 0),
     }),
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [base.qty, base.targetMarginPct, base.fxRate, base.packaging, base.testingPerPc, base.certPerPc],
+    [
+      base.qty,
+      base.targetMarginPct,
+      base.fxRate,
+      base.packaging,
+      base.testingPerPc,
+      base.certPerPc,
+    ],
   );
 
   const [d, setD] = useState<Drivers>(baseDrivers);
@@ -123,7 +163,10 @@ export function SensitivityAnalysis({ active, productName, targetPriceUsd, onApp
 
   const opts = { productName, variantName: active.name };
   const baseSheet = useMemo(() => buildCostingSheet(base, opts), [base, productName, active.name]);
-  const sheet = useMemo(() => buildCostingSheet({ ...base, ...patch }, opts), [base, patch, productName, active.name]);
+  const sheet = useMemo(
+    () => buildCostingSheet({ ...base, ...patch }, opts),
+    [base, patch, productName, active.name],
+  );
 
   const dirty = JSON.stringify(d) !== JSON.stringify(baseDrivers);
   const targetMet = sheet.spUsd <= targetPriceUsd;
@@ -134,16 +177,23 @@ export function SensitivityAnalysis({ active, productName, targetPriceUsd, onApp
     const rows: string[] = [];
     if (next.qty !== baseDrivers.qty) rows.push(`MOQ → ${next.qty.toLocaleString("en-IN")} pcs`);
     if (next.marginPct !== baseDrivers.marginPct) rows.push(`Target margin → ${next.marginPct}%`);
-    if (next.fabricPct) rows.push(`Fabric cost → ${next.fabricPct > 0 ? "+" : ""}${next.fabricPct}%`);
-    if (next.printingPct) rows.push(`Printing cost → ${next.printingPct > 0 ? "+" : ""}${next.printingPct}%`);
+    if (next.fabricPct)
+      rows.push(`Fabric cost → ${next.fabricPct > 0 ? "+" : ""}${next.fabricPct}%`);
+    if (next.printingPct)
+      rows.push(`Printing cost → ${next.printingPct > 0 ? "+" : ""}${next.printingPct}%`);
     if (next.mfgPct) rows.push(`Manufacturing → ${next.mfgPct > 0 ? "+" : ""}${next.mfgPct}%`);
     if (next.packaging !== baseDrivers.packaging)
       rows.push(`Packaging → ${PACKAGING.find((x) => x.key === next.packaging)!.label}`);
     if (next.testing !== baseDrivers.testing)
       rows.push(`Testing → ${TESTING.find((x) => x.key === next.testing)!.label}`);
     if (next.certification !== baseDrivers.certification)
-      rows.push(`Certification → ${CERTIFICATION.find((x) => x.key === next.certification)!.label}`);
-    setRecipe({ pill: p.label, rows: rows.length ? rows : ["No change needed — drivers already optimal"] });
+      rows.push(
+        `Certification → ${CERTIFICATION.find((x) => x.key === next.certification)!.label}`,
+      );
+    setRecipe({
+      pill: p.label,
+      rows: rows.length ? rows : ["No change needed — drivers already optimal"],
+    });
   };
 
   const reset = () => {
@@ -158,7 +208,8 @@ export function SensitivityAnalysis({ active, productName, targetPriceUsd, onApp
         <div>
           <h3 className="text-[14px] font-semibold text-ink-900">Sensitivity analysis</h3>
           <p className="mt-0.5 text-[11.5px] text-ink-500">
-            Adjust key pricing drivers and instantly see their impact on profitability and quotation.
+            Adjust key pricing drivers and instantly see their impact on profitability and
+            quotation.
           </p>
         </div>
         <span className="inline-flex shrink-0 items-center gap-1 rounded-full bg-brand-50 px-2 py-[3px] text-[10px] font-semibold uppercase tracking-[0.06em] text-brand-700">
@@ -189,10 +240,14 @@ export function SensitivityAnalysis({ active, productName, targetPriceUsd, onApp
 
       {recipe && (
         <div className="mt-3 rounded-lg border border-brand-200 bg-brand-50/60 p-3">
-          <div className="text-[12px] font-semibold text-brand-800">AI recommendation applied · {recipe.pill}</div>
+          <div className="text-[12px] font-semibold text-brand-800">
+            AI recommendation applied · {recipe.pill}
+          </div>
           <ul className="mt-1.5 space-y-0.5">
             {recipe.rows.map((r) => (
-              <li key={r} className="text-[12px] text-ink-800">{r}</li>
+              <li key={r} className="text-[12px] text-ink-800">
+                {r}
+              </li>
             ))}
           </ul>
           <p className="mt-1.5 text-[11px] text-ink-500">
@@ -229,26 +284,59 @@ export function SensitivityAnalysis({ active, productName, targetPriceUsd, onApp
           </DriverGroup>
 
           <DriverGroup title="Material">
-            <SliderRow label="Fabric cost" raw={d.fabricPct} ticks={PCT_TICKS} format={pct} onChange={(v) => set("fabricPct", v)} />
-            <SliderRow label="Printing cost" raw={d.printingPct} ticks={PCT_TICKS} format={pct} onChange={(v) => set("printingPct", v)} />
-            <SliderRow label="Manufacturing cost" raw={d.mfgPct} ticks={PCT_TICKS} format={pct} onChange={(v) => set("mfgPct", v)} />
+            <SliderRow
+              label="Fabric cost"
+              raw={d.fabricPct}
+              ticks={PCT_TICKS}
+              format={pct}
+              onChange={(v) => set("fabricPct", v)}
+            />
+            <SliderRow
+              label="Printing cost"
+              raw={d.printingPct}
+              ticks={PCT_TICKS}
+              format={pct}
+              onChange={(v) => set("printingPct", v)}
+            />
+            <SliderRow
+              label="Manufacturing cost"
+              raw={d.mfgPct}
+              ticks={PCT_TICKS}
+              format={pct}
+              onChange={(v) => set("mfgPct", v)}
+            />
           </DriverGroup>
 
           <DriverGroup title="Commercial charges">
             <div className="grid gap-3 sm:grid-cols-3">
-              <ChipRow label="Packaging" options={PACKAGING} value={d.packaging} onChange={(v) => set("packaging", v)} />
-              <ChipRow label="Testing" options={TESTING} value={d.testing} onChange={(v) => set("testing", v)} />
-              <ChipRow label="Certification" options={CERTIFICATION} value={d.certification} onChange={(v) => set("certification", v)} />
+              <ChipRow
+                label="Packaging"
+                options={PACKAGING}
+                value={d.packaging}
+                onChange={(v) => set("packaging", v)}
+              />
+              <ChipRow
+                label="Testing"
+                options={TESTING}
+                value={d.testing}
+                onChange={(v) => set("testing", v)}
+              />
+              <ChipRow
+                label="Certification"
+                options={CERTIFICATION}
+                value={d.certification}
+                onChange={(v) => set("certification", v)}
+              />
             </div>
           </DriverGroup>
-
         </div>
-
 
         {/* Live impact */}
         <aside className="h-fit rounded-xl border border-hairline bg-surface-alt/50 p-3 lg:sticky lg:top-3">
           <div className="flex items-center justify-between">
-            <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-500">Live impact</span>
+            <span className="text-[11px] font-semibold uppercase tracking-[0.06em] text-ink-500">
+              Live impact
+            </span>
             {dirty && (
               <span className="inline-flex items-center gap-1 text-[10.5px] font-medium text-amber-700">
                 <AlertTriangle className="h-3 w-3" /> Unsaved changes
@@ -257,14 +345,33 @@ export function SensitivityAnalysis({ active, productName, targetPriceUsd, onApp
           </div>
 
           <div className="mt-2.5 space-y-1.5">
-            <Impact label="Adjusted product cost" value={inr(sheet.grandTotal)} delta={sheet.grandTotal - baseSheet.grandTotal} invert />
-            <Impact label="Selling price (INR)" value={inr(sheet.spInr)} delta={sheet.spInr - baseSheet.spInr} />
-            <Impact label="Selling price (USD)" value={`$${sheet.spUsd.toFixed(2)}`} delta={sheet.spUsd - baseSheet.spUsd} />
-            <Impact label="Margin %" value={`${(sheet.marginPct * 100).toFixed(1)}%`} delta={(sheet.marginPct - baseSheet.marginPct) * 100} />
+            <Impact
+              label="Adjusted product cost"
+              value={inr(sheet.grandTotal)}
+              delta={sheet.grandTotal - baseSheet.grandTotal}
+              invert
+            />
+            <Impact
+              label="Selling price (INR)"
+              value={inr(sheet.spInr)}
+              delta={sheet.spInr - baseSheet.spInr}
+            />
+            <Impact
+              label="Selling price (USD)"
+              value={`$${sheet.spUsd.toFixed(2)}`}
+              delta={sheet.spUsd - baseSheet.spUsd}
+            />
+            <Impact
+              label="Margin %"
+              value={`${(sheet.marginPct * 100).toFixed(1)}%`}
+              delta={(sheet.marginPct - baseSheet.marginPct) * 100}
+            />
           </div>
 
           <div className="mt-3 rounded-lg border border-hairline bg-white p-3">
-            <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ink-500">Suggested quotation</div>
+            <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ink-500">
+              Suggested quotation
+            </div>
             <div className="mt-0.5 text-[22px] font-semibold tabular-nums text-ink-900 transition-all duration-300">
               ${sheet.spUsd.toFixed(2)}
             </div>
@@ -312,7 +419,9 @@ const PCT_TICKS = [-15, -10, -5, -2, 0, 2, 5, 10, 15];
 function DriverGroup({ title, children }: { title: string; children: React.ReactNode }) {
   return (
     <div className="rounded-xl border border-hairline p-3">
-      <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ink-500">{title}</div>
+      <div className="text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ink-500">
+        {title}
+      </div>
       <div className="mt-3 space-y-5">{children}</div>
     </div>
   );
@@ -435,8 +544,6 @@ function SliderRow({
   );
 }
 
-
-
 function ChipRow({
   label,
   options,
@@ -472,16 +579,33 @@ function ChipRow({
   );
 }
 
-function Impact({ label, value, delta, invert }: { label: string; value: string; delta: number; invert?: boolean }) {
+function Impact({
+  label,
+  value,
+  delta,
+  invert,
+}: {
+  label: string;
+  value: string;
+  delta: number;
+  invert?: boolean;
+}) {
   const flat = Math.abs(delta) < 0.005;
   const good = invert ? delta < 0 : delta > 0;
   return (
     <div className="flex items-baseline justify-between gap-2">
       <span className="text-[11.5px] text-ink-600">{label}</span>
       <span className="flex items-baseline gap-1.5">
-        <span className="text-[13px] font-semibold tabular-nums text-ink-900 transition-all duration-300">{value}</span>
+        <span className="text-[13px] font-semibold tabular-nums text-ink-900 transition-all duration-300">
+          {value}
+        </span>
         {!flat && (
-          <span className={cn("text-[10.5px] font-medium tabular-nums", good ? "text-brand-700" : "text-amber-700")}>
+          <span
+            className={cn(
+              "text-[10.5px] font-medium tabular-nums",
+              good ? "text-brand-700" : "text-amber-700",
+            )}
+          >
             {delta > 0 ? "▲" : "▼"}
             {Math.abs(delta) < 10 ? Math.abs(delta).toFixed(2) : Math.abs(delta).toFixed(0)}
           </span>

@@ -12,7 +12,10 @@ type Props = {
   productName: string;
   targetPriceUsd?: number;
   onClose: () => void;
+  /** Make a compared column the active configuration. */
   onApplyVariant?: (id: string) => void;
+  /** Start a new variant from a compared column. */
+  onDuplicateVariant?: (v: CushionVariant) => void;
 };
 
 export function CompareVariantsWorkspace({
@@ -21,6 +24,8 @@ export function CompareVariantsWorkspace({
   productName,
   targetPriceUsd,
   onClose,
+  onApplyVariant,
+  onDuplicateVariant,
 }: Props) {
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas">
@@ -59,6 +64,8 @@ export function CompareVariantsWorkspace({
           activeId={activeId}
           productName={productName}
           targetPriceUsd={targetPriceUsd}
+          onApplyVariant={onApplyVariant}
+          onDuplicateVariant={onDuplicateVariant}
         />
       </div>
     </div>

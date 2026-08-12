@@ -13,7 +13,9 @@ import {
   Loader2,
   Package,
   History,
+  X,
 } from "lucide-react";
+import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import { DrawerShell, ConfidenceBadge } from "./DrawerShell";
 import {
@@ -31,6 +33,8 @@ import {
 
 export type LibrarySelection = LibraryArticle;
 
+export type PickMode = "single" | "multiple";
+
 type Props = {
   open: boolean;
   onClose: () => void;
@@ -38,6 +42,14 @@ type Props = {
   subtitle?: string;
   submitLabel?: string;
   defaultBuyer?: string;
+  /**
+   * What the entry point implies. A slot that holds one article opens in
+   * "single"; "Add Product", which has no such limit, opens in "multiple".
+   * The user can still switch — the default is a guess, not a rule.
+   */
+  defaultMode?: PickMode;
+  /** Noun used in the confirmation toast — "article", "product", "kit item". */
+  noun?: string;
   onSubmit: (articles: LibraryArticle[]) => void;
 };
 
@@ -50,11 +62,16 @@ export function ArticleLibraryDrawer({
   subtitle = "Search the master catalogue, or create a new article from a tech pack.",
   submitLabel = "Add to POD",
   defaultBuyer,
+  defaultMode = "multiple",
+  noun = "article",
   onSubmit,
 }: Props) {
-  const [view, setView] = useState<"library" | "create">("library");
+  const [view, setView] = useState<"library" | "create" | "review">("library");
+  const [mode, setMode] = useState<PickMode>(defaultMode);
   const [q, setQ] = useState("");
-  const [buyer, setBuyer] = useState<string>(defaultBuyer && LIBRARY_FILTERS.buyer.includes(defaultBuyer) ? defaultBuyer : "all");
+  const [buyer, setBuyer] = useState<string>(
+    defaultBuyer && LIBRARY_FILTERS.buyer.includes(defaultBuyer) ? defaultBuyer : "all",
+  );
   const [category, setCategory] = useState("all");
   const [collection, setCollection] = useState("all");
   const [season, setSeason] = useState("all");
@@ -69,7 +86,9 @@ export function ArticleLibraryDrawer({
       setPicked([]);
       setPreview(null);
       setQ("");
+      setMode(defaultMode);
     }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open]);
 
   const all = useMemo(() => [...drafts, ...LIBRARY_ARTICLES], [drafts]);
@@ -92,12 +111,26 @@ export function ArticleLibraryDrawer({
   }, [all, q, buyer, category, collection, season, status]);
 
   const toggle = (id: string) =>
-    setPicked((p) => (p.includes(id) ? p.filter((x) => x !== id) : [...p, id]));
+    setPicked((p) =>
+      // One slot means one answer: picking replaces rather than accumulates.
+      mode === "single" ? [id] : p.includes(id) ? p.filter((x) => x !== id) : [...p, id],
+    );
 
+  const chosen = all.filter((a) => picked.includes(a.id));
+
+  /**
+   * Committing is deliberately two steps.
+   *
+   * A multi-select list is easy to mis-tick and impossible to re-read once the
+   * drawer has closed, so what was picked is shown back before anything is
+   * added — in the same panel, so nothing is lost by going back.
+   */
   const submit = () => {
-    const items = all.filter((a) => picked.includes(a.id));
-    if (!items.length) return;
-    onSubmit(items);
+    if (!chosen.length) return;
+    onSubmit(chosen);
+    toast.success(
+      chosen.length === 1 ? `${chosen[0].name} added` : `${chosen.length} ${noun}s added`,
+    );
     onClose();
   };
 
@@ -105,26 +138,88 @@ export function ArticleLibraryDrawer({
     <DrawerShell
       open={open}
       onClose={onClose}
-      title={view === "library" ? title : "Create New Article"}
-      subtitle={view === "library" ? subtitle : "Choose how the article data should come in."}
-      footer={
+      title={
+        view === "library" ? title : view === "review" ? "Review selection" : "Create New Article"
+      }
+      subtitle={
+        view === "library"
+          ? subtitle
+          : view === "review"
+            ? "Check what is about to be added. Nothing is committed until you confirm."
+            : "Choose how the article data should come in."
+      }
+      headerAction={
         view === "library" ? (
+          <div className="inline-flex rounded-lg border border-hairline bg-surface p-0.5">
+            {[
+              { id: "single" as PickMode, label: "Single" },
+              { id: "multiple" as PickMode, label: "Multiple" },
+            ].map((t) => (
+              <button
+                key={t.id}
+                type="button"
+                onClick={() => {
+                  setMode(t.id);
+                  // Coming down to one slot cannot keep four answers.
+                  if (t.id === "single") setPicked((p) => p.slice(0, 1));
+                }}
+                aria-pressed={mode === t.id}
+                className={cn(
+                  "rounded-md px-3 py-1 text-[12px] font-medium transition-colors",
+                  mode === t.id ? "bg-ink-900 text-white" : "text-ink-600 hover:text-ink-900",
+                )}
+              >
+                {t.label}
+              </button>
+            ))}
+          </div>
+        ) : undefined
+      }
+      footer={
+        view === "review" ? (
+          <>
+            <span className="text-[12px] text-ink-500">
+              {chosen.length} {noun}
+              {chosen.length === 1 ? "" : "s"} selected
+            </span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setView("library")}
+                className="rounded-md border border-hairline px-3 py-2 text-[13px] text-ink-700 hover:bg-surface"
+              >
+                Back
+              </button>
+              <button
+                onClick={submit}
+                disabled={!chosen.length}
+                className="inline-flex items-center gap-1.5 rounded-md bg-ink-900 px-3 py-2 text-[13px] font-medium text-white hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
+              >
+                <Plus className="h-4 w-4" /> Confirm & Add
+              </button>
+            </div>
+          </>
+        ) : view === "library" ? (
           <>
             <span className="text-[12px] text-ink-500">
               {picked.length ? `${picked.length} selected` : `${rows.length} articles`}
             </span>
             <div className="flex items-center gap-2">
-              <button onClick={onClose} className="rounded-md border border-hairline px-3 py-2 text-[13px] text-ink-700 hover:bg-surface">
+              <button
+                onClick={onClose}
+                className="rounded-md border border-hairline px-3 py-2 text-[13px] text-ink-700 hover:bg-surface"
+              >
                 Cancel
               </button>
               <button
-                onClick={submit}
+                onClick={() => setView("review")}
                 disabled={!picked.length}
                 className="inline-flex items-center gap-1.5 rounded-md bg-ink-900 px-3 py-2 text-[13px] font-medium text-white hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 <Plus className="h-4 w-4" /> {submitLabel}
                 {picked.length > 0 && (
-                  <span className="ml-1 rounded-full bg-white/20 px-1.5 text-[11px] tabular-nums">{picked.length}</span>
+                  <span className="ml-1 rounded-full bg-white/20 px-1.5 text-[11px] tabular-nums">
+                    {picked.length}
+                  </span>
                 )}
               </button>
             </div>
@@ -132,7 +227,13 @@ export function ArticleLibraryDrawer({
         ) : undefined
       }
     >
-      {view === "create" ? (
+      {view === "review" ? (
+        <ReviewSelection
+          articles={chosen}
+          noun={noun}
+          onRemove={(id) => setPicked((p) => p.filter((x) => x !== id))}
+        />
+      ) : view === "create" ? (
         <CreateNewArticle
           onBack={() => setView("library")}
           onCreated={(a) => {
@@ -169,10 +270,30 @@ export function ArticleLibraryDrawer({
               <span className="inline-flex items-center gap-1 text-[11px] uppercase tracking-wide text-ink-400">
                 <Filter className="h-3.5 w-3.5" /> Filters
               </span>
-              <Select value={buyer} onChange={setBuyer} label="Buyer" options={LIBRARY_FILTERS.buyer} />
-              <Select value={category} onChange={setCategory} label="Category" options={LIBRARY_FILTERS.category} />
-              <Select value={collection} onChange={setCollection} label="Collection" options={LIBRARY_FILTERS.collection} />
-              <Select value={season} onChange={setSeason} label="Season" options={LIBRARY_FILTERS.season} />
+              <Select
+                value={buyer}
+                onChange={setBuyer}
+                label="Buyer"
+                options={LIBRARY_FILTERS.buyer}
+              />
+              <Select
+                value={category}
+                onChange={setCategory}
+                label="Category"
+                options={LIBRARY_FILTERS.category}
+              />
+              <Select
+                value={collection}
+                onChange={setCollection}
+                label="Collection"
+                options={LIBRARY_FILTERS.collection}
+              />
+              <Select
+                value={season}
+                onChange={setSeason}
+                label="Season"
+                options={LIBRARY_FILTERS.season}
+              />
               <Select
                 value={status}
                 onChange={setStatus}
@@ -180,10 +301,18 @@ export function ArticleLibraryDrawer({
                 options={LIBRARY_FILTERS.status}
                 render={(s) => LIBRARY_STATUS_LABEL[s as keyof typeof LIBRARY_STATUS_LABEL] ?? s}
               />
-              {(buyer !== "all" || category !== "all" || collection !== "all" || season !== "all" || status !== "all") && (
+              {(buyer !== "all" ||
+                category !== "all" ||
+                collection !== "all" ||
+                season !== "all" ||
+                status !== "all") && (
                 <button
                   onClick={() => {
-                    setBuyer("all"); setCategory("all"); setCollection("all"); setSeason("all"); setStatus("all");
+                    setBuyer("all");
+                    setCategory("all");
+                    setCollection("all");
+                    setSeason("all");
+                    setStatus("all");
                   }}
                   className="text-[12px] text-brand-700 hover:underline"
                 >
@@ -196,17 +325,21 @@ export function ArticleLibraryDrawer({
               <thead className="border-b border-hairline text-[11px] uppercase tracking-wide text-ink-500">
                 <tr>
                   <th className="w-10 px-4 py-2.5">
-                    <input
-                      type="checkbox"
-                      checked={rows.length > 0 && rows.every((r) => picked.includes(r.id))}
-                      onChange={() =>
-                        setPicked((p) =>
-                          rows.every((r) => p.includes(r.id)) ? [] : Array.from(new Set([...p, ...rows.map((r) => r.id)])),
-                        )
-                      }
-                      className="h-4 w-4 rounded border-hairline accent-brand-700"
-                      aria-label="Select all"
-                    />
+                    {mode === "multiple" && (
+                      <input
+                        type="checkbox"
+                        checked={rows.length > 0 && rows.every((r) => picked.includes(r.id))}
+                        onChange={() =>
+                          setPicked((p) =>
+                            rows.every((r) => p.includes(r.id))
+                              ? []
+                              : Array.from(new Set([...p, ...rows.map((r) => r.id)])),
+                          )
+                        }
+                        className="h-4 w-4 rounded border-hairline accent-brand-700"
+                        aria-label="Select all"
+                      />
+                    )}
                   </th>
                   <th className="px-3 py-2.5 text-left font-medium">Article</th>
                   <th className="px-3 py-2.5 text-left font-medium">Size</th>
@@ -223,15 +356,35 @@ export function ArticleLibraryDrawer({
                   return (
                     <tr
                       key={a.id}
-                      className={cn("border-b border-hairline last:border-0 hover:bg-surface-alt/40", on && "bg-brand-50/40")}
+                      // In single mode the row IS the control — a lone checkbox
+                      // column would imply you could tick more than one.
+                      onClick={mode === "single" ? () => toggle(a.id) : undefined}
+                      aria-selected={mode === "single" ? on : undefined}
+                      className={cn(
+                        "border-b border-hairline last:border-0 hover:bg-surface-alt/40",
+                        on && "bg-brand-50/40",
+                        mode === "single" && "cursor-pointer",
+                        mode === "single" && on && "ring-1 ring-inset ring-brand-600",
+                      )}
                     >
                       <td className="px-4 py-2.5">
-                        <input
-                          type="checkbox"
-                          checked={on}
-                          onChange={() => toggle(a.id)}
-                          className="h-4 w-4 rounded border-hairline accent-brand-700"
-                        />
+                        {mode === "multiple" ? (
+                          <input
+                            type="checkbox"
+                            checked={on}
+                            onChange={() => toggle(a.id)}
+                            className="h-4 w-4 rounded border-hairline accent-brand-700"
+                          />
+                        ) : (
+                          <input
+                            type="radio"
+                            name="article-pick"
+                            checked={on}
+                            onChange={() => toggle(a.id)}
+                            aria-label={`Select ${a.name}`}
+                            className="h-4 w-4 border-hairline accent-brand-700"
+                          />
+                        )}
                       </td>
                       <td className="px-3 py-2.5">
                         <div className="flex items-center gap-3">
@@ -239,7 +392,9 @@ export function ArticleLibraryDrawer({
                           <div className="min-w-0">
                             <div className="flex items-center gap-1.5 font-medium text-ink-900">
                               {a.name}
-                              <span className="rounded bg-ink-100 px-1 py-px text-[10px] text-ink-500">{a.version}</span>
+                              <span className="rounded bg-ink-100 px-1 py-px text-[10px] text-ink-500">
+                                {a.version}
+                              </span>
                             </div>
                             <div className="truncate text-[11px] text-ink-400">
                               {a.articleNo} · {a.buyer} · {a.buyerRef} · {a.season}
@@ -267,7 +422,11 @@ export function ArticleLibraryDrawer({
                               on ? "text-emerald-700" : "text-brand-700 hover:bg-brand-50",
                             )}
                           >
-                            {on ? <Check className="h-3.5 w-3.5" /> : <Plus className="h-3.5 w-3.5" />}
+                            {on ? (
+                              <Check className="h-3.5 w-3.5" />
+                            ) : (
+                              <Plus className="h-3.5 w-3.5" />
+                            )}
                             {on ? "Selected" : submitLabel}
                           </button>
                         </div>
@@ -279,7 +438,10 @@ export function ArticleLibraryDrawer({
                   <tr>
                     <td colSpan={8} className="px-4 py-12 text-center text-[13px] text-ink-400">
                       No articles match your search.
-                      <button onClick={() => setView("create")} className="ml-1 text-brand-700 hover:underline">
+                      <button
+                        onClick={() => setView("create")}
+                        className="ml-1 text-brand-700 hover:underline"
+                      >
                         Create a new article →
                       </button>
                     </td>
@@ -333,12 +495,20 @@ function PreviewPanel({ article, onClose }: { article: LibraryArticle; onClose: 
     <aside className="w-[320px] shrink-0 border-l border-hairline bg-surface-alt/40">
       <div className="flex items-center justify-between border-b border-hairline px-4 py-3">
         <span className="text-[12px] font-medium text-ink-900">Preview</span>
-        <button onClick={onClose} className="text-[12px] text-ink-500 hover:text-ink-900">Close</button>
+        <button onClick={onClose} className="text-[12px] text-ink-500 hover:text-ink-900">
+          Close
+        </button>
       </div>
       <div className="p-4">
-        <img src={article.image} alt={article.name} className="h-40 w-full rounded-md object-cover" />
+        <img
+          src={article.image}
+          alt={article.name}
+          className="h-40 w-full rounded-md object-cover"
+        />
         <h3 className="mt-3 text-[14px] font-semibold text-ink-900">{article.name}</h3>
-        <p className="text-[12px] text-ink-500">{article.articleNo} · {article.style}</p>
+        <p className="text-[12px] text-ink-500">
+          {article.articleNo} · {article.style}
+        </p>
         <dl className="mt-3 space-y-1.5 text-[12px]">
           {[
             ["Buyer", article.buyer],
@@ -362,7 +532,9 @@ function PreviewPanel({ article, onClose }: { article: LibraryArticle; onClose: 
         </dl>
         <div className="mt-3 flex items-center gap-2 rounded-md border border-hairline bg-surface px-3 py-2 text-[11px] text-ink-500">
           <History className="h-3.5 w-3.5 text-ink-400" />
-          {article.techPackRef ? `Tech pack ${article.techPackRef} · synced ${article.lastSyncedAt ?? "—"}` : "No tech pack linked"}
+          {article.techPackRef
+            ? `Tech pack ${article.techPackRef} · synced ${article.lastSyncedAt ?? "—"}`
+            : "No tech pack linked"}
         </div>
       </div>
     </aside>
@@ -372,6 +544,62 @@ function PreviewPanel({ article, onClose }: { article: LibraryArticle; onClose: 
 /* ================================================================== */
 /* Create New Article                                                  */
 /* ================================================================== */
+
+/**
+ * What is about to be added, shown back before it is.
+ *
+ * Every row can still be dropped from here, so a mis-tick costs one click
+ * rather than an undo somewhere else — and the count is stated plainly,
+ * because "4 selected" in a footer is easy to read past.
+ */
+function ReviewSelection({
+  articles,
+  noun,
+  onRemove,
+}: {
+  articles: LibraryArticle[];
+  noun: string;
+  onRemove: (id: string) => void;
+}) {
+  if (articles.length === 0) {
+    return (
+      <p className="px-5 py-14 text-center text-[13px] text-ink-500">
+        Nothing selected. Go back and pick at least one {noun}.
+      </p>
+    );
+  }
+
+  return (
+    <div className="px-5 py-4">
+      <h3 className="text-[12px] font-semibold uppercase tracking-[0.12em] text-ink-500">
+        {articles.length} {noun}
+        {articles.length === 1 ? "" : "s"} selected
+      </h3>
+
+      <ul className="mt-3 divide-y divide-hairline overflow-hidden rounded-lg border border-hairline">
+        {articles.map((a) => (
+          <li key={a.id} className="flex items-center gap-3 bg-surface px-3.5 py-2.5">
+            <img src={a.image} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
+            <div className="min-w-0 flex-1">
+              <div className="text-[13px] font-medium text-ink-900">{a.name}</div>
+              <div className="text-[11.5px] text-ink-500">
+                {a.articleNo} · {a.size} · MOQ {a.moq}
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={() => onRemove(a.id)}
+              aria-label={`Remove ${a.name} from the selection`}
+              className="rounded p-1.5 text-ink-400 hover:bg-surface-alt hover:text-[#8f2c22] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function CreateNewArticle({
   onBack,
@@ -384,7 +612,10 @@ function CreateNewArticle({
 
   return (
     <div className="p-5">
-      <button onClick={onBack} className="mb-4 inline-flex items-center gap-1 text-[12px] text-ink-500 hover:text-ink-900">
+      <button
+        onClick={onBack}
+        className="mb-4 inline-flex items-center gap-1 text-[12px] text-ink-500 hover:text-ink-900"
+      >
         <ArrowLeft className="h-3 w-3" /> Back to library
       </button>
 
@@ -423,8 +654,20 @@ function CreateNewArticle({
 }
 
 function MethodCard({
-  icon, title, desc, onClick, recommended, selected,
-}: { icon: React.ReactNode; title: string; desc: string; onClick: () => void; recommended?: boolean; selected?: boolean }) {
+  icon,
+  title,
+  desc,
+  onClick,
+  recommended,
+  selected,
+}: {
+  icon: React.ReactNode;
+  title: string;
+  desc: string;
+  onClick: () => void;
+  recommended?: boolean;
+  selected?: boolean;
+}) {
   return (
     <button
       onClick={onClick}
@@ -435,12 +678,21 @@ function MethodCard({
           : "border-hairline bg-surface hover:bg-surface-alt",
       )}
     >
-      <span className={cn("flex h-8 w-8 items-center justify-center rounded-md", selected ? "bg-ink-900 text-white" : "bg-ink-100 text-ink-700")}>
+      <span
+        className={cn(
+          "flex h-8 w-8 items-center justify-center rounded-md",
+          selected ? "bg-ink-900 text-white" : "bg-ink-100 text-ink-700",
+        )}
+      >
         {icon}
       </span>
       <span className="flex items-center gap-2 text-[13px] font-semibold text-ink-900">
         {title}
-        {recommended && <span className="rounded-full bg-brand-700 px-1.5 py-0.5 text-[10px] font-medium text-white">Recommended</span>}
+        {recommended && (
+          <span className="rounded-full bg-brand-700 px-1.5 py-0.5 text-[10px] font-medium text-white">
+            Recommended
+          </span>
+        )}
       </span>
       <span className="text-[12px] leading-relaxed text-ink-500">{desc}</span>
     </button>
@@ -500,7 +752,9 @@ function TechPackFlow({ onCreated }: { onCreated: (a: LibraryArticle) => void })
 
   return (
     <div>
-      <p className="text-[12px] text-ink-500">Select a tech pack — extraction starts automatically.</p>
+      <p className="text-[12px] text-ink-500">
+        Select a tech pack — extraction starts automatically.
+      </p>
       <div className="mt-3 grid gap-2 sm:grid-cols-3">
         {TECH_PACKS.map((t) => (
           <button
@@ -508,13 +762,19 @@ function TechPackFlow({ onCreated }: { onCreated: (a: LibraryArticle) => void })
             onClick={() => setTp(t)}
             className={cn(
               "flex items-start gap-3 rounded-lg border p-3 text-left",
-              tp?.id === t.id ? "border-brand-700 bg-brand-50/60" : "border-hairline bg-surface hover:bg-surface-alt",
+              tp?.id === t.id
+                ? "border-brand-700 bg-brand-50/60"
+                : "border-hairline bg-surface hover:bg-surface-alt",
             )}
           >
             <FileText className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" />
             <span className="min-w-0">
-              <span className="block truncate text-[12px] font-medium text-ink-900">{t.fileName}</span>
-              <span className="block text-[11px] text-ink-500">{t.buyer} · {t.season} · {t.pages} pages · {t.version}</span>
+              <span className="block truncate text-[12px] font-medium text-ink-900">
+                {t.fileName}
+              </span>
+              <span className="block text-[11px] text-ink-500">
+                {t.buyer} · {t.season} · {t.pages} pages · {t.version}
+              </span>
               <span className="block text-[11px] text-ink-400">{t.uploadedAt}</span>
             </span>
           </button>
@@ -524,15 +784,31 @@ function TechPackFlow({ onCreated }: { onCreated: (a: LibraryArticle) => void })
       {tp && !done && (
         <div className="mt-5 rounded-lg border border-hairline bg-surface p-4">
           <div className="flex items-center gap-2 text-[13px] font-medium text-ink-900">
-            <Loader2 className="h-4 w-4 animate-spin text-brand-700" /> Extracting data from {tp.fileName}
+            <Loader2 className="h-4 w-4 animate-spin text-brand-700" /> Extracting data from{" "}
+            {tp.fileName}
           </div>
           <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-ink-100">
-            <div className="h-full rounded-full bg-brand-700 transition-all duration-500" style={{ width: `${pct}%` }} />
+            <div
+              className="h-full rounded-full bg-brand-700 transition-all duration-500"
+              style={{ width: `${pct}%` }}
+            />
           </div>
           <ul className="mt-3 space-y-1.5 text-[12px]">
             {EXTRACTION_STAGES.map((s, i) => (
-              <li key={s} className={cn("flex items-center gap-2", i <= stage ? "text-ink-900" : "text-ink-400")}>
-                {i < stage ? <Check className="h-3.5 w-3.5 text-emerald-600" /> : i === stage ? <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-700" /> : <span className="h-3.5 w-3.5" />}
+              <li
+                key={s}
+                className={cn(
+                  "flex items-center gap-2",
+                  i <= stage ? "text-ink-900" : "text-ink-400",
+                )}
+              >
+                {i < stage ? (
+                  <Check className="h-3.5 w-3.5 text-emerald-600" />
+                ) : i === stage ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-brand-700" />
+                ) : (
+                  <span className="h-3.5 w-3.5" />
+                )}
                 {s}
               </li>
             ))}
@@ -546,11 +822,13 @@ function TechPackFlow({ onCreated }: { onCreated: (a: LibraryArticle) => void })
             <div className="flex items-center gap-2 text-[13px] text-ink-900">
               <Sparkles className="h-4 w-4 text-brand-700" />
               <span>
-                Extracted <span className="font-semibold">{fields.length} fields</span> from {tp.fileName} — highlighted
-                fields came from the tech pack and stay editable.
+                Extracted <span className="font-semibold">{fields.length} fields</span> from{" "}
+                {tp.fileName} — highlighted fields came from the tech pack and stay editable.
               </span>
             </div>
-            <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-ink-700">{tp.version}</span>
+            <span className="rounded-full bg-white px-2 py-0.5 text-[11px] text-ink-700">
+              {tp.version}
+            </span>
           </div>
 
           <div className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
@@ -559,7 +837,9 @@ function TechPackFlow({ onCreated }: { onCreated: (a: LibraryArticle) => void })
                 <span className="mb-1 flex items-center gap-1.5 text-[11px] uppercase tracking-wide text-ink-500">
                   {f.label}
                   <ConfidenceBadge value={f.confidence} />
-                  {f.confidence < 0.6 && <span className="text-[10px] normal-case text-danger-600">confirm</span>}
+                  {f.confidence < 0.6 && (
+                    <span className="text-[10px] normal-case text-danger-600">confirm</span>
+                  )}
                 </span>
                 <input
                   value={f.value}
@@ -620,15 +900,22 @@ function CostSheetFlow({ onCreated }: { onCreated: (a: LibraryArticle) => void }
 
   return (
     <div>
-      <p className="text-[12px] text-ink-500">Pick a working cost sheet — known columns are mapped automatically.</p>
+      <p className="text-[12px] text-ink-500">
+        Pick a working cost sheet — known columns are mapped automatically.
+      </p>
       <div className="mt-3 grid gap-2 sm:grid-cols-3">
         {COST_SHEET_FILES.map((f) => (
           <button
             key={f}
-            onClick={() => { setFile(f); setMaps(COST_SHEET_MAPPINGS); }}
+            onClick={() => {
+              setFile(f);
+              setMaps(COST_SHEET_MAPPINGS);
+            }}
             className={cn(
               "flex items-start gap-2 rounded-lg border p-3 text-left text-[12px]",
-              file === f ? "border-brand-700 bg-brand-50/60" : "border-hairline bg-surface hover:bg-surface-alt",
+              file === f
+                ? "border-brand-700 bg-brand-50/60"
+                : "border-hairline bg-surface hover:bg-surface-alt",
             )}
           >
             <FileSpreadsheet className="mt-0.5 h-4 w-4 shrink-0 text-ink-400" />
@@ -656,27 +943,43 @@ function CostSheetFlow({ onCreated }: { onCreated: (a: LibraryArticle) => void }
             </thead>
             <tbody>
               {maps.map((m) => (
-                <tr key={m.source} className={cn("border-b border-hairline last:border-0", !m.target && "bg-amber-50/40")}>
+                <tr
+                  key={m.source}
+                  className={cn(
+                    "border-b border-hairline last:border-0",
+                    !m.target && "bg-amber-50/40",
+                  )}
+                >
                   <td className="px-4 py-2 font-medium text-ink-900">{m.source}</td>
                   <td className="px-4 py-2 text-ink-500">{m.sample}</td>
                   <td className="px-4 py-2">
                     <select
                       value={m.target ?? ""}
                       onChange={(e) =>
-                        setMaps((ms) => ms.map((x) => (x.source === m.source ? { ...x, target: e.target.value || null } : x)))
+                        setMaps((ms) =>
+                          ms.map((x) =>
+                            x.source === m.source ? { ...x, target: e.target.value || null } : x,
+                          ),
+                        )
                       }
                       className={cn(
                         "rounded-md border px-2 py-1 text-[12px] focus:outline-none",
-                        m.target ? "border-hairline bg-surface text-ink-900" : "border-amber-300 bg-white text-amber-700",
+                        m.target
+                          ? "border-hairline bg-surface text-ink-900"
+                          : "border-amber-300 bg-white text-amber-700",
                       )}
                     >
                       <option value="">Unmapped — select field</option>
                       {MAPPING_TARGETS.map((t) => (
-                        <option key={t} value={t}>{t}</option>
+                        <option key={t} value={t}>
+                          {t}
+                        </option>
                       ))}
                     </select>
                   </td>
-                  <td className="px-4 py-2"><ConfidenceBadge value={m.confidence} /></td>
+                  <td className="px-4 py-2">
+                    <ConfidenceBadge value={m.confidence} />
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -690,7 +993,11 @@ function CostSheetFlow({ onCreated }: { onCreated: (a: LibraryArticle) => void }
             onClick={() =>
               onCreated(
                 newDraft({
-                  name: maps.find((m) => m.target === "name")?.sample.split("—")[0].trim() || "Imported Article",
+                  name:
+                    maps
+                      .find((m) => m.target === "name")
+                      ?.sample.split("—")[0]
+                      .trim() || "Imported Article",
                   articleNo: maps.find((m) => m.target === "articleNo")?.sample ?? "—",
                   size: maps.find((m) => m.target === "size")?.sample ?? "—",
                   moq: maps.find((m) => m.target === "moq")?.sample ?? "—",
@@ -714,21 +1021,46 @@ function CostSheetFlow({ onCreated }: { onCreated: (a: LibraryArticle) => void }
 /* ---------------- Blank ---------------- */
 
 function BlankFlow({ onCreated }: { onCreated: (a: LibraryArticle) => void }) {
-  const [form, setForm] = useState({ name: "", articleNo: "", buyer: "", buyerRef: "", category: "", collection: "", season: "", size: "", moq: "", style: "", supplier: "" });
+  const [form, setForm] = useState({
+    name: "",
+    articleNo: "",
+    buyer: "",
+    buyerRef: "",
+    category: "",
+    collection: "",
+    season: "",
+    size: "",
+    moq: "",
+    style: "",
+    supplier: "",
+  });
   const ok = form.name.trim() && form.size.trim() && form.moq.trim();
   return (
     <div>
       <div className="flex items-center gap-2 text-[12px] text-ink-500">
-        <Package className="h-4 w-4 text-ink-400" /> Blank article — fill in what you know, the rest stays editable later.
+        <Package className="h-4 w-4 text-ink-400" /> Blank article — fill in what you know, the rest
+        stays editable later.
       </div>
       <div className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
-        {([
-          ["name", "Product Name *"], ["articleNo", "Article Number"], ["buyer", "Buyer"],
-          ["buyerRef", "Buyer Reference"], ["category", "Product Category"], ["collection", "Collection"],
-          ["season", "Season"], ["size", "Size *"], ["moq", "MOQ *"], ["style", "Style"], ["supplier", "Supplier"],
-        ] as const).map(([k, label]) => (
+        {(
+          [
+            ["name", "Product Name *"],
+            ["articleNo", "Article Number"],
+            ["buyer", "Buyer"],
+            ["buyerRef", "Buyer Reference"],
+            ["category", "Product Category"],
+            ["collection", "Collection"],
+            ["season", "Season"],
+            ["size", "Size *"],
+            ["moq", "MOQ *"],
+            ["style", "Style"],
+            ["supplier", "Supplier"],
+          ] as const
+        ).map(([k, label]) => (
           <label key={k} className="block">
-            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">{label}</span>
+            <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+              {label}
+            </span>
             <input
               value={form[k]}
               onChange={(e) => setForm({ ...form, [k]: e.target.value })}

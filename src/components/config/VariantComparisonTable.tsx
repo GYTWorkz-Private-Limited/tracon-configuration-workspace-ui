@@ -5,7 +5,7 @@
 // they match the Costing workspace exactly.
 
 import { useMemo, useState } from "react";
-import { ChevronDown, Trophy } from "lucide-react";
+import { ArrowRight, ChevronDown, Copy, Trophy } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { computeCushion, buildMoqVariant, type CushionVariant } from "@/lib/cushionCosting";
 import { buildCostingSheet, inr, type CostingNums } from "@/lib/costingSheet";
@@ -30,7 +30,8 @@ const SECTIONS: Section[] = [
       { label: "Product", text: () => "—" },
       {
         label: "Size",
-        text: (_n, v) => (v.inputs.sizeInches ? `${v.inputs.sizeInches}" × ${v.inputs.sizeInches}"` : "—"),
+        text: (_n, v) =>
+          v.inputs.sizeInches ? `${v.inputs.sizeInches}" × ${v.inputs.sizeInches}"` : "—",
       },
       { label: "MOQ", text: (n) => `${n.qty.toLocaleString("en-IN")} pcs`, num: (n) => n.qty },
       { label: "Supplier", text: () => "Aarav Textiles (in-house)" },
@@ -44,7 +45,12 @@ const SECTIONS: Section[] = [
     rows: [
       { label: "Fabric cost", text: (n) => inr(n.fabric), num: (n) => n.fabric, best: "low" },
       { label: "Printing cost", text: (n) => inr(n.printing), num: (n) => n.printing, best: "low" },
-      { label: "Embroidery cost", text: (n) => inr(n.embroidery), num: (n) => n.embroidery, best: "low" },
+      {
+        label: "Embroidery cost",
+        text: (n) => inr(n.embroidery),
+        num: (n) => n.embroidery,
+        best: "low",
+      },
       { label: "Washing cost", text: (n) => inr(n.washing), num: (n) => n.washing },
       {
         label: "Manufacturing cost",
@@ -52,7 +58,12 @@ const SECTIONS: Section[] = [
         num: (n) => n.manufacturing,
         best: "low",
       },
-      { label: "Accessories cost", text: (n) => inr(n.accessories), num: (n) => n.accessories, best: "low" },
+      {
+        label: "Accessories cost",
+        text: (n) => inr(n.accessories),
+        num: (n) => n.accessories,
+        best: "low",
+      },
       {
         label: "Packaging cost",
         text: (n) => inr(n.packagingMaterial),
@@ -83,6 +94,14 @@ type Props = {
   stickyTop?: number;
   className?: string;
   defaultMode?: Mode;
+  /**
+   * Make the column being read the active configuration. Without this the
+   * comparison can only be looked at — the decision it exists to support has
+   * nowhere to land.
+   */
+  onApplyVariant?: (id: string) => void;
+  /** Start a new variant from the column being read. */
+  onDuplicateVariant?: (v: CushionVariant) => void;
 };
 
 export function VariantComparisonTable({
@@ -92,6 +111,8 @@ export function VariantComparisonTable({
   stickyTop = 0,
   className,
   defaultMode = "moq",
+  onApplyVariant,
+  onDuplicateVariant,
 }: Props) {
   const [mode, setMode] = useState<Mode>(defaultMode);
   const [openSections, setOpenSections] = useState<Record<string, boolean>>({
@@ -99,6 +120,11 @@ export function VariantComparisonTable({
     material: true,
   });
   const [selectedId, setSelectedId] = useState(activeId);
+  // Which rows to show. Reset on every open, because "differences only" is a
+  // reading mode for the question in front of you, not a saved preference.
+  const [diffOnly, setDiffOnly] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [confirming, setConfirming] = useState<CushionVariant | null>(null);
 
   // MOQ mode — same configuration as the active variant, only qty changes.
   const moqVariants = useMemo<CushionVariant[]>(() => {
@@ -129,7 +155,13 @@ export function VariantComparisonTable({
 
   if (rows.length === 0) return null;
 
-  const cheapestId = rows.reduce((b, r) => (r.n.materialTotal < b.n.materialTotal ? r : b), rows[0]).v.id;
+  // MOQ columns are quantity breaks, not the saved variants, so the id the
+  // table opened with is not among them — without this the card row would
+  // start with nothing selected and no actions on offer at all.
+  const activeColumnId = rows.some((r) => r.v.id === selectedId) ? selectedId : rows[0].v.id;
+
+  const cheapestId = rows.reduce((b, r) => (r.n.materialTotal < b.n.materialTotal ? r : b), rows[0])
+    .v.id;
 
   const gridCols = `minmax(228px, 260px) repeat(${columns.length}, minmax(190px, 1fr))`;
 
@@ -141,12 +173,10 @@ export function VariantComparisonTable({
         style={{ top: stickyTop }}
       >
         <div className="inline-flex rounded-lg border border-hairline bg-surface p-0.5">
-          {(
-            [
-              { id: "moq" as Mode, label: "Compare MOQ" },
-              { id: "scenario" as Mode, label: "Compare scenarios" },
-            ]
-          ).map((t) => (
+          {[
+            { id: "moq" as Mode, label: "Compare MOQ" },
+            { id: "scenario" as Mode, label: "Compare scenarios" },
+          ].map((t) => (
             <button
               key={t.id}
               onClick={() => setMode(t.id)}
@@ -159,6 +189,31 @@ export function VariantComparisonTable({
             </button>
           ))}
         </div>
+        {/* Secondary to the mode switch on purpose: which comparison you are
+            running is the question, how much of it to show is a preference. */}
+        <div className="inline-flex rounded-lg border border-hairline bg-surface p-0.5">
+          {(
+            [
+              { on: false, label: "All rows" },
+              { on: true, label: "Differences only" },
+            ] as const
+          ).map((t) => (
+            <button
+              key={t.label}
+              onClick={() => setDiffOnly(t.on)}
+              aria-pressed={diffOnly === t.on}
+              className={cn(
+                "rounded-md px-3 py-1 text-[11.5px] font-medium transition-colors",
+                diffOnly === t.on
+                  ? "border border-hairline bg-surface-alt text-ink-900"
+                  : "border border-transparent text-ink-500 hover:text-ink-900",
+              )}
+            >
+              {t.label}
+            </button>
+          ))}
+        </div>
+
         <span className="text-[11.5px] text-ink-500">
           {mode === "moq"
             ? "Identical configuration — only order quantity changes."
@@ -175,49 +230,90 @@ export function VariantComparisonTable({
           {mode === "moq" ? "MOQ summary" : "Scenario summary"}
         </div>
         {rows.map(({ v, n }) => {
-          const isSel = v.id === selectedId;
+          const isSel = v.id === activeColumnId;
+          // A card is a container with its own actions, so the selectable
+          // region is a button INSIDE it rather than the card itself —
+          // nesting buttons would be invalid and unreachable by keyboard.
           return (
-            <button
+            <div
               key={v.id}
-              onClick={() => setSelectedId(v.id)}
               className={cn(
-                "rounded-xl border bg-white p-3.5 text-left transition-all",
+                "flex flex-col rounded-xl border bg-white p-3.5 text-left transition-all",
                 isSel
                   ? "border-brand-600 shadow-[0_0_0_2px_rgba(12,176,160,0.22)]"
                   : "border-hairline hover:border-brand-600/50",
               )}
             >
-              <div className="flex items-start justify-between gap-2">
-                <div className="text-[13.5px] font-semibold text-ink-900">{v.name}</div>
-                <div className="text-right">
-                  <div className="text-[20px] font-semibold leading-none tabular-nums text-ink-900">
-                    {inr(n.materialTotal)}
-                  </div>
-                  <div className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-ink-400">
-                    {mode === "moq" ? "est. cost / piece" : "cost / piece"}
+              <button
+                type="button"
+                onClick={() => setSelectedId(v.id)}
+                aria-pressed={isSel}
+                className="text-left"
+              >
+                <div className="flex items-start justify-between gap-2">
+                  <div className="text-[13.5px] font-semibold text-ink-900">{v.name}</div>
+                  <div className="text-right">
+                    <div className="text-[20px] font-semibold leading-none tabular-nums text-ink-900">
+                      {inr(n.materialTotal)}
+                    </div>
+                    <div className="mt-0.5 text-[10px] uppercase tracking-[0.12em] text-ink-400">
+                      {mode === "moq" ? "est. cost / piece" : "cost / piece"}
+                    </div>
                   </div>
                 </div>
-              </div>
 
-              <dl className="mt-2.5 grid grid-cols-2 gap-1.5 border-t border-hairline pt-2.5 text-[11px]">
-                <Meta label="MOQ" value={n.qty.toLocaleString("en-IN")} />
-                <Meta label="Size" value={v.inputs.sizeInches ? `${v.inputs.sizeInches}"` : "—"} />
-              </dl>
+                <dl className="mt-2.5 grid grid-cols-2 gap-1.5 border-t border-hairline pt-2.5 text-[11px]">
+                  <Meta label="MOQ" value={n.qty.toLocaleString("en-IN")} />
+                  <Meta
+                    label="Size"
+                    value={v.inputs.sizeInches ? `${v.inputs.sizeInches}"` : "—"}
+                  />
+                </dl>
 
-              {mode === "scenario" && (
-                <div className="mt-2 text-[11px] leading-relaxed text-ink-500">
-                  {v.tagline ??
-                    `${v.inputs.embroidery > 0 ? "Embroidered" : "Plain"} · print ₹${v.inputs.reactivePrint}/m`}
+                {mode === "scenario" && (
+                  <div className="mt-2 text-[11px] leading-relaxed text-ink-500">
+                    {v.tagline ??
+                      `${v.inputs.embroidery > 0 ? "Embroidered" : "Plain"} · print ₹${v.inputs.reactivePrint}/m`}
+                  </div>
+                )}
+
+                <div className="mt-2.5 flex flex-wrap gap-1">
+                  {mode === "scenario" && v.id === activeId && <Badge tone="ink">Active</Badge>}
+                  {v.id === cheapestId && (
+                    <Badge tone="green" icon={<Trophy className="h-3 w-3" />}>
+                      Cheapest
+                    </Badge>
+                  )}
+                </div>
+              </button>
+
+              {/* Only the card being read offers the decisions — showing them on
+                every column would be four primary actions competing at once. */}
+              {isSel && (onApplyVariant || onDuplicateVariant) && (
+                <div className="mt-2.5 flex items-center justify-end gap-1.5 border-t border-hairline pt-2.5">
+                  {onDuplicateVariant && (
+                    <button
+                      type="button"
+                      onClick={() => onDuplicateVariant(v)}
+                      title="Duplicate as new variant"
+                      aria-label={`Duplicate ${v.name} as a new variant`}
+                      className="rounded-md border border-hairline bg-surface p-1.5 text-ink-500 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                    >
+                      <Copy className="h-3.5 w-3.5" />
+                    </button>
+                  )}
+                  {onApplyVariant && mode === "scenario" && v.id !== activeId && (
+                    <button
+                      type="button"
+                      onClick={() => setConfirming(v)}
+                      className="inline-flex items-center gap-1 rounded-md bg-brand-700 px-2.5 py-1.5 text-[11.5px] font-semibold text-white hover:bg-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                    >
+                      Apply this variant <ArrowRight className="h-3 w-3" aria-hidden />
+                    </button>
+                  )}
                 </div>
               )}
-
-              <div className="mt-2.5 flex flex-wrap gap-1">
-                {mode === "scenario" && v.id === activeId && <Badge tone="ink">Active</Badge>}
-                {v.id === cheapestId && (
-                  <Badge tone="green" icon={<Trophy className="h-3 w-3" />}>Cheapest</Badge>
-                )}
-              </div>
-            </button>
+            </div>
           );
         })}
       </div>
@@ -227,13 +323,19 @@ export function VariantComparisonTable({
         {SECTIONS.map((s) => {
           const open = openSections[s.id];
           return (
-            <section key={s.id} className="overflow-hidden rounded-xl border border-hairline bg-white">
+            <section
+              key={s.id}
+              className="overflow-hidden rounded-xl border border-hairline bg-white"
+            >
               <button
                 onClick={() => setOpenSections((p) => ({ ...p, [s.id]: !p[s.id] }))}
                 className="sticky left-0 flex w-full items-center gap-2 bg-surface-alt/50 px-4 py-2.5 text-left hover:bg-surface-alt"
               >
                 <ChevronDown
-                  className={cn("h-3.5 w-3.5 text-ink-400 transition-transform", !open && "-rotate-90")}
+                  className={cn(
+                    "h-3.5 w-3.5 text-ink-400 transition-transform",
+                    !open && "-rotate-90",
+                  )}
                 />
                 <span className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-ink-600">
                   {s.label}
@@ -243,72 +345,121 @@ export function VariantComparisonTable({
 
               {open && (
                 <div>
-                  {s.rows.map((row, ri) => {
-                    const nums = row.num ? rows.map((r) => row.num!(r.n, r.v)) : null;
-                    const texts = rows.map((r) => row.text(r.n, r.v));
-                    const identical = texts.every((t) => t === texts[0]);
-                    const bestVal =
-                      nums && row.best
-                        ? row.best === "low"
-                          ? Math.min(...nums)
-                          : Math.max(...nums)
-                        : null;
+                  {s.rows
+                    .filter((row) => {
+                      if (!diffOnly) return true;
+                      const t = rows.map((r) => row.text(r.n, r.v));
+                      return !t.every((x) => x === t[0]);
+                    })
+                    .map((row, ri) => {
+                      const nums = row.num ? rows.map((r) => row.num!(r.n, r.v)) : null;
+                      const texts = rows.map((r) => row.text(r.n, r.v));
+                      const identical = texts.every((t) => t === texts[0]);
+                      const rowKey = `${s.id}:${row.label}`;
+                      const isOpen = expanded === rowKey;
+                      const bestVal =
+                        nums && row.best
+                          ? row.best === "low"
+                            ? Math.min(...nums)
+                            : Math.max(...nums)
+                          : null;
 
-                    return (
-                      <div key={row.label}>
-                        {row.group && (
+                      return (
+                        <div key={row.label}>
+                          {row.group && (
+                            <div
+                              className={cn(
+                                "sticky left-0 bg-surface-alt/30 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-400",
+                                "border-t border-hairline",
+                              )}
+                            >
+                              {row.group}
+                            </div>
+                          )}
                           <div
                             className={cn(
-                              "sticky left-0 bg-surface-alt/30 px-4 py-1.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-400",
-                              "border-t border-hairline",
+                              "grid items-stretch",
+                              (ri > 0 || row.group) && "border-t border-hairline",
                             )}
+                            style={{ gridTemplateColumns: gridCols }}
                           >
-                            {row.group}
-                          </div>
-                        )}
-                        <div
-                          className={cn("grid items-stretch", (ri > 0 || row.group) && "border-t border-hairline")}
-                          style={{ gridTemplateColumns: gridCols }}
-                        >
-                          <div className="sticky left-0 z-10 flex items-center gap-2 border-r border-hairline bg-white px-4 py-2.5 text-[12.5px] text-ink-600">
-                            {row.label}
-                          </div>
-                          {rows.map((r, i) => {
-                            const isBest =
-                              bestVal !== null && nums !== null && !identical && nums[i] === bestVal;
-                            const isDifferent = !identical;
-                            return (
-                              <div
-                                key={r.v.id}
-                                className={cn(
-                                  "flex items-center border-r border-hairline px-4 py-2.5 text-[12.5px] tabular-nums last:border-r-0",
-                                  row.strong ? "font-semibold text-ink-900" : "text-ink-800",
-                                  r.v.id === selectedId && "bg-brand-50/40",
-                                  isDifferent && !isBest && "text-ink-900",
-                                  identical && "text-ink-500",
-                                )}
-                              >
-                                <span
+                            <div className="sticky left-0 z-10 flex items-center gap-2 border-r border-hairline bg-white px-4 py-2.5 text-[12.5px] text-ink-600">
+                              <span className="min-w-0 flex-1">{row.label}</span>
+                              {/* Only a row that actually differs has anything to
+                                explain, so only that row offers the caret. */}
+                              {!identical && (
+                                <button
+                                  type="button"
+                                  onClick={() => setExpanded(isOpen ? null : rowKey)}
+                                  aria-expanded={isOpen}
+                                  aria-label={`Why ${row.label} differs`}
+                                  title={`Why ${row.label} differs`}
+                                  className="shrink-0 rounded p-0.5 text-ink-400 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                                >
+                                  <ChevronDown
+                                    className={cn(
+                                      "h-3.5 w-3.5 transition-transform",
+                                      !isOpen && "-rotate-90",
+                                    )}
+                                    aria-hidden
+                                  />
+                                </button>
+                              )}
+                            </div>
+                            {rows.map((r, i) => {
+                              const isBest =
+                                bestVal !== null &&
+                                nums !== null &&
+                                !identical &&
+                                nums[i] === bestVal;
+                              const isDifferent = !identical;
+                              return (
+                                <div
+                                  key={r.v.id}
                                   className={cn(
-                                    isBest &&
-                                      "rounded-md bg-brand-50 px-1.5 py-0.5 font-semibold text-brand-700",
+                                    "flex items-center border-r border-hairline px-4 py-2.5 text-[12.5px] tabular-nums last:border-r-0",
+                                    row.strong ? "font-semibold text-ink-900" : "text-ink-800",
+                                    r.v.id === activeColumnId && "bg-brand-50/40",
+                                    isDifferent && !isBest && "text-ink-900",
+                                    identical && "text-ink-500",
                                   )}
                                 >
-                                  {row.label === "Product" ? productName : texts[i]}
-                                </span>
-                              </div>
-                            );
-                          })}
+                                  <span
+                                    className={cn(
+                                      isBest &&
+                                        "rounded-md bg-brand-50 px-1.5 py-0.5 font-semibold text-brand-700",
+                                    )}
+                                  >
+                                    {row.label === "Product" ? productName : texts[i]}
+                                  </span>
+                                </div>
+                              );
+                            })}
+                          </div>
+
+                          {isOpen && !identical && (
+                            <div className="sticky left-0 border-t border-hairline bg-surface-alt/40 px-4 py-2">
+                              <p className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-ink-400">
+                                Why {row.label} differs
+                              </p>
+                              <ul className="mt-1 space-y-0.5">
+                                {rows.slice(1).map((r, i) => (
+                                  <li key={r.v.id} className="text-[11.5px] text-ink-600">
+                                    <span className="font-medium text-ink-900">{r.v.name}</span> —{" "}
+                                    {row.label}: {texts[0]} → {texts[i + 1]}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
                         </div>
-                      </div>
-                    );
-                  })}
+                      );
+                    })}
                 </div>
               )}
             </section>
           );
         })}
-
       </div>
 
       {/* Sticky direct cost footer */}
@@ -320,14 +471,18 @@ export function VariantComparisonTable({
           <div className="text-[11px] font-semibold uppercase tracking-[0.14em] text-ink-500">
             Direct cost
           </div>
-          <div className="text-[10.5px] text-ink-400">Raw material + process + packaging, per piece</div>
+          <div className="text-[10.5px] text-ink-400">
+            Raw material + process + packaging, per piece
+          </div>
         </div>
         {rows.map(({ v, n }) => (
           <div
             key={v.id}
             className={cn(
               "rounded-lg border px-3 py-2",
-              v.id === cheapestId ? "border-brand-600 bg-brand-50/50" : "border-hairline bg-surface",
+              v.id === cheapestId
+                ? "border-brand-600 bg-brand-50/50"
+                : "border-hairline bg-surface",
             )}
           >
             <div className="flex items-baseline justify-between gap-2">
@@ -341,6 +496,51 @@ export function VariantComparisonTable({
           </div>
         ))}
       </div>
+
+      {/* Applying a variant replaces what is open in Configuration, so it asks
+          first — this is the one action here that changes another screen. */}
+      {confirming && onApplyVariant && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="Apply this variant"
+          className="fixed inset-0 z-[60] flex items-center justify-center p-4"
+        >
+          <button
+            className="absolute inset-0 bg-ink-900/40"
+            aria-label="Cancel"
+            onClick={() => setConfirming(null)}
+          />
+          <div className="relative w-full max-w-[440px] rounded-xl border border-hairline bg-surface p-5 shadow-2xl">
+            <h2 className="text-[15px] font-semibold text-ink-900">
+              Set {confirming.name} as the active configuration?
+            </h2>
+            <p className="mt-1.5 text-[12.5px] text-ink-500">
+              This replaces what is currently open in Configuration. Nothing is re-costed — the
+              variant already has its own costing.
+            </p>
+            <div className="mt-4 flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setConfirming(null)}
+                className="rounded-md border border-hairline bg-surface px-3.5 py-2 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  onApplyVariant(confirming.id);
+                  setConfirming(null);
+                }}
+                className="rounded-md bg-brand-700 px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                Confirm
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

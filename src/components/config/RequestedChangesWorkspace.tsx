@@ -103,7 +103,9 @@ export function RequestedChangesWorkspace({
             </button>
             <div>
               <div className="flex items-center gap-2.5">
-                <h1 className="text-[20px] font-semibold tracking-tight text-ink-900">{productName}</h1>
+                <h1 className="text-[20px] font-semibold tracking-tight text-ink-900">
+                  {productName}
+                </h1>
                 <span
                   suppressHydrationWarning
                   className="text-[12px] font-medium uppercase tracking-[0.14em] text-ink-400"
@@ -161,7 +163,12 @@ export function RequestedChangesWorkspace({
         </div>
       </header>
 
-      <WorkflowStepper active="Quotation" podId={navPodId} articleId={navArticleId} costingRef={costingRef} />
+      <WorkflowStepper
+        active="Quotation"
+        podId={navPodId}
+        articleId={navArticleId}
+        costingRef={costingRef}
+      />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
         {/* LEFT — current product / variant summary */}
@@ -170,7 +177,9 @@ export function RequestedChangesWorkspace({
             <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-ink-500">
               Current product
             </div>
-            <div className="mt-1 text-[14px] font-semibold leading-tight text-ink-900">{productName}</div>
+            <div className="mt-1 text-[14px] font-semibold leading-tight text-ink-900">
+              {productName}
+            </div>
             <div className="text-[11.5px] text-ink-600">
               {buyer}
               {buyerRef ? ` · ${buyerRef}` : ""}
@@ -227,19 +236,23 @@ export function RequestedChangesWorkspace({
               </div>
               <div className="mt-4 h-2 w-full overflow-hidden rounded-full bg-ink-100">
                 <div
-                  className={cn("h-full rounded-full transition-all", allDone ? "bg-brand-600" : "bg-ink-900")}
+                  className={cn(
+                    "h-full rounded-full transition-all",
+                    allDone ? "bg-brand-600" : "bg-ink-900",
+                  )}
                   style={{ width: `${pct}%` }}
                 />
               </div>
               <div className="mt-3 flex items-center gap-2 text-[12px]">
                 {allDone ? (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-brand-50 px-2.5 py-1 font-medium text-brand-800">
-                    <CheckCircle2 className="h-3.5 w-3.5" /> All changes completed — you can resubmit
+                    <CheckCircle2 className="h-3.5 w-3.5" /> All changes completed — you can
+                    resubmit
                   </span>
                 ) : (
                   <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-50 px-2.5 py-1 font-medium text-amber-700">
-                    <AlertCircle className="h-3.5 w-3.5" /> {total - completed} pending — resubmit is
-                    locked until all are completed
+                    <AlertCircle className="h-3.5 w-3.5" /> {total - completed} pending — resubmit
+                    is locked until all are completed
                   </span>
                 )}
               </div>
@@ -296,7 +309,9 @@ export function RequestedChangesWorkspace({
                       <RevisionBadge status={r.status} />
                       <div className="min-w-0 flex-1">
                         <div className="text-[12px] text-ink-700">{r.comments}</div>
-                        <div className="mt-0.5 text-[11px] text-ink-500">Created by {r.createdBy}</div>
+                        <div className="mt-0.5 text-[11px] text-ink-500">
+                          Created by {r.createdBy}
+                        </div>
                       </div>
                       <button
                         onClick={() => setReadOnlyRevision(r)}
@@ -425,7 +440,8 @@ function ChangeCard({ change: c }: { change: RequestedChange }) {
             <span className="truncate text-[12.5px] font-medium text-ink-900">{c.field}</span>
           </span>
           <span className="mt-0.5 block text-[11px] text-ink-500">
-            {c.requestedBy} · {c.requestedRole} · <span suppressHydrationWarning>{c.requestedAt}</span>
+            {c.requestedBy} · {c.requestedRole} ·{" "}
+            <span suppressHydrationWarning>{c.requestedAt}</span>
           </span>
         </span>
         <span
@@ -487,7 +503,9 @@ function ChangeCard({ change: c }: { change: RequestedChange }) {
 
 function Label({ children }: { children: React.ReactNode }) {
   return (
-    <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-ink-500">{children}</div>
+    <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-ink-500">
+      {children}
+    </div>
   );
 }
 
@@ -499,7 +517,9 @@ function ValueBox({ label, value, accent }: { label: string; value: string; acce
         accent ? "border-brand-200 bg-brand-50" : "border-hairline bg-surface-alt",
       )}
     >
-      <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-ink-500">{label}</div>
+      <div className="text-[10px] font-medium uppercase tracking-[0.14em] text-ink-500">
+        {label}
+      </div>
       <div
         className={cn(
           "mt-0.5 text-[13px] font-semibold tabular-nums",

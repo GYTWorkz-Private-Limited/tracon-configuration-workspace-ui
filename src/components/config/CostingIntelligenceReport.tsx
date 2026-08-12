@@ -445,6 +445,11 @@ export function CostingIntelligenceReport({
                   activeId={active.variant.id}
                   productName={productName}
                   targetPriceUsd={targetPriceUsd}
+                  onApplyVariant={(id) => {
+                    setPromoted(id);
+                    onPromote?.(id);
+                    toast.success("Variant applied to this costing");
+                  }}
                 />
               </div>
             )}

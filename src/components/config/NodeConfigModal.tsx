@@ -105,7 +105,10 @@ export function NodeConfigModal({ nodeId, inputs, onClose, onApply }: Props) {
   const quoteDelta = previewMetrics.suggestedQuoteUsd - baseMetrics.suggestedQuoteUsd;
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-ink-900/40 backdrop-blur-sm" onClick={onClose}>
+    <div
+      className="fixed inset-0 z-50 flex justify-end bg-ink-900/40 backdrop-blur-sm"
+      onClick={onClose}
+    >
       <div
         className="flex h-full w-full max-w-[520px] flex-col bg-white shadow-2xl animate-surface-in"
         onClick={(e) => e.stopPropagation()}
@@ -124,7 +127,10 @@ export function NodeConfigModal({ nodeId, inputs, onClose, onApply }: Props) {
             <h2 className="text-[17px] font-medium text-ink-900">{spec.title}</h2>
             <p className="mt-0.5 text-[12.5px] text-ink-500">{spec.description}</p>
           </div>
-          <button onClick={onClose} className="rounded-md p-1 text-ink-400 hover:bg-surface-alt hover:text-ink-900">
+          <button
+            onClick={onClose}
+            className="rounded-md p-1 text-ink-400 hover:bg-surface-alt hover:text-ink-900"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -169,13 +175,26 @@ export function NodeConfigModal({ nodeId, inputs, onClose, onApply }: Props) {
         {/* Preview strip */}
         <div className="flex items-center justify-between border-b border-hairline bg-surface-alt/40 px-5 py-3">
           <div>
-            <div className="text-[10.5px] font-medium uppercase tracking-[0.14em] text-ink-500">Preview quote</div>
+            <div className="text-[10.5px] font-medium uppercase tracking-[0.14em] text-ink-500">
+              Preview quote
+            </div>
             <div className="flex items-baseline gap-2">
               <div className="text-[22px] font-semibold tabular-nums text-ink-900">
                 ${previewMetrics.suggestedQuoteUsd.toFixed(2)}
               </div>
-              <div className={cn("text-[11.5px] tabular-nums", quoteDelta === 0 ? "text-ink-500" : quoteDelta > 0 ? "text-danger" : "text-emerald-700")}>
-                {quoteDelta === 0 ? "no change" : `${quoteDelta > 0 ? "+" : ""}$${quoteDelta.toFixed(2)}`}
+              <div
+                className={cn(
+                  "text-[11.5px] tabular-nums",
+                  quoteDelta === 0
+                    ? "text-ink-500"
+                    : quoteDelta > 0
+                      ? "text-danger"
+                      : "text-emerald-700",
+                )}
+              >
+                {quoteDelta === 0
+                  ? "no change"
+                  : `${quoteDelta > 0 ? "+" : ""}$${quoteDelta.toFixed(2)}`}
               </div>
             </div>
           </div>
@@ -183,7 +202,10 @@ export function NodeConfigModal({ nodeId, inputs, onClose, onApply }: Props) {
             <MiniStat label="Total ₹/pc" value={`₹${previewMetrics.totalPc.toFixed(0)}`} />
             <MiniStat label="Fabric" value={`₹${previewMetrics.fabricSubtotal.toFixed(0)}`} />
             <MiniStat label="Making" value={`₹${previewMetrics.makingSubtotal.toFixed(0)}`} />
-            <MiniStat label="Margin" value={`${(previewMetrics.quoteMarginPct * 100).toFixed(0)}%`} />
+            <MiniStat
+              label="Margin"
+              value={`${(previewMetrics.quoteMarginPct * 100).toFixed(0)}%`}
+            />
           </dl>
         </div>
 
@@ -200,7 +222,9 @@ export function NodeConfigModal({ nodeId, inputs, onClose, onApply }: Props) {
                 onClick={() => setSelected(v.id)}
                 className={cn(
                   "flex w-full items-start gap-3 rounded-xl border px-3 py-2.5 text-left transition-all",
-                  isSel ? "border-ink-900 bg-ink-900/[0.03] shadow-sm" : "border-hairline bg-white hover:border-ink-300",
+                  isSel
+                    ? "border-ink-900 bg-ink-900/[0.03] shadow-sm"
+                    : "border-hairline bg-white hover:border-ink-300",
                 )}
               >
                 <span
@@ -215,19 +239,33 @@ export function NodeConfigModal({ nodeId, inputs, onClose, onApply }: Props) {
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="text-[13px] font-medium text-ink-900">{v.label}</span>
                     {v.tag && (
-                      <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide", TAG_STYLES[v.tag])}>
+                      <span
+                        className={cn(
+                          "rounded-full px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide",
+                          TAG_STYLES[v.tag],
+                        )}
+                      >
                         {v.tag}
                       </span>
                     )}
                     {isCurrent && (
-                      <span className="rounded-full bg-surface-alt px-1.5 py-0.5 text-[10px] text-ink-500">current</span>
+                      <span className="rounded-full bg-surface-alt px-1.5 py-0.5 text-[10px] text-ink-500">
+                        current
+                      </span>
                     )}
                   </div>
                   {v.note && <div className="text-[11.5px] text-ink-500">{v.note}</div>}
                 </div>
                 <div className="text-right">
-                  <div className="text-[12px] font-medium tabular-nums text-ink-900">${quote.toFixed(2)}</div>
-                  <div className={cn("text-[10.5px] tabular-nums", d === 0 ? "text-ink-400" : d > 0 ? "text-danger" : "text-emerald-700")}>
+                  <div className="text-[12px] font-medium tabular-nums text-ink-900">
+                    ${quote.toFixed(2)}
+                  </div>
+                  <div
+                    className={cn(
+                      "text-[10.5px] tabular-nums",
+                      d === 0 ? "text-ink-400" : d > 0 ? "text-danger" : "text-emerald-700",
+                    )}
+                  >
                     {d === 0 ? "—" : `${d > 0 ? "+" : ""}${d.toFixed(2)}`}
                   </div>
                 </div>
@@ -247,14 +285,20 @@ export function NodeConfigModal({ nodeId, inputs, onClose, onApply }: Props) {
             {visibleVariants.length} of {spec.variants.length} · applies to active scenario
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={onClose} className="rounded-md border border-hairline px-3 py-1.5 text-[12.5px] text-ink-700 hover:bg-surface-alt">
+            <button
+              onClick={onClose}
+              className="rounded-md border border-hairline px-3 py-1.5 text-[12.5px] text-ink-700 hover:bg-surface-alt"
+            >
               Cancel
             </button>
             <button
               disabled={!previewVariant || previewVariant.id === currentValue}
               onClick={() => {
                 if (!previewVariant) return;
-                onApply(previewVariant.patch, nodesForInputPatch(previewVariant.patch, [spec.nodeId]));
+                onApply(
+                  previewVariant.patch,
+                  nodesForInputPatch(previewVariant.patch, [spec.nodeId]),
+                );
                 onClose();
               }}
               className={cn(
@@ -297,7 +341,12 @@ export function _VariantPriceHint({
   return (
     <div className="text-right">
       <div className="text-[12px] font-medium tabular-nums text-ink-900">${q.toFixed(2)}</div>
-      <div className={cn("text-[10.5px] tabular-nums", d === 0 ? "text-ink-400" : d > 0 ? "text-danger" : "text-emerald-700")}>
+      <div
+        className={cn(
+          "text-[10.5px] tabular-nums",
+          d === 0 ? "text-ink-400" : d > 0 ? "text-danger" : "text-emerald-700",
+        )}
+      >
         {d === 0 ? "—" : `${d > 0 ? "+" : ""}${d.toFixed(2)}`}
       </div>
     </div>

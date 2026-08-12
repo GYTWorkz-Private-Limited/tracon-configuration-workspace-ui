@@ -39,6 +39,8 @@ export type AuditKind =
   | "selling_price_reset"
   | "option_changed"
   | "recost_requested"
+  | "line_rejected"
+  | "requote_created"
   | "sent_for_approval"
   | "version_started"
   | "comment"

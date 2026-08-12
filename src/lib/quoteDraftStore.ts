@@ -110,6 +110,17 @@ export type QuoteItem = {
    * button would look broken. Removing is a decision, and it is remembered.
    */
   dismissedBuildIds?: string[];
+  /**
+   * Sent back to Costing.
+   *
+   * The line stays on the quotation — removing it would lose the price the
+   * buyer was shown and the reason it was questioned. It is marked, frozen and
+   * blocking instead, which is what "this one needs re-costing" actually
+   * means.
+   */
+  rejected?: { at: string; by: string; reason: string };
+  /** How much of this article is being redone on a requote. */
+  requoteScope?: "full" | "override";
 };
 
 /**
@@ -130,6 +141,8 @@ export type QuoteDraft = {
   id: string;
   podId: string;
   mode: QuoteMode;
+  /** the quotation this one was raised from, when it is a requote */
+  requoteOf?: string;
   items: QuoteItem[];
   /** quote-wide commercial defaults, inherited by every item that has none */
   rates: Partial<ProvisionRates>;
@@ -694,6 +707,101 @@ export function setItemSellingPrice(
  */
 export function setLineBuild(quotationId: string, itemId: string, lineId: string, buildId: string) {
   updateLine(quotationId, itemId, lineId, { buildId });
+}
+
+/**
+ * Send a line back to Costing.
+ *
+ * Nothing is written back into Configuration or Costing from here — the
+ * quotation records that it asked, and the costing team answers on their own
+ * screens. That is the whole reason this is a flag and a reason, not an edit.
+ */
+export function rejectItem(quotationId: string, itemId: string, reason: string) {
+  const item = itemOf(quotationId, itemId);
+  if (!item) return;
+  logQuotationEvent(
+    quotationId,
+    "line_rejected",
+    `${item.name} sent back for recosting — ${reason.trim()}`,
+  );
+  write(quotationId, (d) => ({
+    ...d,
+    items: d.items.map((i) =>
+      i.id === itemId
+        ? { ...i, rejected: { at: stamp(), by: "Gautam Kitclu", reason: reason.trim() } }
+        : i,
+    ),
+  }));
+}
+
+/** Withdraw the request — the costing came back and the line can be quoted. */
+export function clearRejection(quotationId: string, itemId: string) {
+  const item = itemOf(quotationId, itemId);
+  if (!item?.rejected) return;
+  logQuotationEvent(quotationId, "line_rejected", `${item.name} returned to the quotation`);
+  write(quotationId, (d) => ({
+    ...d,
+    items: d.items.map((i) => (i.id === itemId ? { ...i, rejected: undefined } : i)),
+  }));
+}
+
+/**
+ * Raise a new quotation from an approved one.
+ *
+ * The buyer has come back after the fact, so this is a NEW commercial cycle,
+ * not an edit of the record they accepted: a fresh number, linked to the one
+ * it came from, carrying copies of the chosen articles. The originals are left
+ * exactly as they were sent.
+ */
+export function createRequote(
+  fromQuotationId: string,
+  picks: { itemId: string; scope: "full" | "override" }[],
+): string | undefined {
+  const from = state[fromQuotationId];
+  if (!from || picks.length === 0) return undefined;
+
+  const items = picks
+    .map(({ itemId, scope }) => {
+      const src = from.items.find((i) => i.id === itemId);
+      if (!src) return undefined;
+      return {
+        ...src,
+        id: uid("QI"),
+        // A requote starts from a clean commercial position: what the buyer
+        // pushed back on is exactly what should not be inherited silently.
+        rejected: undefined,
+        requoteScope: scope,
+        ...(scope === "full"
+          ? { finalCostOverrideInr: undefined, sellingPriceOverrideUsd: undefined }
+          : {}),
+      } as QuoteItem;
+    })
+    .filter((i): i is QuoteItem => Boolean(i));
+  if (items.length === 0) return undefined;
+
+  const id = nextQuotationId();
+  state = {
+    ...state,
+    [id]: {
+      id,
+      podId: from.podId,
+      mode: items.length > 1 ? "multiple" : "single",
+      requoteOf: from.id,
+      items,
+      rates: from.rates,
+      createdAt: stamp(),
+      updatedAt: stamp(),
+    },
+  };
+  emit();
+
+  logQuotationEvent(
+    id,
+    "requote_created",
+    `${id} raised as a requote of ${from.id} — ${items.map((i) => i.name).join(", ")}`,
+  );
+  logQuotationEvent(from.id, "requote_created", `Requoted as ${id}`);
+  return id;
 }
 
 /** Choose which configured position is the price that goes to the buyer. */

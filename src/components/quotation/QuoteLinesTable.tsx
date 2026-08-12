@@ -4,7 +4,8 @@
 // is never typed and never stored. Only the commercial decisions (which
 // scenario, which build, what quantity, what margin) belong to the quotation.
 
-import { RotateCcw, Trash2 } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { Check, Pencil, RotateCcw, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { inr, pct, usd } from "@/lib/commercialProvisions";
 import type { PricedLine } from "@/lib/quotationPricing";
@@ -31,6 +32,116 @@ export type QuoteRow = {
   moqOverridden?: boolean;
 };
 
+/**
+ * A figure the commercial team may type straight into the table.
+ *
+ * Editing in place matters here: the row is the comparison, and making the
+ * user open a panel to change one number means losing sight of the three
+ * numbers they were comparing it against.
+ */
+function InlineMoney({
+  value,
+  secondary,
+  edited,
+  disabled,
+  format,
+  onSave,
+  label,
+}: {
+  value: number;
+  secondary: string;
+  edited?: boolean;
+  disabled?: boolean;
+  format: (n: number) => string;
+  onSave: (n: number) => void;
+  label: string;
+}) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState("");
+  const [savedAt, setSavedAt] = useState(0);
+  const ref = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (editing) ref.current?.select();
+  }, [editing]);
+
+  // "Saved" is a receipt, not a state — it fades.
+  useEffect(() => {
+    if (!savedAt) return;
+    const t = window.setTimeout(() => setSavedAt(0), 2500);
+    return () => window.clearTimeout(t);
+  }, [savedAt]);
+
+  const typed = Number(draft.replace(/[^\d.]/g, ""));
+  const commit = () => {
+    if (Number.isFinite(typed) && typed > 0) {
+      onSave(Math.round(typed * 100) / 100);
+      setSavedAt(Date.now());
+    }
+    setEditing(false);
+  };
+
+  if (disabled) {
+    return (
+      <>
+        <div className="text-[13px] font-semibold text-ink-400">{format(value)}</div>
+        <div className="text-[10.5px] text-ink-300">{secondary}</div>
+      </>
+    );
+  }
+
+  if (editing) {
+    return (
+      <input
+        ref={ref}
+        type="number"
+        min={0}
+        step="0.01"
+        value={draft}
+        aria-label={label}
+        onChange={(e) => setDraft(e.target.value)}
+        onBlur={commit}
+        onKeyDown={(e) => {
+          if (e.key === "Enter") commit();
+          if (e.key === "Escape") setEditing(false);
+        }}
+        className="w-24 rounded border border-brand-600 bg-surface px-1.5 py-1 text-right text-[12px] font-semibold tabular-nums text-ink-900 focus:outline-none focus:ring-2 focus:ring-brand-700/20"
+      />
+    );
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        onClick={() => {
+          setDraft(String(value));
+          setEditing(true);
+        }}
+        title={`Edit ${label}`}
+        className="group inline-flex items-center gap-1 rounded text-[13px] font-semibold text-ink-900 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+      >
+        {format(value)}
+        <Pencil
+          className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100"
+          aria-hidden
+        />
+      </button>
+      <div className="flex items-center justify-end gap-1 text-[10.5px] text-ink-400">
+        {secondary}
+        {savedAt > 0 && (
+          <span className="inline-flex items-center gap-0.5 font-semibold text-brand-700">
+            <Check className="h-3 w-3" aria-hidden /> Saved
+          </span>
+        )}
+        {edited && savedAt === 0 && (
+          <span className="font-semibold uppercase tracking-[0.06em] text-ink-500">Override</span>
+        )}
+      </div>
+    </>
+  );
+}
+
 export function QuoteLinesTable({
   rows,
   quotedLineId,
@@ -40,6 +151,8 @@ export function QuoteLinesTable({
   onMoq,
   onBuild,
   onResetMoq,
+  onSellingPrice,
+  frozen = false,
   showQuoteColumn = true,
   identityHeader = "Configuration",
   readOnly = false,
@@ -55,6 +168,10 @@ export function QuoteLinesTable({
   onBuild?: (lineId: string, buildId: string) => void;
   /** hand the quantity back to the costing's own MOQ */
   onResetMoq?: (lineId: string) => void;
+  /** fix the selling price by hand, $ / pc — margin follows from it */
+  onSellingPrice?: (lineId: string, sellingUsd: number) => void;
+  /** the whole item has been sent back for recosting: shown, frozen */
+  frozen?: boolean;
   showQuoteColumn?: boolean;
   identityHeader?: string;
   /** a sent version is a record, so every control on it is frozen */
@@ -62,7 +179,9 @@ export function QuoteLinesTable({
 }) {
   return (
     <div className="overflow-x-auto">
-      <table className="w-full min-w-[900px] border-collapse text-[12px]">
+      <table
+        className={cn("w-full min-w-[900px] border-collapse text-[12px]", frozen && "opacity-60")}
+      >
         <thead>
           <tr className="border-b border-hairline bg-surface-alt/60 text-[10px] uppercase tracking-[0.1em] text-ink-500">
             {showQuoteColumn && (
@@ -182,7 +301,7 @@ export function QuoteLinesTable({
                     min={1}
                     step={100}
                     value={priced.moq}
-                    disabled={readOnly}
+                    disabled={readOnly || frozen}
                     onChange={(e) => onMoq(row.lineId, Number(e.target.value))}
                     aria-label="Quoted quantity"
                     className={cn(
@@ -230,12 +349,28 @@ export function QuoteLinesTable({
                 </td>
 
                 <td className="px-3 py-2.5 text-right tabular-nums">
-                  <div className="text-[13px] font-semibold text-ink-900">{usd(c.sellingUsd)}</div>
-                  <div className="text-[10.5px] text-ink-400">{inr(c.sellingInr)}</div>
-                  {(c.sellingPriceEdited || c.finalCostEdited) && (
-                    <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-500">
-                      {c.sellingPriceEdited ? "Price override" : "Cost override"}
-                    </div>
+                  {onSellingPrice && !readOnly ? (
+                    <InlineMoney
+                      value={c.sellingUsd}
+                      secondary={inr(c.sellingInr)}
+                      edited={c.sellingPriceEdited}
+                      disabled={frozen}
+                      format={(n) => usd(n)}
+                      label="Selling price"
+                      onSave={(n) => onSellingPrice(row.lineId, n)}
+                    />
+                  ) : (
+                    <>
+                      <div className="text-[13px] font-semibold text-ink-900">
+                        {usd(c.sellingUsd)}
+                      </div>
+                      <div className="text-[10.5px] text-ink-400">{inr(c.sellingInr)}</div>
+                      {(c.sellingPriceEdited || c.finalCostEdited) && (
+                        <div className="text-[10px] font-semibold uppercase tracking-[0.06em] text-ink-500">
+                          {c.sellingPriceEdited ? "Price override" : "Cost override"}
+                        </div>
+                      )}
+                    </>
                   )}
                 </td>
 
@@ -245,7 +380,7 @@ export function QuoteLinesTable({
                       type="number"
                       step="0.5"
                       value={c.marginPct}
-                      disabled={readOnly}
+                      disabled={readOnly || frozen}
                       onChange={(e) => onMargin(row.lineId, Number(e.target.value))}
                       aria-label="Target margin percent"
                       className="w-14 rounded border border-transparent bg-transparent px-1 py-1 text-right text-[12px] font-medium tabular-nums text-ink-900 hover:border-hairline focus:border-brand-600 focus:bg-surface focus:outline-none focus:ring-2 focus:ring-brand-700/20"

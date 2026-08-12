@@ -98,6 +98,7 @@ export function QuoteWorkspace({
   const sent = latestVersion(history);
   const locked = history.locked;
   const companions = (quotation?.items ?? []).filter((i) => i.articleId !== article.id);
+  const blocked = items.filter((i) => i.rejected);
   const isMulti = quotation?.mode === "multiple";
 
   return (
@@ -165,9 +166,15 @@ export function QuoteWorkspace({
           ) : (
             <button
               type="button"
-              disabled={items.length === 0}
+              disabled={items.length === 0 || blocked.length > 0}
               onClick={() => setApprovalOpen(true)}
-              title={items.length === 0 ? "Quote this article first" : undefined}
+              title={
+                blocked.length > 0
+                  ? `${blocked.map((i) => i.name).join(", ")} ${blocked.length === 1 ? "is" : "are"} out for recosting — the quotation cannot be sent until ${blocked.length === 1 ? "it comes" : "they come"} back.`
+                  : items.length === 0
+                    ? "Quote this article first"
+                    : undefined
+              }
               className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
             >
               <Send className="h-4 w-4" /> Send for Approval

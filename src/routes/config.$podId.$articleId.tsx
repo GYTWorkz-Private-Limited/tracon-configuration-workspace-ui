@@ -23,6 +23,7 @@ import { ProductHeader } from "@/components/layout/ProductHeader";
 import { WorkflowStepper } from "@/components/layout/WorkflowStepper";
 import { ArticleTabsBar } from "@/components/layout/ArticleTabsBar";
 import { ActionGroup, ModuleRevisionAction } from "@/components/changes/FlowActions";
+import { CompareVariantsAction } from "@/components/config/CompareVariantsAction";
 import { BundleBuilderDrawer } from "@/components/configuration/BundleBuilderDrawer";
 import { ArticleLibraryDrawer } from "@/components/articles/ArticleLibraryDrawer";
 import {
@@ -166,6 +167,7 @@ function ConfigurationWorkspacePage() {
       >
         <ActionGroup>
           <ModuleRevisionAction />
+          <CompareVariantsAction productName={article.name} />
           <button
             onClick={() =>
               navigate({

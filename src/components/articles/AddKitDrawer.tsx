@@ -65,7 +65,10 @@ export function AddKitDrawer({ open, onClose, defaultBuyer, onCreate }: Props) {
     setItems((prev) => prev.map((x) => (x.id === id ? { ...x, ...p } : x)));
 
   const reset = () => {
-    setName(""); setCollection(""); setMoq(""); setItems([]);
+    setName("");
+    setCollection("");
+    setMoq("");
+    setItems([]);
   };
 
   return (
@@ -79,10 +82,15 @@ export function AddKitDrawer({ open, onClose, defaultBuyer, onCreate }: Props) {
         footer={
           <>
             <span className="text-[12px] text-ink-500">
-              {items.length ? `${items.length} articles · ${items.reduce((s, i) => s + i.qty, 0)} pieces per set` : "No articles yet"}
+              {items.length
+                ? `${items.length} articles · ${items.reduce((s, i) => s + i.qty, 0)} pieces per set`
+                : "No articles yet"}
             </span>
             <div className="flex items-center gap-2">
-              <button onClick={onClose} className="rounded-md border border-hairline px-3 py-2 text-[13px] text-ink-700 hover:bg-surface">
+              <button
+                onClick={onClose}
+                className="rounded-md border border-hairline px-3 py-2 text-[13px] text-ink-700 hover:bg-surface"
+              >
                 Cancel
               </button>
               <button
@@ -117,7 +125,9 @@ export function AddKitDrawer({ open, onClose, defaultBuyer, onCreate }: Props) {
                 onClick={() => setName(k.name)}
                 className={cn(
                   "rounded-full border px-2.5 py-1 text-[12px]",
-                  name === k.name ? "border-brand-700 bg-brand-50 text-brand-700" : "border-hairline text-ink-700 hover:bg-surface-alt",
+                  name === k.name
+                    ? "border-brand-700 bg-brand-50 text-brand-700"
+                    : "border-hairline text-ink-700 hover:bg-surface-alt",
                 )}
               >
                 {k.name}
@@ -126,12 +136,24 @@ export function AddKitDrawer({ open, onClose, defaultBuyer, onCreate }: Props) {
           </div>
 
           <div className="mt-4 grid gap-x-6 gap-y-3 sm:grid-cols-2">
-            <Field label="Kit Name *" value={name} onChange={setName} placeholder="e.g. Dining Set — SS27" />
+            <Field
+              label="Kit Name *"
+              value={name}
+              onChange={setName}
+              placeholder="e.g. Dining Set — SS27"
+            />
             <Field label="Buyer" value={buyer} onChange={setBuyer} />
-            <Field label="Collection" value={collection} onChange={setCollection} placeholder="e.g. Warm Table Top" />
+            <Field
+              label="Collection"
+              value={collection}
+              onChange={setCollection}
+              placeholder="e.g. Warm Table Top"
+            />
             <Field label="MOQ *" value={moq} onChange={setMoq} placeholder="e.g. 1,000 sets" />
             <label className="block">
-              <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">Currency</span>
+              <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">
+                Currency
+              </span>
               <select
                 value={currency}
                 onChange={(e) => setCurrency(e.target.value)}
@@ -161,7 +183,14 @@ export function AddKitDrawer({ open, onClose, defaultBuyer, onCreate }: Props) {
               <div className="flex flex-col items-center py-10 text-center">
                 <Boxes className="h-5 w-5 text-ink-400" />
                 <p className="mt-2 text-[13px] text-ink-500">
-                  No articles yet — <button onClick={() => setLibOpen(true)} className="text-brand-700 hover:underline">select from the Article Library</button>.
+                  No articles yet —{" "}
+                  <button
+                    onClick={() => setLibOpen(true)}
+                    className="text-brand-700 hover:underline"
+                  >
+                    select from the Article Library
+                  </button>
+                  .
                 </p>
               </div>
             ) : (
@@ -190,7 +219,9 @@ export function AddKitDrawer({ open, onClose, defaultBuyer, onCreate }: Props) {
                           type="number"
                           min={1}
                           value={it.qty}
-                          onChange={(e) => patch(it.id, { qty: Math.max(1, Number(e.target.value) || 1) })}
+                          onChange={(e) =>
+                            patch(it.id, { qty: Math.max(1, Number(e.target.value) || 1) })
+                          }
                           className="w-16 rounded-md border border-hairline bg-surface px-2 py-1 text-[13px] tabular-nums focus:outline-none"
                         />
                       </td>
@@ -204,10 +235,18 @@ export function AddKitDrawer({ open, onClose, defaultBuyer, onCreate }: Props) {
                       </td>
                       <td className="px-3 py-2">
                         <div className="flex items-center justify-end gap-0.5">
-                          <button onClick={() => move(i, -1)} className="rounded p-1 text-ink-500 hover:bg-surface-alt" aria-label="Move up">
+                          <button
+                            onClick={() => move(i, -1)}
+                            className="rounded p-1 text-ink-500 hover:bg-surface-alt"
+                            aria-label="Move up"
+                          >
                             <ChevronUp className="h-3.5 w-3.5" />
                           </button>
-                          <button onClick={() => move(i, 1)} className="rounded p-1 text-ink-500 hover:bg-surface-alt" aria-label="Move down">
+                          <button
+                            onClick={() => move(i, 1)}
+                            className="rounded p-1 text-ink-500 hover:bg-surface-alt"
+                            aria-label="Move down"
+                          >
                             <ChevronDown className="h-3.5 w-3.5" />
                           </button>
                           <button
@@ -229,6 +268,7 @@ export function AddKitDrawer({ open, onClose, defaultBuyer, onCreate }: Props) {
       </DrawerShell>
 
       <ArticleLibraryDrawer
+        noun="kit item"
         open={libOpen}
         onClose={() => setLibOpen(false)}
         title="Select Kit Articles"
@@ -242,8 +282,16 @@ export function AddKitDrawer({ open, onClose, defaultBuyer, onCreate }: Props) {
 }
 
 function Field({
-  label, value, onChange, placeholder,
-}: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  label,
+  value,
+  onChange,
+  placeholder,
+}: {
+  label: string;
+  value: string;
+  onChange: (v: string) => void;
+  placeholder?: string;
+}) {
   return (
     <label className="block">
       <span className="mb-1 block text-[11px] uppercase tracking-wide text-ink-500">{label}</span>

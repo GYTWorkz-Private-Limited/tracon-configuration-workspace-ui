@@ -24,6 +24,7 @@ import {
   Lock,
   PackagePlus,
   Send,
+  Sparkles,
   Trash2,
   X,
 } from "lucide-react";
@@ -32,7 +33,7 @@ import { cn } from "@/lib/utils";
 import { usePod } from "@/lib/podsStore";
 import { inr, pct, usd } from "@/lib/commercialProvisions";
 import { useCostingSelections } from "@/lib/costingSelectionStore";
-import { addProducts, removeItems, useQuotation } from "@/lib/quoteDraftStore";
+import { addProducts, createRequote, removeItems, useQuotation } from "@/lib/quoteDraftStore";
 import {
   latestVersion,
   startNewVersion,
@@ -46,6 +47,7 @@ import { ArticleSelectionModal } from "./ArticleSelectionModal";
 import { QuotationPreview } from "./QuotationPreview";
 import { QuotationApprovalWorkspace } from "./QuotationApprovalWorkspace";
 import { QuotationHistoryPanel, VersionStatusPill } from "./QuotationHistoryPanel";
+import { RequotePicker } from "./RequotePicker";
 
 export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }) {
   const navigate = useNavigate();
@@ -60,6 +62,7 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
   const [historyOpen, setHistoryOpen] = useState(false);
   const [focus, setFocus] = useState<string>("all");
   const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [requoteOpen, setRequoteOpen] = useState(false);
 
   const items = useMemo(() => quotation?.items ?? [], [quotation]);
   const views: ViewedItem[] = useMemo(
@@ -84,6 +87,8 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
   const sent = latestVersion(history);
   const locked = history.locked;
   const activeFocus = focus !== "all" && items.some((i) => i.id === focus) ? focus : "all";
+  // A quotation with a line out for recosting is not a quotation yet.
+  const blocked = items.filter((i) => i.rejected);
   const quotedIds = new Set(items.map((i) => i.articleId));
 
   /** Leaving returns to the article the quotation was started from. */
@@ -132,9 +137,20 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
                 </span>
               )}
             </div>
-            <p className="mt-0.5 text-[12px] text-ink-500">
-              {pod.buyer} · {pod.id} · {items.length} article{items.length === 1 ? "" : "s"} quoted
-              as one document
+            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-ink-500">
+              <span>
+                {pod.buyer} · {pod.id} · {items.length} article{items.length === 1 ? "" : "s"}{" "}
+                quoted as one document
+              </span>
+              {quotation.requoteOf && (
+                <Link
+                  to="/quotations/$quotationId"
+                  params={{ quotationId: quotation.requoteOf }}
+                  className="font-medium text-brand-700 hover:underline"
+                >
+                  Requote of {quotation.requoteOf}
+                </Link>
+              )}
             </p>
           </div>
 
@@ -158,6 +174,18 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
             >
               <FileText className="h-4 w-4" /> Preview Quotation
             </button>
+            {/* A quotation the buyer has agreed is finished. Going again is a
+                new document, so it gets its own button rather than reopening
+                the one they accepted. */}
+            {(sent?.status === "approved" || sent?.status === "sent") && (
+              <button
+                type="button"
+                onClick={() => setRequoteOpen(true)}
+                className="inline-flex items-center gap-1.5 rounded-md border border-brand-700 bg-brand-50 px-3 py-2 text-[13px] font-medium text-brand-700 hover:bg-brand-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                <Sparkles className="h-4 w-4" /> Generate Requote
+              </button>
+            )}
             {locked ? (
               <button
                 type="button"
@@ -169,7 +197,12 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
             ) : (
               <button
                 type="button"
-                disabled={items.length === 0}
+                disabled={items.length === 0 || blocked.length > 0}
+                title={
+                  blocked.length > 0
+                    ? `${blocked.map((i) => i.name).join(", ")} ${blocked.length === 1 ? "is" : "are"} out for recosting — the quotation cannot be sent until ${blocked.length === 1 ? "it comes" : "they come"} back.`
+                    : undefined
+                }
                 onClick={() => setApprovalOpen(true)}
                 className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
               >
@@ -322,6 +355,25 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
                 }
               : undefined
           }
+        />
+      )}
+
+      {requoteOpen && (
+        <RequotePicker
+          quotationId={quotation.id}
+          items={items}
+          priceOf={(id) => {
+            const v = views.find((x) => x.item.id === id);
+            return v ? v.priced.commercial.sellingUsd : 0;
+          }}
+          onClose={() => setRequoteOpen(false)}
+          onConfirm={(picks) => {
+            const next = createRequote(quotation.id, picks);
+            setRequoteOpen(false);
+            // Land in the new cycle, not back on the list — this is where the
+            // work continues.
+            if (next) navigate({ to: "/quotations/$quotationId", params: { quotationId: next } });
+          }}
         />
       )}
 
