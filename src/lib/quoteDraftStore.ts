@@ -95,6 +95,14 @@ export type QuoteItem = {
   finalCostOverrideInr?: number;
   /** a kit's hand-fixed selling price, $ / set */
   sellingPriceOverrideUsd?: number;
+  /**
+   * Variants the user has taken OFF this quotation.
+   *
+   * Published variants flow onto the quote automatically, so without this a
+   * removed row would come straight back on the next render — the remove
+   * button would look broken. Removing is a decision, and it is remembered.
+   */
+  dismissedBuildIds?: string[];
 };
 
 /**
@@ -365,6 +373,43 @@ export function addLine(
   );
 }
 
+/**
+ * Put a row on the quote for each variant that has none.
+ *
+ * Configuration keeps publishing variants after a quotation has been opened,
+ * and the commercial team cannot choose between ways of building the product
+ * if the quote only shows the ones that happened to exist the day it was
+ * created. So the rows follow what Configuration has published — except the
+ * ones somebody deliberately removed.
+ *
+ * The caller passes the variants that are genuinely uncovered, because only it
+ * knows which rows sit on an OPTION of a variant and therefore already cover
+ * it.
+ */
+export function addVariantRows(podId: string, itemId: string, variantIds: string[]) {
+  const item = itemOf(podId, itemId);
+  if (!item || item.kind !== "product") return;
+  const dismissed = new Set(item.dismissedBuildIds ?? []);
+  // Already on the quote wins over "uncovered": the caller computes coverage
+  // from a snapshot, so two calls can race before the first write is visible
+  // to it — and a variant must never end up with two rows.
+  const present = new Set(item.lines.map((l) => l.buildId));
+  const add = variantIds.filter((id) => !dismissed.has(id) && !present.has(id));
+  if (add.length === 0) return;
+
+  write(podId, (d) => ({
+    ...d,
+    items: d.items.map((i) =>
+      i.id !== itemId
+        ? i
+        : {
+            ...i,
+            lines: [...i.lines, ...add.map((buildId) => ({ ...baseLine(), buildId }))],
+          },
+    ),
+  }));
+}
+
 export function updateLine(
   podId: string,
   itemId: string,
@@ -430,6 +475,7 @@ export function removeLine(podId: string, itemId: string, lineId: string) {
     "line_removed",
     `Configuration row removed from ${itemOf(podId, itemId)?.name ?? "an item"}`,
   );
+  const removedBuildId = itemOf(podId, itemId)?.lines.find((l) => l.id === lineId)?.buildId;
   write(podId, (d) => ({
     ...d,
     items: d.items.map((i) => {
@@ -439,6 +485,10 @@ export function removeLine(podId: string, itemId: string, lineId: string) {
       const lines = i.lines.filter((l) => l.id !== lineId);
       return {
         ...i,
+        // Remembered so the automatic variant rows do not bring it back.
+        dismissedBuildIds: removedBuildId
+          ? Array.from(new Set([...(i.dismissedBuildIds ?? []), removedBuildId]))
+          : i.dismissedBuildIds,
         lines,
         // Never leave the summary pointing at a line that no longer exists.
         quotedLineId: i.quotedLineId === lineId ? lines[0]?.id : i.quotedLineId,

@@ -6,7 +6,7 @@
 // sees is a single combined position computed once for the set, not two
 // unrelated quotes sitting next to each other.
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
 import { Boxes, ChevronDown, Package, Settings2, Trash2 } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
@@ -31,6 +31,7 @@ import {
 } from "@/lib/costingSelectionStore";
 import {
   addLine,
+  addVariantRows,
   removeItem,
   removeLine,
   setItemFinalCost,
@@ -135,6 +136,27 @@ function ProductCard({
       }),
     [item, scenarios, builds],
   );
+
+  /**
+   * Variants Configuration has published that no row covers yet.
+   *
+   * A row sitting on an OPTION already covers its parent variant, which is why
+   * this compares by variant rather than by build id.
+   */
+  const uncoveredVariantIds = useMemo(() => {
+    const covered = new Set(
+      item.lines.map((l) => variantOf(builds, buildById(builds, l.buildId)).id),
+    );
+    return builds.filter((b) => b.kind === "variant" && !covered.has(b.id)).map((b) => b.id);
+  }, [builds, item.lines]);
+
+  // Configuration keeps publishing after a quotation is opened, so the rows
+  // follow it. A sent version is a record and never moves.
+  const uncoveredKey = uncoveredVariantIds.join(",");
+  useEffect(() => {
+    if (readOnly || !uncoveredKey) return;
+    addVariantRows(podId, item.id, uncoveredKey.split(","));
+  }, [podId, item.id, uncoveredKey, readOnly]);
 
   const quotedId = item.quotedLineId ?? rows[0]?.lineId;
   const quoted = rows.find((r) => r.lineId === quotedId) ?? rows[0];
