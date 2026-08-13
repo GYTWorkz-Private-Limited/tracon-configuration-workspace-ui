@@ -209,19 +209,19 @@ export function QuoteLinesTable({
               {identityHeader}
             </th>
             <th scope="col" className="px-3 py-2 text-right font-medium">
-              MOQ
+              MOQ (pcs)
             </th>
             <th scope="col" className="px-3 py-2 text-right font-medium">
-              Direct cost
+              Direct cost ₹/pc
             </th>
             <th scope="col" className="px-3 py-2 text-right font-medium">
-              Commercials
+              Commercials ₹/pc
             </th>
             <th scope="col" className="px-3 py-2 text-right font-medium">
-              Final cost
+              Final cost ₹/pc
             </th>
             <th scope="col" className="px-3 py-2 text-right font-medium">
-              Selling price
+              Selling price $/pc
             </th>
             <th scope="col" className="px-3 py-2 text-right font-medium">
               Margin

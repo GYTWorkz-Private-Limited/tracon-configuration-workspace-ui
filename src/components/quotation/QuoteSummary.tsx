@@ -13,6 +13,7 @@ import { useEffect, useRef, useState } from "react";
 import { ArrowRight, Check, Pencil, RotateCcw, TriangleAlert, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { inr, pct, usd, type CommercialResult } from "@/lib/commercialProvisions";
+import { inrShort } from "@/lib/fabricRequirement";
 
 export type SummaryVariant = "product" | "kit";
 
@@ -64,7 +65,13 @@ export function QuoteSummary({
     { label: "Margin INR", value: `${inr(result.marginInr)} ${unit}` },
     { label: "Margin %", value: pct(result.marginPct, 1), strong: true },
     { label: "Buyer Target", value: `${usd(result.buyerTargetUsd)} ${unit}` },
-    { label: "Order Value", value: usd(orderValueUsd, 0), strong: true },
+    {
+      // The order value is what the buyer signs — stated in both currencies,
+      // for the quantity stated one cell over.
+      label: `Order Value (${quantityLabel})`,
+      value: `${usd(orderValueUsd, 0)} · ${inrShort(result.sellingInr * quantity)}`,
+      strong: true,
+    },
   ];
 
   return (

@@ -18,7 +18,12 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { ArticleLibraryDrawer } from "@/components/articles/ArticleLibraryDrawer";
-import { RECOSTING_LABEL, useRecostRequest } from "@/lib/recostingStore";
+import {
+  RECOSTING_LABEL,
+  podHasRecostIn,
+  useRecostRequest,
+  useRecostRequests,
+} from "@/lib/recostingStore";
 import { AddKitDrawer } from "@/components/articles/AddKitDrawer";
 import {
   usePod,
@@ -88,6 +93,7 @@ const STYLE_PRESETS = Array.from(new Set(PRODUCT_PRESETS.map((p) => p.style)));
 function PodDetail() {
   const { id } = Route.useParams();
   const pod = usePod(id);
+  const recosts = useRecostRequests();
   const navigate = useNavigate();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -175,6 +181,13 @@ function PodDetail() {
               <span className="rounded-full bg-ink-100 px-2 py-0.5 text-[11px] font-medium text-ink-700">
                 {POD_STATUS_LABEL[pod.status]}
               </span>
+              {/* An article sent back from a quotation puts the whole order in
+                  a recosting round — said here, where the order is managed. */}
+              {podHasRecostIn(recosts, pod.id) && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
+                  Recost / Requote
+                </span>
+              )}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-ink-500">
               <span>

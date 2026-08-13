@@ -48,6 +48,7 @@ import {
   workingVersionNo,
 } from "@/lib/quotationHistory";
 import { totalsOf, viewQuote, type ViewedItem } from "@/lib/quotationView";
+import { inrShort } from "@/lib/fabricRequirement";
 import { QuoteItemCard } from "./QuoteItemCard";
 import { ConfigLegend } from "./ConfigChips";
 import { ArticleSelectionModal } from "./ArticleSelectionModal";
@@ -191,7 +192,10 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
             {/* A quotation the buyer has agreed is finished. Going again is a
                 new document, so it gets its own button rather than reopening
                 the one they accepted. */}
-            {(sent?.status === "approved" || sent?.status === "sent") && (
+            {/* Any sent version — approved, rejected, superseded — can be the
+                start of the next round; the customer's answer is exactly when
+                a requote happens. */}
+            {sent && (
               <button
                 type="button"
                 onClick={() => setRequoteOpen(true)}
@@ -567,7 +571,11 @@ function CombinedSummary({ views, quotationId }: { views: ViewedItem[]; quotatio
     { label: "Total Cost", value: inr(costInr, 0) },
     { label: "Selling Price", value: inr(sellingInr, 0) },
     { label: "Margin", value: pct(totals.blendedMarginPct, 1), strong: true },
-    { label: "Total Quote Value", value: usd(totals.orderValueUsd, 0), strong: true },
+    {
+      label: "Total Quote Value",
+      value: `${usd(totals.orderValueUsd, 0)} · ${inrShort(sellingInr)}`,
+      strong: true,
+    },
   ];
 
   return (
@@ -585,6 +593,7 @@ function CombinedSummary({ views, quotationId }: { views: ViewedItem[]; quotatio
           <span className="text-[19px] font-semibold tabular-nums text-ink-900">
             {usd(totals.orderValueUsd, 0)}
           </span>
+          <span className="text-[12px] tabular-nums text-ink-500">{inrShort(sellingInr)}</span>
         </span>
       </header>
 

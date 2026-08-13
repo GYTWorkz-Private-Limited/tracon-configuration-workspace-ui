@@ -11,6 +11,7 @@ import { ArrowRight, Boxes, ChevronDown, Package, Settings2, Trash2, Undo2 } fro
 import { Link } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 import { inr, usd } from "@/lib/commercialProvisions";
+import { inrShort } from "@/lib/fabricRequirement";
 import {
   buildById,
   categoryTotals,
@@ -230,7 +231,8 @@ function ProductCard({
         kindIcon={<Package className="h-3.5 w-3.5" aria-hidden />}
         subtitle={`${item.size ?? quoted.priced.sizeLabel} · ${quoted.priced.gsm} GSM · ${item.srfRef}`}
         headline={usd(quoted.priced.commercial.sellingUsd)}
-        headlineNote="/ pc"
+        headlineNote={`${inr(quoted.priced.commercial.sellingInr)} / pc`}
+        orderLine={`${quoted.priced.moq.toLocaleString("en-IN")} pcs → ${usd(quoted.priced.orderValueUsd, 0)} · ${inrShort(quoted.priced.commercial.sellingInr * quoted.priced.moq)}`}
         readOnly={readOnly}
         onOverride={() => setOverriding(true)}
         siblings={siblings.length > 0 ? siblings : [item]}
@@ -387,7 +389,8 @@ function KitCard({ podId, quotationId, item, index, readOnly, showSummary, sibli
         kindIcon={<Boxes className="h-3.5 w-3.5" aria-hidden />}
         subtitle={`${item.members.map((m) => m.name).join(" + ")} · ${item.members.length} article${item.members.length === 1 ? "" : "s"} per set`}
         headline={usd(kit.commercial.sellingUsd)}
-        headlineNote="/ set"
+        headlineNote={`${inr(kit.commercial.sellingInr)} / set`}
+        orderLine={`${kit.sets.toLocaleString("en-IN")} sets → ${usd(kit.orderValueUsd, 0)} · ${inrShort(kit.commercial.sellingInr * kit.sets)}`}
         readOnly={readOnly}
         onOverride={() => setOverriding(true)}
         siblings={siblings.length > 0 ? siblings : [item]}
@@ -579,6 +582,7 @@ function CardHeader({
   subtitle,
   headline,
   headlineNote,
+  orderLine,
   onToggle,
   collapsed,
   readOnly,
@@ -594,6 +598,8 @@ function CardHeader({
   subtitle: string;
   headline: string;
   headlineNote: string;
+  /** the order this price becomes: quantity → value, both currencies */
+  orderLine?: string;
   onToggle?: () => void;
   collapsed?: boolean;
   readOnly?: boolean;
@@ -700,7 +706,12 @@ function CardHeader({
             Quoted price
           </div>
           <div className="text-[19px] font-semibold tabular-nums text-ink-900">{headline}</div>
-          <div className="text-[10.5px] text-ink-400">{headlineNote}</div>
+          <div className="text-[10.5px] tabular-nums text-ink-400">{headlineNote}</div>
+          {/* A per-piece price is an input; the order value is what the buyer
+              actually signs. Both are stated, in both currencies. */}
+          {orderLine && (
+            <div className="mt-0.5 text-[10.5px] tabular-nums text-ink-500">{orderLine}</div>
+          )}
         </div>
         <div className="flex flex-col gap-1">
           {/* Re-costing is a real move at this stage: the buyer has pushed

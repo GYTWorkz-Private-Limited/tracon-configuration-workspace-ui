@@ -79,6 +79,18 @@ export function useRecostRequest(podId?: string, articleId?: string): RecostRequ
   return all[readinessKey(podId, articleId)];
 }
 
+/**
+ * Does any article of this POD have a live recosting ask?
+ *
+ * The POD dashboard's status column answers "what is this order waiting on",
+ * and an article sent back from a quotation is exactly that kind of wait —
+ * whatever the stored status says, the truthful answer is "recosting".
+ */
+export function podHasRecostIn(snapshot: State, podId: string): boolean {
+  const prefix = `${podId}::`;
+  return Object.keys(snapshot).some((k) => k.startsWith(prefix));
+}
+
 export function recostRequestIn(
   snapshot: State,
   podId: string,
