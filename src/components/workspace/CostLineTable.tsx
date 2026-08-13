@@ -430,10 +430,18 @@ function LineRow({
         )}
       </td>
 
-      {!compact && <td className={cn(cell, "text-right tabular-nums")}>{line.quantity}</td>}
-      {!compact && <td className={cn(cell, "text-right tabular-nums")}>{line.consumption}</td>}
+      {!compact && (
+        <td className={cn(cell, "whitespace-nowrap text-right tabular-nums")}>{line.quantity}</td>
+      )}
+      {!compact && (
+        <td className={cn(cell, "whitespace-nowrap text-right tabular-nums")}>
+          {line.consumption}
+        </td>
+      )}
       {!compact && <td className={cn(cell, "text-right tabular-nums")}>{line.wastage}</td>}
-      <td className={cn(cell, "text-right tabular-nums")}>{line.rate}</td>
+      {/* "82.00 / metre" is one fact — broken over three lines it stops
+          reading as a rate. */}
+      <td className={cn(cell, "whitespace-nowrap text-right tabular-nums")}>{line.rate}</td>
       <td className={cn("px-3 text-right align-middle", pad)}>
         <span
           className={cn(

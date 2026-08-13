@@ -212,27 +212,32 @@ function ConfigurationWorkspacePage() {
         <KitCostingWorkspace pod={pod} kit={article} stepper={stepper} />
       ) : (
         /* ---- a single product: the sheet, unchanged ---- */
-        <ArticleCostingWorkspace
-          copilotOpen={copilotOpen}
-          onCopilotOpenChange={setCopilotOpen}
-          podId={pod.id}
-          buyer={pod.buyer}
-          buyerRef={pod.buyerRef}
-          headerSlot={stepper}
-          identity={{
-            articleId: article.id,
-            name: article.name,
-            srfRef: article.srfRef,
-            size: article.size,
-            moq: article.moq,
-            image: article.image,
-            articleNo: article.articleNo,
-            styleNo: article.styleNo,
-            colour: article.colour,
-            currency: article.currency,
-          }}
-          onCosted={setCosting}
-        />
+        <>
+          {/* Same band, same place, as the Costing Report, Quotation and
+              Approval — the workflow strip is the spine of the workspace and
+              must not scroll away inside a card. */}
+          {stepper}
+          <ArticleCostingWorkspace
+            copilotOpen={copilotOpen}
+            onCopilotOpenChange={setCopilotOpen}
+            podId={pod.id}
+            buyer={pod.buyer}
+            buyerRef={pod.buyerRef}
+            identity={{
+              articleId: article.id,
+              name: article.name,
+              srfRef: article.srfRef,
+              size: article.size,
+              moq: article.moq,
+              image: article.image,
+              articleNo: article.articleNo,
+              styleNo: article.styleNo,
+              colour: article.colour,
+              currency: article.currency,
+            }}
+            onCosted={setCosting}
+          />
+        </>
       )}
 
       <ArticleTabsBar

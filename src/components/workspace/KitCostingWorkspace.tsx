@@ -179,7 +179,6 @@ export function KitCostingWorkspace({
               podId={pod.id}
               buyer={pod.buyer}
               buyerRef={pod.buyerRef}
-              productCard={false}
               identity={{
                 articleId: m.id,
                 name: m.name,

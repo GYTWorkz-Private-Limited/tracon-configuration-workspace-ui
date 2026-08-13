@@ -173,8 +173,6 @@ export function ArticleCostingWorkspace({
   buyer,
   buyerRef,
   identity,
-  headerSlot,
-  productCard = true,
   onCosted,
   copilotOpen: copilotOpenProp,
   onCopilotOpenChange,
@@ -183,10 +181,6 @@ export function ArticleCostingWorkspace({
   buyer: string;
   buyerRef: string;
   identity: CostingIdentity;
-  /** the workflow band, when this workspace owns the page */
-  headerSlot?: React.ReactNode;
-  /** kits render their own header, so the product card is suppressed there */
-  productCard?: boolean;
   onCosted?: (summary: ArticleCosting) => void;
   /** let the page header drive the copilot; omit to keep it self-managing */
   copilotOpen?: boolean;
@@ -709,59 +703,12 @@ export function ArticleCostingWorkspace({
       />
 
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-canvas p-4">
-        {productCard && (
-          <div className="shrink-0 rounded-xl border border-hairline bg-surface p-4 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="flex min-w-0 items-start gap-3">
-                {identity.image && (
-                  <img
-                    src={identity.image}
-                    alt=""
-                    className="h-14 w-14 shrink-0 rounded-lg border border-hairline object-cover"
-                  />
-                )}
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h1 className="truncate text-[16px] font-semibold text-ink-900">
-                      {product.name}
-                    </h1>
-                    <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10.5px] font-medium text-brand-700">
-                      {product.status}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-500">
-                    <span className="rounded bg-surface-alt px-1.5 py-0.5">
-                      # {product.articleNo}
-                    </span>
-                    <span className="rounded bg-surface-alt px-1.5 py-0.5"># {podId}</span>
-                    <Meta label="Size" value={product.size} />
-                    <Meta label="MOQ" value={product.moq} />
-                    <Meta label="Buyer" value={product.buyer} />
-                  </div>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-[10px] font-medium uppercase tracking-[0.1em] text-ink-500">
-                  Total Direct Cost
-                </div>
-                <div className="text-[22px] font-semibold tabular-nums text-ink-900">
-                  {money(rollup.directCost)}
-                </div>
-                <div className="text-[10.5px] text-ink-400">/ pc</div>
-              </div>
-            </div>
-
-            {headerSlot && <div className="-mx-4 mt-3 border-t border-hairline">{headerSlot}</div>}
-          </div>
-        )}
-
+        {/* The page header above already states the identity and the running
+            total; repeating them in a card here made the page read as two
+            stacked headers. The sheet starts at the variants, the way the
+            Costing Report starts at its tabs. */}
         {/* scenarios — whole costing positions */}
-        <div
-          className={cn(
-            "shrink-0 overflow-hidden rounded-xl border border-hairline bg-surface",
-            productCard ? "mt-3" : "",
-          )}
-        >
+        <div className="shrink-0 overflow-hidden rounded-xl border border-hairline bg-surface">
           {/* Scenario navigation lives in the variant tabs below — a second
               scenario strip here was duplicate navigation for the same thing. */}
           {/* variants and options inside the active scenario */}
@@ -908,12 +855,4 @@ function toBuildRef(v: Variant): BuildRef {
       option: p.options.find((o) => o.id === p.selectedId) ?? p.options[0],
     })),
   };
-}
-
-function Meta({ label, value }: { label: string; value: string }) {
-  return (
-    <span>
-      {label}: <span className="font-medium text-ink-900">{value}</span>
-    </span>
-  );
 }
