@@ -14,7 +14,17 @@
  */
 
 import { useState } from "react";
-import { Boxes, Check, Clock, History, MessageSquareWarning, Package, Send, X } from "lucide-react";
+import {
+  Boxes,
+  Check,
+  Clock,
+  History,
+  MessageSquareWarning,
+  Package,
+  Send,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Pod } from "@/lib/podsStore";
 import { WorkflowStepper } from "@/components/layout/WorkflowStepper";
@@ -78,6 +88,7 @@ export function QuotationApprovalWorkspace({
   costingRef,
   views,
   onClose,
+  onRequote,
 }: {
   pod: Pod;
   /** the quotation being approved — one request per quotation, never per article */
@@ -86,6 +97,12 @@ export function QuotationApprovalWorkspace({
   costingRef?: string;
   views: ViewedItem[];
   onClose: () => void;
+  /**
+   * Start a requote from here. Approval is where a buyer's push-back usually
+   * lands, so the way into the next round is offered on this screen too —
+   * the host owns the picker, this just hands over to it.
+   */
+  onRequote?: () => void;
 }) {
   const approval = useQuotationApproval(quotationId);
   const history = useQuotationHistory(quotationId);
@@ -155,6 +172,16 @@ export function QuotationApprovalWorkspace({
               </div>
             </div>
           </div>
+
+          {onRequote && approval.submitted && (
+            <button
+              type="button"
+              onClick={onRequote}
+              className="inline-flex items-center gap-1.5 self-center rounded-md border border-brand-700 bg-brand-50 px-3 py-2 text-[13px] font-medium text-brand-700 hover:bg-brand-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              <Sparkles className="h-4 w-4" /> Requote
+            </button>
+          )}
         </div>
       </header>
 

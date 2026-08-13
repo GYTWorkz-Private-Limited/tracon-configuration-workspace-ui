@@ -969,18 +969,45 @@ export function resolveRejectionForArticle(podId: string, articleId: string) {
  */
 export function createRequote(
   fromQuotationId: string,
-  picks: { itemId: string; scope: "full" | "override" }[],
+  picks: {
+    itemId: string;
+    scope: "full" | "override";
+    /**
+     * Products only: which configured lines (variants) carry forward. Omitted
+     * or empty means all of them — a kit always travels whole, its members
+     * are priced as one set.
+     */
+    lineIds?: string[];
+  }[],
 ): string | undefined {
   const from = state[fromQuotationId];
   if (!from || picks.length === 0) return undefined;
 
   const items = picks
-    .map(({ itemId, scope }) => {
+    .map(({ itemId, scope, lineIds }) => {
       const src = from.items.find((i) => i.id === itemId);
       if (!src) return undefined;
+      // Only the chosen variants come forward; the ones the buyer accepted
+      // stay behind on the sent version rather than being dragged into a new
+      // round they were never part of.
+      const keep =
+        src.kind === "product" && lineIds?.length
+          ? src.lines.filter((l) => lineIds.includes(l.id))
+          : src.lines;
+      const lines = keep.length > 0 ? keep : src.lines;
+      // The variants left behind must STAY behind: the live sync that surfaces
+      // published variants as rows would quietly re-add them otherwise, and a
+      // choice that un-makes itself is worse than no choice.
+      const dropped = src.lines.filter((l) => !lines.includes(l)).map((l) => l.buildId);
       return {
         ...src,
         id: uid("QI"),
+        dismissedBuildIds: Array.from(new Set([...(src.dismissedBuildIds ?? []), ...dropped])),
+        lines: lines.map((l) => ({ ...l, rejected: undefined })),
+        quotedLineId:
+          src.quotedLineId && lines.some((l) => l.id === src.quotedLineId)
+            ? src.quotedLineId
+            : lines[0]?.id,
         // A requote starts from a clean commercial position: what the buyer
         // pushed back on is exactly what should not be inherited silently.
         rejected: undefined,

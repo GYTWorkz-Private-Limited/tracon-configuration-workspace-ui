@@ -16,10 +16,21 @@
  * The sent quotation stays exactly as it was sent, whatever is chosen here.
  */
 
-import { useState } from "react";
-import { ArrowLeft, ArrowRight, Boxes, FileText, Package, Settings2, X } from "lucide-react";
+import { useMemo, useState } from "react";
+import {
+  ArrowLeft,
+  ArrowRight,
+  Boxes,
+  ChevronDown,
+  FileText,
+  Package,
+  Settings2,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usd } from "@/lib/commercialProvisions";
+import { buildsIn, scenariosIn, useCostingSelections } from "@/lib/costingSelectionStore";
+import { buildById, scenarioById } from "@/lib/quotationPricing";
 import type { QuoteItem } from "@/lib/quoteDraftStore";
 
 /** Where the selected articles are reworked. */
@@ -27,6 +38,7 @@ export type RequoteDestination = "configuration" | "quotation";
 
 export function RequotePicker({
   quotationId,
+  podId,
   items,
   priceOf,
   /** the sent version the selected articles currently stand on */
@@ -36,24 +48,71 @@ export function RequotePicker({
   onConfirm,
 }: {
   quotationId: string;
+  podId: string;
   items: QuoteItem[];
   /** current quoted price of an item, for orientation while choosing */
   priceOf: (itemId: string) => number;
   versionNo?: number;
   statusLabel?: string;
   onClose: () => void;
-  onConfirm: (itemIds: string[], destination: RequoteDestination) => void;
+  onConfirm: (
+    picks: { itemId: string; lineIds: string[] }[],
+    destination: RequoteDestination,
+  ) => void;
 }) {
-  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const selections = useCostingSelections();
+
+  /**
+   * Article → its configured variants, named as the quotation table names
+   * them, so "pull only the embroidered build forward" is a thing that can be
+   * said here. Kits are not expandable: priced as one set, they travel whole.
+   */
+  const configsOf = useMemo(() => {
+    const map = new Map<string, { lineId: string; label: string }[]>();
+    for (const item of items) {
+      if (item.kind === "kit") {
+        map.set(item.id, []);
+        continue;
+      }
+      const scenarios = scenariosIn(selections, podId, item.articleId);
+      const builds = buildsIn(selections, podId, item.articleId);
+      map.set(
+        item.id,
+        item.lines.map((l) => ({
+          lineId: l.id,
+          label: `${scenarioById(scenarios, l.scenarioId).name} · ${buildById(builds, l.buildId).name}`,
+        })),
+      );
+    }
+    return map;
+  }, [items, selections, podId]);
+
+  const allLinesOf = (item: QuoteItem) =>
+    new Set((configsOf.get(item.id) ?? []).map((c) => c.lineId));
+
+  /** item id → the line ids coming forward; a kit maps to an empty set. */
+  const [picked, setPicked] = useState<Map<string, Set<string>>>(new Map());
+  const [open, setOpen] = useState<Set<string>>(new Set());
   const [step, setStep] = useState<1 | 2>(1);
   const [destination, setDestination] = useState<RequoteDestination | null>(null);
 
   const allOn = picked.size === items.length && items.length > 0;
 
-  const toggle = (id: string) => {
-    const next = new Set(picked);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
+  const toggle = (item: QuoteItem) => {
+    const next = new Map(picked);
+    if (next.has(item.id)) next.delete(item.id);
+    else next.set(item.id, allLinesOf(item));
+    setPicked(next);
+  };
+
+  const toggleLine = (item: QuoteItem, lineId: string) => {
+    const next = new Map(picked);
+    const set = new Set(next.get(item.id) ?? []);
+    if (set.has(lineId)) set.delete(lineId);
+    else set.add(lineId);
+    // An article with no configuration selected is not coming forward.
+    if (set.size === 0) next.delete(item.id);
+    else next.set(item.id, set);
     setPicked(next);
   };
 
@@ -101,7 +160,11 @@ export function RequotePicker({
                 {items.length > 1 && (
                   <button
                     type="button"
-                    onClick={() => setPicked(allOn ? new Set() : new Set(items.map((i) => i.id)))}
+                    onClick={() =>
+                      setPicked(
+                        allOn ? new Map() : new Map(items.map((i) => [i.id, allLinesOf(i)])),
+                      )
+                    }
                     className="shrink-0 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
                   >
                     {allOn ? "Clear selection" : `Select all ${items.length}`}
@@ -111,20 +174,27 @@ export function RequotePicker({
 
               <ul className="space-y-2">
                 {items.map((item) => {
-                  const on = picked.has(item.id);
+                  const configs = configsOf.get(item.id) ?? [];
+                  const lines = picked.get(item.id);
+                  const on = lines !== undefined;
+                  const partial = on && configs.length > 0 && lines.size < configs.length;
+                  const expanded = open.has(item.id);
                   return (
                     <li
                       key={item.id}
                       className={cn(
-                        "rounded-xl border px-4 py-3 transition-colors",
+                        "overflow-hidden rounded-xl border transition-colors",
                         on ? "border-brand-600 bg-brand-50/40" : "border-hairline bg-surface",
                       )}
                     >
-                      <label className="flex cursor-pointer items-center gap-3">
+                      <label className="flex cursor-pointer items-center gap-3 px-4 py-3">
                         <input
                           type="checkbox"
                           checked={on}
-                          onChange={() => toggle(item.id)}
+                          ref={(el) => {
+                            if (el) el.indeterminate = partial;
+                          }}
+                          onChange={() => toggle(item)}
                           aria-label={`Requote ${item.name}`}
                           className="h-4 w-4 accent-[var(--color-brand-700)]"
                         />
@@ -149,6 +219,11 @@ export function RequotePicker({
                           </span>
                           <span className="block text-[11.5px] text-ink-500">
                             {item.srfRef} · quoted at {usd(priceOf(item.id))}
+                            {item.kind === "kit"
+                              ? " · priced as one set, travels whole"
+                              : configs.length > 1
+                                ? ` · ${on ? lines.size : 0} of ${configs.length} configurations`
+                                : ""}
                           </span>
                         </span>
                         {/* Where this article stands today — the thing the
@@ -157,7 +232,51 @@ export function RequotePicker({
                           {quotationId} · V{versionNo ?? 1}
                           {statusLabel ? ` · ${statusLabel}` : ""}
                         </span>
+                        {/* Only a product has variants to open. */}
+                        {item.kind === "product" && configs.length > 1 && (
+                          <button
+                            type="button"
+                            onClick={(e) => {
+                              e.preventDefault();
+                              setOpen((prev) => {
+                                const next = new Set(prev);
+                                if (next.has(item.id)) next.delete(item.id);
+                                else next.add(item.id);
+                                return next;
+                              });
+                            }}
+                            aria-expanded={expanded}
+                            aria-label={`Choose which variants of ${item.name} come forward`}
+                            className="shrink-0 rounded p-1 text-ink-400 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                          >
+                            <ChevronDown
+                              className={cn(
+                                "h-4 w-4 transition-transform",
+                                !expanded && "-rotate-90",
+                              )}
+                              aria-hidden
+                            />
+                          </button>
+                        )}
                       </label>
+
+                      {expanded && item.kind === "product" && (
+                        <ul className="border-t border-hairline bg-surface/60 px-4 py-2 pl-11">
+                          {configs.map((cfg) => (
+                            <li key={cfg.lineId}>
+                              <label className="flex cursor-pointer items-center gap-2.5 py-1">
+                                <input
+                                  type="checkbox"
+                                  checked={lines?.has(cfg.lineId) ?? false}
+                                  onChange={() => toggleLine(item, cfg.lineId)}
+                                  className="h-3.5 w-3.5 accent-[var(--color-brand-700)]"
+                                />
+                                <span className="text-[12px] text-ink-700">{cfg.label}</span>
+                              </label>
+                            </li>
+                          ))}
+                        </ul>
+                      )}
                     </li>
                   );
                 })}
@@ -251,7 +370,16 @@ export function RequotePicker({
               <button
                 type="button"
                 disabled={!destination}
-                onClick={() => destination && onConfirm(Array.from(picked), destination)}
+                onClick={() =>
+                  destination &&
+                  onConfirm(
+                    Array.from(picked, ([itemId, lineIds]) => ({
+                      itemId,
+                      lineIds: Array.from(lineIds),
+                    })),
+                    destination,
+                  )
+                }
                 className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
               >
                 {destination === "configuration"

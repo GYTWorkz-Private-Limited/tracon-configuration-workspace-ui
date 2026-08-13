@@ -376,6 +376,7 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
       {requoteOpen && (
         <RequotePicker
           quotationId={quotation.id}
+          podId={pod.id}
           items={items}
           versionNo={sent?.no}
           statusLabel={sent ? STATUS_LABEL[sent.status] : "Draft"}
@@ -384,7 +385,7 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
             return v ? v.priced.commercial.sellingUsd : 0;
           }}
           onClose={() => setRequoteOpen(false)}
-          onConfirm={(itemIds, destination) => {
+          onConfirm={(picks, destination) => {
             // Editing the configuration means the costing is being redone, so
             // hand-set cost and price must not survive into the new round;
             // editing the quotation keeps the costing and moves only the
@@ -392,7 +393,7 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
             const scope = destination === "configuration" ? "full" : "override";
             const next = createRequote(
               quotation.id,
-              itemIds.map((itemId) => ({ itemId, scope })),
+              picks.map(({ itemId, lineIds }) => ({ itemId, lineIds, scope })),
             );
             setRequoteOpen(false);
             if (!next) return;
@@ -401,7 +402,7 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
               // The work continues in Configuration, on the first selected
               // article; the requote reads its costs live from there, so the
               // path back is Costing Report → Quotation as always.
-              const first = items.find((i) => i.id === itemIds[0]);
+              const first = items.find((i) => i.id === picks[0]?.itemId);
               if (first) {
                 navigate({
                   to: "/config/$podId/$articleId",
@@ -423,6 +424,10 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
           articleId={items[0]?.articleId ?? ""}
           views={views}
           onClose={() => setApprovalOpen(false)}
+          onRequote={() => {
+            setApprovalOpen(false);
+            setRequoteOpen(true);
+          }}
         />
       )}
     </div>
