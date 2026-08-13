@@ -21,13 +21,12 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { Scale, Sparkles } from "lucide-react";
+import { Sparkles } from "lucide-react";
 
 import { VariantTabs, type WorkVariant } from "@/components/configuration/VariantTabs";
 import { CopilotPanel } from "@/components/configuration/CopilotPanel";
 import { AddVariantModal } from "@/components/configuration/AddVariantModal";
 import { AddOptionModal, type OptionEntry } from "@/components/configuration/AddOptionModal";
-import { CompareWorkspace, type CompareRow } from "@/components/configuration/CompareWorkspace";
 
 import { CostBreakdownStrip, type CostCategory } from "@/components/workspace/CostBreakdownStrip";
 import { CategoryComposition } from "@/components/workspace/CategoryComposition";
@@ -223,7 +222,6 @@ export function ArticleCostingWorkspace({
   };
   const [variantModalOpen, setVariantModalOpen] = useState(false);
   const [optionModalOpen, setOptionModalOpen] = useState(false);
-  const [compareOpen, setCompareOpen] = useState(false);
 
   // Switching to an article backed by a different product bundle (Placemat →
   // Quilt) re-seeds everything derived from it. Param-only navigation does not
@@ -363,65 +361,6 @@ export function ArticleCostingWorkspace({
     const roll = rollupVariant(priced, bundle.masters);
     return { priced, roll, out: commercialOutput(roll.directCost, priced.commercial) };
   };
-
-  const rowFrom = (
-    id: string,
-    name: string,
-    subtitle: string,
-    isActive: boolean,
-    v: Variant,
-    scenario: Scenario,
-    baseSelling: number,
-  ): CompareRow => {
-    const { priced, roll, out } = priceUnder(v, scenario);
-    return {
-      id,
-      name,
-      subtitle,
-      isActive,
-      size: sizeOf(priced.parameters).join('" × ') + '"',
-      moq: `${moqOf(priced.parameters).toLocaleString()} pcs`,
-      quality: `${gsmOf(priced.parameters)} GSM`,
-      rawMaterialInr: roll.rawMaterial,
-      processInr: roll.process,
-      accessoriesInr: roll.accessories,
-      packagingInr: roll.packaging,
-      testingInr: roll.testing,
-      directCostUsd: roll.directCost,
-      componentCount: roll.components.length,
-      sellingUsd: out.sellingUsd,
-      marginPct: out.marginPct,
-      buyerTargetUsd: out.buyerTargetUsd,
-      onTarget: out.onTarget,
-      deltaPct: isActive ? null : scenarioDelta(out.sellingUsd, baseSelling),
-    };
-  };
-
-  const variantCompareRows: CompareRow[] = useMemo(() => {
-    const baseSelling = priceUnder(activeVariant, activeScenario).out.sellingUsd;
-    return variants.map((v) =>
-      rowFrom(
-        v.id,
-        v.name,
-        v.kind === "option" ? "Option" : "Variant",
-        v.id === activeVariantId,
-        v,
-        activeScenario,
-        baseSelling,
-      ),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [variants, activeVariantId, activeScenario, bundle.masters]);
-
-  const scenarioCompareRows: CompareRow[] = useMemo(() => {
-    const preview = SCENARIO_PRESETS.slice(0, 4);
-    const base = preview.find((s) => s.isBase) ?? preview[0];
-    const baseSelling = priceUnder(bundle.defaultVariant, base).out.sellingUsd;
-    return preview.map((s) =>
-      rowFrom(s.id, s.name, s.subtitle, Boolean(s.isBase), bundle.defaultVariant, s, baseSelling),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bundle.defaultVariant, bundle.masters]);
 
   const selected = rollup.components.find((c) => c.component.id === selectedId) ?? null;
   const category: CostCategory = filter ?? "direct";
@@ -888,23 +827,6 @@ export function ArticleCostingWorkspace({
           </div>
         )}
 
-        {/* Comparison sits above the sheet rather than under it: on a long
-            costing, a control at the foot of the table is a screen away from
-            the rows it applies to. The copilot lives in the page header, with
-            the rest of the page's actions. */}
-        <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setCompareOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-          >
-            <Scale className="h-3.5 w-3.5 text-ink-400" /> Compare
-          </button>
-          <p className="min-w-0 flex-1 text-right text-[10.5px] text-ink-400">
-            Costs are per piece and update as the configuration changes.
-          </p>
-        </div>
-
         <div className="mt-3">
           <CostLineTable
             sections={visibleSections}
@@ -965,25 +887,6 @@ export function ArticleCostingWorkspace({
         parameters={pricedVariant.parameters}
         onCreate={createOption}
       />
-
-      {compareOpen && (
-        <CompareWorkspace
-          open={compareOpen}
-          onClose={() => setCompareOpen(false)}
-          productName={product.name}
-          articleNo={product.articleNo}
-          variantRows={variantCompareRows}
-          scenarioRows={scenarioCompareRows}
-          money={money}
-          onApplyVariant={(id) => {
-            if (variants.some((v) => v.id === id)) {
-              setActiveVariantId(id);
-              setSelectedId(null);
-            }
-            setCompareOpen(false);
-          }}
-        />
-      )}
     </div>
   );
 }

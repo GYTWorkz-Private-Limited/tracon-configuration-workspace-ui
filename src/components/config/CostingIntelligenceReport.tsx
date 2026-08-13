@@ -6,7 +6,13 @@
 
 import { useMemo, useState } from "react";
 import { usePod } from "@/lib/podsStore";
-import { fabricRequirementsFor, metres, tierInsight, tierLabel } from "@/lib/fabricRequirement";
+import {
+  fabricCost,
+  fabricRequirementsFor,
+  metres,
+  tierInsight,
+  tierLabel,
+} from "@/lib/fabricRequirement";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { SensitivityAnalysis } from "./SensitivityAnalysis";
@@ -465,6 +471,7 @@ export function CostingIntelligenceReport({
                 entry={active}
                 metricsByVariant={metricsByVariant}
                 targetPriceUsd={targetPriceUsd}
+                podId={navPodId}
               />
             )}
           </div>
@@ -1009,18 +1016,23 @@ function FabricRequirementStrip({ podId }: { podId?: string }) {
             <div className="mt-1 text-[22px] font-semibold tabular-nums text-ink-900">
               {metres(r.metres)}
             </div>
-            <div className="text-[11.5px] text-ink-500">
-              {tierLabel(r.tier)} · list ₹{r.tier.rate}/m
-              {r.tier.rate < r.baseRate && (
-                <span className="ml-1 text-emerald-700">
-                  −{Math.round((1 - r.tier.rate / r.baseRate) * 100)}% vs ₹{r.baseRate}
+            <div className="text-[13px] font-semibold tabular-nums text-ink-900">
+              {fabricCost(r.costInr)}{" "}
+              <span className="text-[11.5px] font-normal text-ink-500">at ₹{r.tier.rate}/m</span>
+            </div>
+            <div className="mt-0.5 text-[11.5px] text-ink-500">
+              {tierLabel(r.tier)}
+              {r.savingPct > 0 && (
+                <span className="font-medium text-emerald-700">
+                  {" · "}
+                  {r.savingPct}% below base, saves {fabricCost(r.savingInr)}
                 </span>
               )}
             </div>
             <div className="mt-1 text-[11.5px] text-ink-400">
               {r.nextTier
-                ? `${metres(r.nextTier.metresAway)} more → ₹${r.nextTier.tier.rate}/m`
-                : "Cheapest tier reached"}
+                ? `${metres(r.nextTier.metresAway)} more reaches ₹${r.nextTier.tier.rate}/m`
+                : "Best tier reached"}
             </div>
           </div>
         ))}
@@ -3886,14 +3898,52 @@ function AiInsightsTab({
   entry,
   metricsByVariant,
   targetPriceUsd,
+  podId,
 }: {
   entry: Entry;
   metricsByVariant: Entry[];
   targetPriceUsd: number;
+  /** the POD whose fabric order this article is part of */
+  podId?: string;
 }) {
   const { metrics: m, variant: v } = entry;
+  const pod = usePod(podId ?? "");
+  const fabrics = useMemo(() => fabricRequirementsFor(pod), [pod]);
+
+  /**
+   * Fabric leads, because it is the largest line in the sheet AND the only one
+   * whose price is decided by the ORDER rather than by this article — so it is
+   * the lever with the most money on it and the one a costing engineer is most
+   * likely to have missed.
+   */
+  const fabricLever = useMemo(() => {
+    if (fabrics.length === 0) return null;
+    const spend = fabrics.reduce((t, r) => t + r.costInr, 0);
+    const saved = fabrics.reduce((t, r) => t + r.savingInr, 0);
+    const totalMetres = fabrics.reduce((t, r) => t + r.metres, 0);
+    // The best offer still on the table, by what it is actually worth.
+    const reachable = fabrics
+      .filter((r) => r.nextTier)
+      .sort(
+        (a, b) =>
+          (b.nextTier?.savingPerMetre ?? 0) * b.metres -
+          (a.nextTier?.savingPerMetre ?? 0) * a.metres,
+      )[0];
+
+    return {
+      title: `Fabric requirement — ${metres(totalMetres)} across ${fabrics.length} cloth${fabrics.length === 1 ? "" : "s"}`,
+      impact:
+        saved > 0 ? `${fabricCost(saved)} saved on fabric` : `${fabricCost(spend)} fabric spend`,
+      detail: reachable
+        ? `${fabricCost(spend)} at the tiers this order reaches. ${tierInsight(reachable)}`
+        : `${fabricCost(spend)} at the tiers this order reaches — every cloth is already buying at its best band.`,
+      applyLabel: reachable ? "Review order quantity" : "Fabric priced at best tier",
+      good: true,
+    };
+  }, [fabrics]);
 
   const recommendations = [
+    ...(fabricLever ? [fabricLever] : []),
     {
       title: "Switch greige to Karur Mills",
       impact: "-3.4% total cost",

@@ -169,23 +169,6 @@ function ConfigurationWorkspacePage() {
       >
         <ActionGroup>
           <ModuleRevisionAction />
-          {/* The copilot is part of costing, not an extra on top of it, so it
-              sits with the page's own actions rather than at the foot of the
-              sheet where it has to be hunted for. */}
-          <button
-            type="button"
-            onClick={() => setCopilotOpen((o) => !o)}
-            aria-pressed={copilotOpen}
-            title="Ask the costing copilot about this configuration"
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-              copilotOpen
-                ? "border-brand-700 bg-brand-50 text-brand-700"
-                : "border-hairline bg-surface text-ink-700 hover:bg-surface-alt",
-            )}
-          >
-            <Sparkles className="h-4 w-4" /> AI Copilot
-          </button>
           <CompareVariantsAction productName={article.name} />
           <button
             onClick={() =>
@@ -203,6 +186,23 @@ function ConfigurationWorkspacePage() {
             className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-1"
           >
             Continue to Costing Report <ArrowRight className="h-4 w-4" />
+          </button>
+          {/* Last in the group, so it lands at the top-right corner of the
+              page whether or not the header wraps — the place a costing user
+              goes looking for it. */}
+          <button
+            type="button"
+            onClick={() => setCopilotOpen((o) => !o)}
+            aria-pressed={copilotOpen}
+            title="Ask the costing copilot about this configuration"
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
+              copilotOpen
+                ? "border-brand-700 bg-brand-50 text-brand-700"
+                : "border-hairline bg-surface text-ink-700 hover:bg-surface-alt",
+            )}
+          >
+            <Sparkles className="h-4 w-4" /> AI Copilot
           </button>
         </ActionGroup>
       </ProductHeader>

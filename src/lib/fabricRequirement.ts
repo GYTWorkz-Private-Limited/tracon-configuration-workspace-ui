@@ -45,8 +45,14 @@ export type FabricRequirement = {
   metres: number;
   /** the band those metres land in */
   tier: RateTier;
+  /** what this fabric costs the order: metres × the tier rate */
+  costInr: number;
   /** what a single small order would have paid */
   baseRate: number;
+  /** how much cheaper the tier is than the base band, as a positive percent */
+  savingPct: number;
+  /** rupees saved on this fabric by reaching the tier — never below zero */
+  savingInr: number;
   /** the next band up, when there is one still to reach */
   nextTier?: {
     tier: RateTier;
@@ -188,13 +194,21 @@ export function fabricRequirementsFor(pod: Pod | undefined): FabricRequirement[]
       const totalPieces = Array.from(pieces.values()).reduce((t, n) => t + n, 0);
       const metresPerPiece = metres / Math.max(totalPieces, 1);
 
+      // A saving is a saving: it is stated as a positive number and simply
+      // absent when the order buys at the base band. A "−0%" says nothing and
+      // a minus sign next to a cost invites reading it as one.
+      const saved = Math.max(master.rate - tier.rate, 0);
+
       return {
         masterId: master.id,
         name: master.name,
         code: master.code,
         metres: rounded,
         tier,
+        costInr: Math.round(rounded * tier.rate),
         baseRate: master.rate,
+        savingPct: master.rate > 0 ? Math.round((saved / master.rate) * 100) : 0,
+        savingInr: Math.round(saved * rounded),
         nextTier: next && {
           tier: next,
           metresAway: next.minMetres - rounded,
@@ -253,6 +267,9 @@ export function podFabricRates(podId: string | undefined): FabricRateOverrides {
  * ------------------------------------------------------------------ */
 
 export const metres = (n: number) => `${Math.round(n).toLocaleString("en-IN")} m`;
+
+/** Fabric spend, in whole rupees — the figure a buyer would recognise. */
+export const fabricCost = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 
 export const tierLabel = (t: RateTier) => `${t.minMetres.toLocaleString("en-IN")} m tier`;
 

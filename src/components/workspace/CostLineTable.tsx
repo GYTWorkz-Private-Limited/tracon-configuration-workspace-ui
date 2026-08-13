@@ -13,7 +13,7 @@ import { BookOpen, Check, ChevronDown, Layers, Plus, Settings2, Trash2 } from "l
 import { cn } from "@/lib/utils";
 import type { MoneyFormatter } from "@/lib/money";
 import type { CostLine, LineSection, OptionGroup } from "@/lib/costLines";
-import { metres, tierLabel, type FabricRequirement } from "@/lib/fabricRequirement";
+import { fabricCost, metres, tierLabel, type FabricRequirement } from "@/lib/fabricRequirement";
 
 type Props = {
   sections: LineSection[];
@@ -88,9 +88,6 @@ function groupByFabric(
   return blocks;
 }
 
-const discountPct = (r: FabricRequirement) =>
-  r.baseRate > 0 ? Math.round((1 - r.tier.rate / r.baseRate) * 100) : 0;
-
 function FabricRollupRow({
   req,
   cols,
@@ -109,20 +106,24 @@ function FabricRollupRow({
             {req.name}
           </span>
           <span className="text-[11px] text-ink-500">
-            {metres(req.metres)} for this POD · {tierLabel(req.tier)}
+            {metres(req.metres)} for this POD · {tierLabel(req.tier)} at ₹{req.tier.rate}/m
           </span>
+          {!compact && req.savingPct > 0 && (
+            <span className="text-[11px] font-medium text-emerald-700">
+              {req.savingPct}% below the base rate · saves {fabricCost(req.savingInr)}
+            </span>
+          )}
           {!compact && req.nextTier && (
             <span className="text-[11px] text-ink-400">
-              {metres(req.nextTier.metresAway)} more → next tier
+              {metres(req.nextTier.metresAway)} more reaches the next tier
             </span>
           )}
         </span>
       </td>
-      {/* The rate COLUMN above already carries the discounted number on every
-          row; repeating the master's list rate here would read as a second,
-          contradictory price. What the roll-up adds is the size of the break. */}
+      {/* The two numbers that matter for a purchase: how much cloth, and what
+          it costs. The per-metre rate is already on every row above. */}
       <td className="px-3 py-1.5 text-right text-[11.5px] font-semibold tabular-nums text-ink-700">
-        {discountPct(req) > 0 ? `−${discountPct(req)}%` : "list rate"}
+        {fabricCost(req.costInr)}
       </td>
       <td className="px-3 pr-5 py-1.5" />
     </tr>

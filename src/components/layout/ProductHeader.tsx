@@ -104,7 +104,10 @@ export function ProductHeader({
           </div>
         </div>
 
-        <div className="flex items-center gap-5">
+        {/* ml-auto, not just justify-between: the identity line is long enough
+            to wrap this group onto its own row, and without it the actions
+            land on the LEFT of that row instead of the top right. */}
+        <div className="ml-auto flex items-center gap-5">
           <div className="text-right">
             <div className="text-[11px] text-ink-400">Total Cost</div>
             <div className="text-[17px] font-semibold tabular-nums text-ink-900">{totalCost}</div>
