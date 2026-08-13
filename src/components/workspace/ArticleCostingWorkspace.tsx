@@ -874,6 +874,35 @@ export function ArticleCostingWorkspace({
           </div>
         )}
 
+        {/* The two things you reach for WHILE reading the sheet — a second
+            opinion and a comparison — sit above it. They used to live under the
+            table, which on a long costing put them a full screen out of sight. */}
+        <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
+          <button
+            type="button"
+            onClick={() => setCopilotOpen((o) => !o)}
+            aria-pressed={copilotOpen}
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
+              copilotOpen
+                ? "border-brand-700 bg-brand-50 text-brand-700"
+                : "border-hairline bg-surface text-ink-700 hover:bg-surface-alt",
+            )}
+          >
+            <Sparkles className="h-3.5 w-3.5" /> AI Copilot
+          </button>
+          <button
+            type="button"
+            onClick={() => setCompareOpen(true)}
+            className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          >
+            <Scale className="h-3.5 w-3.5 text-ink-400" /> Compare
+          </button>
+          <p className="min-w-0 flex-1 text-right text-[10.5px] text-ink-400">
+            Costs are per piece and update as the configuration changes.
+          </p>
+        </div>
+
         <div className="mt-3">
           <CostLineTable
             sections={visibleSections}
@@ -891,31 +920,6 @@ export function ArticleCostingWorkspace({
             compact={Boolean(selected)}
             fabricRollups={fabricReqs}
           />
-        </div>
-
-        <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2">
-          <p className="min-w-0 flex-1 text-[10.5px] text-ink-400">
-            * Costs shown are per piece. Values update automatically as the configuration changes.
-          </p>
-          <button
-            type="button"
-            onClick={() => setCompareOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-          >
-            <Scale className="h-3.5 w-3.5 text-ink-400" /> Compare
-          </button>
-          <button
-            type="button"
-            onClick={() => setCopilotOpen((o) => !o)}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-              copilotOpen
-                ? "border-brand-700 bg-brand-50 text-brand-700"
-                : "border-hairline bg-surface text-ink-700 hover:bg-surface-alt",
-            )}
-          >
-            <Sparkles className="h-3.5 w-3.5" /> AI Copilot
-          </button>
         </div>
       </main>
 
