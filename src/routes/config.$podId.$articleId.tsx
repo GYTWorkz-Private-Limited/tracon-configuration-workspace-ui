@@ -17,7 +17,7 @@
 
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Boxes, PackagePlus } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, PackagePlus, Sparkles } from "lucide-react";
 
 import { ProductHeader } from "@/components/layout/ProductHeader";
 import { WorkflowStepper } from "@/components/layout/WorkflowStepper";
@@ -32,6 +32,7 @@ import {
 } from "@/components/workspace/ArticleCostingWorkspace";
 import { KitCostingWorkspace } from "@/components/workspace/KitCostingWorkspace";
 
+import { cn } from "@/lib/utils";
 import { addKit, addLibraryArticles, usePod } from "@/lib/podsStore";
 import { rollupVariant } from "@/lib/costingModel";
 import { applyParameters, commercialOutput } from "@/lib/pricingVariants";
@@ -73,6 +74,7 @@ function ConfigurationWorkspacePage() {
   /** late intake: an article the team forgot, or several combined into a set */
   const [addArticleOpen, setAddArticleOpen] = useState(false);
   const [bundleOpen, setBundleOpen] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
   /** the live roll-up, lifted so the page header can report the running cost */
   const [costing, setCosting] = useState<ArticleCosting | null>(null);
@@ -167,6 +169,23 @@ function ConfigurationWorkspacePage() {
       >
         <ActionGroup>
           <ModuleRevisionAction />
+          {/* The copilot is part of costing, not an extra on top of it, so it
+              sits with the page's own actions rather than at the foot of the
+              sheet where it has to be hunted for. */}
+          <button
+            type="button"
+            onClick={() => setCopilotOpen((o) => !o)}
+            aria-pressed={copilotOpen}
+            title="Ask the costing copilot about this configuration"
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
+              copilotOpen
+                ? "border-brand-700 bg-brand-50 text-brand-700"
+                : "border-hairline bg-surface text-ink-700 hover:bg-surface-alt",
+            )}
+          >
+            <Sparkles className="h-4 w-4" /> AI Copilot
+          </button>
           <CompareVariantsAction productName={article.name} />
           <button
             onClick={() =>
@@ -194,6 +213,8 @@ function ConfigurationWorkspacePage() {
       ) : (
         /* ---- a single product: the sheet, unchanged ---- */
         <ArticleCostingWorkspace
+          copilotOpen={copilotOpen}
+          onCopilotOpenChange={setCopilotOpen}
           podId={pod.id}
           buyer={pod.buyer}
           buyerRef={pod.buyerRef}

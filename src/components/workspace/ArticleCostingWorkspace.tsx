@@ -177,6 +177,8 @@ export function ArticleCostingWorkspace({
   headerSlot,
   productCard = true,
   onCosted,
+  copilotOpen: copilotOpenProp,
+  onCopilotOpenChange,
 }: {
   podId: string;
   buyer: string;
@@ -187,6 +189,9 @@ export function ArticleCostingWorkspace({
   /** kits render their own header, so the product card is suppressed there */
   productCard?: boolean;
   onCosted?: (summary: ArticleCosting) => void;
+  /** let the page header drive the copilot; omit to keep it self-managing */
+  copilotOpen?: boolean;
+  onCopilotOpenChange?: (open: boolean) => void;
 }) {
   const bundle = resolveCostingModel(identity.srfRef);
 
@@ -206,7 +211,16 @@ export function ArticleCostingWorkspace({
   const [librarySection, setLibrarySection] = useState<LineSection["id"] | null>(null);
   const [filter, setFilter] = useState<CostCategory | null>(null);
   const [live, setLive] = useState(false);
-  const [copilotOpen, setCopilotOpen] = useState(false);
+  // The copilot can be driven from the page header, where costing users expect
+  // to find it, or from the sheet's own toolbar. Controlled when the page owns
+  // the state, self-managing when it does not.
+  const [ownCopilotOpen, setOwnCopilotOpen] = useState(false);
+  const copilotOpen = copilotOpenProp ?? ownCopilotOpen;
+  const setCopilotOpen = (next: boolean | ((o: boolean) => boolean)) => {
+    const value = typeof next === "function" ? next(copilotOpen) : next;
+    if (onCopilotOpenChange) onCopilotOpenChange(value);
+    else setOwnCopilotOpen(value);
+  };
   const [variantModalOpen, setVariantModalOpen] = useState(false);
   const [optionModalOpen, setOptionModalOpen] = useState(false);
   const [compareOpen, setCompareOpen] = useState(false);
@@ -874,23 +888,11 @@ export function ArticleCostingWorkspace({
           </div>
         )}
 
-        {/* The two things you reach for WHILE reading the sheet — a second
-            opinion and a comparison — sit above it. They used to live under the
-            table, which on a long costing put them a full screen out of sight. */}
+        {/* Comparison sits above the sheet rather than under it: on a long
+            costing, a control at the foot of the table is a screen away from
+            the rows it applies to. The copilot lives in the page header, with
+            the rest of the page's actions. */}
         <div className="mt-3 flex shrink-0 flex-wrap items-center gap-2">
-          <button
-            type="button"
-            onClick={() => setCopilotOpen((o) => !o)}
-            aria-pressed={copilotOpen}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-              copilotOpen
-                ? "border-brand-700 bg-brand-50 text-brand-700"
-                : "border-hairline bg-surface text-ink-700 hover:bg-surface-alt",
-            )}
-          >
-            <Sparkles className="h-3.5 w-3.5" /> AI Copilot
-          </button>
           <button
             type="button"
             onClick={() => setCompareOpen(true)}
