@@ -53,7 +53,9 @@ const STATUS_TONE: Record<ArticleStatus, string> = {
   in_progress: "bg-brand-50 text-brand-700",
   pending_approval: "bg-amber-50 text-amber-700",
   approved: "bg-emerald-50 text-emerald-700",
-  completed: "bg-emerald-100 text-emerald-800",
+  // Red, deliberately not amber: "waiting on an approver" and "sent back"
+  // must not read the same at a glance.
+  recosting: "bg-red-50 text-red-700",
 };
 
 /** Preset catalogue used by the Product combobox + Style helper. */

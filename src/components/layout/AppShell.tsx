@@ -1,6 +1,14 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import { Calculator, FileText, Settings, HelpCircle, Bell, ChevronDown } from "lucide-react";
+import {
+  Calculator,
+  FileText,
+  Settings,
+  HelpCircle,
+  Bell,
+  ChevronDown,
+  PanelLeft,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import { usePods } from "@/lib/podsStore";
 import { useAllQuoteDrafts } from "@/lib/quoteDraftStore";
@@ -16,26 +24,31 @@ function NavItem({
   label,
   badge,
   active,
+  collapsed,
 }: {
   to: string;
   icon: typeof Calculator;
   label: string;
   badge?: number;
   active: boolean;
+  /** icon-only rail — the label moves into the tooltip */
+  collapsed?: boolean;
 }) {
   return (
     <Link
       to={to}
+      title={collapsed ? label : undefined}
       className={cn(
-        "group flex items-center gap-3 rounded-md px-3 py-2 text-[13px] transition-colors",
+        "group flex items-center gap-3 rounded-md py-2 text-[13px] transition-colors",
+        collapsed ? "justify-center px-0" : "px-3",
         active
           ? "bg-brand-50 text-brand-700 font-medium"
           : "text-ink-500 hover:bg-surface-alt hover:text-ink-900",
       )}
     >
       <Icon className={cn("h-[16px] w-[16px]", active ? "text-brand-700" : "text-ink-400")} />
-      <span className="flex-1">{label}</span>
-      {badge !== undefined && (
+      {!collapsed && <span className="flex-1">{label}</span>}
+      {!collapsed && badge !== undefined && (
         <span
           className={cn(
             "rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums",
@@ -49,11 +62,41 @@ function NavItem({
   );
 }
 
+const COLLAPSE_KEY = "tracon.sidebarCollapsed.v1";
+
+/**
+ * Collapsed = icon-only, not hidden: navigation stays one click away instead
+ * of two. Persisted, because a layout choice that resets on every page load
+ * is a choice the app keeps un-making for you.
+ */
+function loadCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.localStorage.getItem(COLLAPSE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
+
 export function AppShell({ children }: { children: React.ReactNode }) {
   const currentPath = useRouterState({ select: (r) => r.location.pathname });
   const isActive = (p: string) => currentPath === p || currentPath.startsWith(p + "/");
   const [hydrated, setHydrated] = useState(false);
   useEffect(() => setHydrated(true), []);
+  // Start expanded on the server pass; the stored choice applies after
+  // hydration so both passes render the same markup.
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => setCollapsed(loadCollapsed()), []);
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      try {
+        window.localStorage.setItem(COLLAPSE_KEY, c ? "0" : "1");
+      } catch {
+        // ignore
+      }
+      return !c;
+    });
+  };
   const pods = usePods();
   const quotations = useAllQuoteDrafts();
   const activePods = pods.filter(
@@ -77,19 +120,28 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="min-h-screen w-full bg-canvas">
       {/* Sidebar */}
-      <aside className="fixed inset-y-0 left-0 z-30 hidden w-[236px] flex-col border-r border-hairline bg-surface lg:flex">
-        <div className="flex h-14 items-center gap-2 px-5">
+      <aside
+        className={cn(
+          "fixed inset-y-0 left-0 z-30 hidden flex-col border-r border-hairline bg-surface transition-[width] duration-150 lg:flex",
+          collapsed ? "w-[60px]" : "w-[236px]",
+        )}
+      >
+        <div
+          className={cn("flex h-14 items-center gap-2", collapsed ? "justify-center px-0" : "px-5")}
+        >
           <div className="flex h-7 w-7 items-center justify-center rounded-md bg-brand-700 text-white">
             <span className="text-[12px] font-semibold">T</span>
           </div>
-          <div className="flex flex-col leading-tight">
-            <span className="text-[13px] font-semibold text-ink-900">Tracon</span>
-            <span className="text-[10px] text-ink-400">Product Intelligence</span>
-          </div>
+          {!collapsed && (
+            <div className="flex flex-col leading-tight">
+              <span className="text-[13px] font-semibold text-ink-900">Tracon</span>
+              <span className="text-[10px] text-ink-400">Product Intelligence</span>
+            </div>
+          )}
         </div>
 
         {/* Workspace switcher */}
-        <div className="mx-3 mb-3 mt-1">
+        <div className={cn("mx-3 mb-3 mt-1", collapsed && "hidden")}>
           <button className="flex w-full items-center gap-2 rounded-md border border-hairline bg-surface-alt px-2.5 py-1.5 text-left hover:bg-ink-50">
             <div className="flex h-5 w-5 items-center justify-center rounded bg-ink-900 text-[10px] font-medium text-white">
               A
@@ -111,6 +163,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
                 label={it.title}
                 badge={it.badge}
                 active={isActive(it.url)}
+                collapsed={collapsed}
               />
             ))}
           </div>
@@ -124,15 +177,25 @@ export function AppShell({ children }: { children: React.ReactNode }) {
               icon={it.icon}
               label={it.title}
               active={isActive(it.url)}
+              collapsed={collapsed}
             />
           ))}
         </div>
       </aside>
 
       {/* Main */}
-      <div className="lg:pl-[236px]">
+      <div className={cn(collapsed ? "lg:pl-[60px]" : "lg:pl-[236px]")}>
         {/* Top nav */}
         <header className="sticky top-0 z-20 flex h-14 items-center gap-4 border-b border-hairline bg-canvas/80 px-6 backdrop-blur-md lg:px-10">
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label={collapsed ? "Expand navigation" : "Collapse navigation"}
+            aria-pressed={collapsed}
+            className="hidden rounded-md p-2 text-ink-500 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 lg:inline-flex"
+          >
+            <PanelLeft className="h-4 w-4" />
+          </button>
           <div className="flex items-center gap-2 text-[12px] text-ink-400">
             <span>Workspace</span>
             <span className="text-ink-300">/</span>

@@ -25,6 +25,7 @@ import {
   FileText,
   Package,
   Settings2,
+  Users,
   X,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -34,7 +35,7 @@ import { buildById, scenarioById } from "@/lib/quotationPricing";
 import type { QuoteItem } from "@/lib/quoteDraftStore";
 
 /** Where the selected articles are reworked. */
-export type RequoteDestination = "configuration" | "quotation";
+export type RequoteDestination = "configuration" | "quotation" | "team";
 
 export function RequotePicker({
   quotationId,
@@ -298,7 +299,7 @@ export function RequotePicker({
                 )}
               </p>
 
-              <div className="mt-3 grid gap-3 md:grid-cols-2">
+              <div className="mt-3 grid gap-3 md:grid-cols-3">
                 <DestinationCard
                   active={destination === "configuration"}
                   onSelect={() => setDestination("configuration")}
@@ -314,6 +315,14 @@ export function RequotePicker({
                   title="Edit Quotation"
                   description="Modify the quoted commercial values — selected scenario, MOQ, margin, selling price. The costing underneath stays as it stands; only the commercial position moves."
                   path="Straight to the new quotation"
+                />
+                <DestinationCard
+                  active={destination === "team"}
+                  onSelect={() => setDestination("team")}
+                  icon={<Users className="h-4.5 w-4.5" aria-hidden />}
+                  title="Send to Costing Team"
+                  description="Hand the selected articles to the costing team's queue. They move to Recosting and nothing else happens now — the team re-costs, marks them ready, and the new quotation is raised from there."
+                  path="Costing team queue · status Recosting"
                 />
               </div>
 
@@ -386,7 +395,9 @@ export function RequotePicker({
                   ? "Open Configuration"
                   : destination === "quotation"
                     ? "Open Quotation"
-                    : "Create Requote"}
+                    : destination === "team"
+                      ? "Send to Costing Team"
+                      : "Create Requote"}
                 <ArrowRight className="h-3.5 w-3.5" />
               </button>
             )}

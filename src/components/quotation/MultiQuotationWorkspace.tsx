@@ -49,6 +49,8 @@ import {
 } from "@/lib/quotationHistory";
 import { totalsOf, viewQuote, type ViewedItem } from "@/lib/quotationView";
 import { inrShort } from "@/lib/fabricRequirement";
+import { requestRecost } from "@/lib/recostingStore";
+import { toast } from "sonner";
 import { QuoteItemCard } from "./QuoteItemCard";
 import { ConfigLegend } from "./ConfigChips";
 import { ArticleSelectionModal } from "./ArticleSelectionModal";
@@ -390,6 +392,31 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
           }}
           onClose={() => setRequoteOpen(false)}
           onConfirm={(picks, destination) => {
+            // Sending to the costing team is not a new quotation — it is the
+            // recosting ask itself, on the same document. The articles move to
+            // Recosting, the team re-costs and marks them ready, and only then
+            // is anything new raised.
+            if (destination === "team") {
+              const chosen = items.filter((i) => picks.some((x) => x.itemId === i.id));
+              for (const item of chosen) {
+                const articleIds =
+                  item.kind === "kit" ? item.members.map((m) => m.articleId) : [item.articleId];
+                for (const articleId of articleIds) {
+                  requestRecost({
+                    podId: pod.id,
+                    articleId,
+                    quotationId: quotation.id,
+                    reason: "Sent to the costing team for recosting",
+                  });
+                }
+              }
+              toast.success(
+                `${chosen.map((i) => i.name).join(", ")} sent to the costing team — status Recosting`,
+              );
+              setRequoteOpen(false);
+              return;
+            }
+
             // Editing the configuration means the costing is being redone, so
             // hand-set cost and price must not survive into the new round;
             // editing the quotation keeps the costing and moves only the

@@ -25,30 +25,23 @@ export const Route = createFileRoute("/pods/")({
  * an approved order with an article sent back is waiting on costing, not on
  * approval.
  */
-type EffectiveStatus = PodStatus | "recost";
-
-const STATUS_TONE: Record<EffectiveStatus, string> = {
-  draft: "bg-ink-100 text-ink-700",
+const STATUS_TONE: Record<PodStatus, string> = {
   in_progress: "bg-brand-50 text-brand-700",
   pending_approval: "bg-amber-50 text-amber-700",
   approved: "bg-emerald-50 text-emerald-700",
-  completed: "bg-emerald-100 text-emerald-800",
-  recost: "bg-amber-100 text-amber-900",
-};
-
-const STATUS_NAME: Record<EffectiveStatus, string> = {
-  ...POD_STATUS_LABEL,
-  recost: "Recost / Requote",
+  // Red, deliberately not amber: "waiting on an approver" and "sent back"
+  // must not read the same at a glance.
+  recosting: "bg-red-50 text-red-700",
 };
 
 function PodsDashboard() {
   const pods = usePods();
   const navigate = useNavigate();
   const [q, setQ] = useState("");
-  const [status, setStatus] = useState<"all" | EffectiveStatus>("all");
+  const [status, setStatus] = useState<"all" | PodStatus>("all");
   const recosts = useRecostRequests();
-  const statusOf = (p: { id: string; status: PodStatus }): EffectiveStatus =>
-    podHasRecostIn(recosts, p.id) ? "recost" : p.status;
+  const statusOf = (p: { id: string; status: PodStatus }): PodStatus =>
+    podHasRecostIn(recosts, p.id) ? "recosting" : p.status;
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
@@ -97,28 +90,20 @@ function PodsDashboard() {
             />
           </div>
           <div className="flex items-center gap-1 rounded-md border border-hairline bg-surface p-1">
-            {(
-              [
-                "all",
-                "draft",
-                "in_progress",
-                "pending_approval",
-                "approved",
-                "completed",
-                "recost",
-              ] as const
-            ).map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatus(s)}
-                className={cn(
-                  "rounded px-2.5 py-1 text-[12px] transition-colors",
-                  status === s ? "bg-ink-900 text-white" : "text-ink-500 hover:text-ink-900",
-                )}
-              >
-                {s === "all" ? "All" : STATUS_NAME[s]}
-              </button>
-            ))}
+            {(["all", "in_progress", "pending_approval", "approved", "recosting"] as const).map(
+              (s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatus(s)}
+                  className={cn(
+                    "rounded px-2.5 py-1 text-[12px] transition-colors",
+                    status === s ? "bg-ink-900 text-white" : "text-ink-500 hover:text-ink-900",
+                  )}
+                >
+                  {s === "all" ? "All" : POD_STATUS_LABEL[s]}
+                </button>
+              ),
+            )}
           </div>
         </div>
 
@@ -180,7 +165,7 @@ function PodsDashboard() {
                           STATUS_TONE[statusOf(p)],
                         )}
                       >
-                        {STATUS_NAME[statusOf(p)]}
+                        {POD_STATUS_LABEL[statusOf(p)]}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-ink-700">{p.owner}</td>

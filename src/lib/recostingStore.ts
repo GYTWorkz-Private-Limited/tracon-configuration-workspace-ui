@@ -16,6 +16,7 @@
 
 import { useSyncExternalStore } from "react";
 import { clearReadyForQuotation, readinessKey } from "./quotationReadiness";
+import { setArticleStatus } from "./podsStore";
 
 export type RecostRequest = {
   podId: string;
@@ -127,6 +128,9 @@ export function requestRecost(input: {
   };
   emit();
   clearReadyForQuotation(input.podId, input.articleId);
+  // The lifecycle pill follows the ask everywhere the article is listed —
+  // status IS the answer to "what is this waiting on".
+  setArticleStatus(input.podId, input.articleId, "recosting");
 }
 
 /** The ask is withdrawn — either re-costed, or rejected by mistake. */
@@ -137,6 +141,7 @@ export function clearRecost(podId: string, articleId: string) {
   delete next[key];
   state = next;
   emit();
+  setArticleStatus(podId, articleId, "in_progress");
 }
 
 export const RECOSTING_LABEL = "Recosting requested";

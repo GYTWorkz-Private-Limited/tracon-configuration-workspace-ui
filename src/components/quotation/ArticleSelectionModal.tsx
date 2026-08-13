@@ -155,6 +155,19 @@ export function ArticleSelectionModal({
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {/* Said inline, before the choice — a second popup after Continue
+              would be the same fact delivered as a surprise. */}
+          {eligibleCount > 0 && eligibleCount < rows.length && (
+            <p className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-[12px] text-amber-900">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>
+                {rows.length - eligibleCount} of {rows.length} article
+                {rows.length === 1 ? " is" : "s are"} not yet costed and cannot be selected.
+                Continue with the remaining {eligibleCount}, or cancel and finish their costing
+                first.
+              </span>
+            </p>
+          )}
           {rows.length === 0 ? (
             <p className="py-12 text-center text-[13px] text-ink-500">
               This POD has no articles yet.
