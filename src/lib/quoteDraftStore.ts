@@ -168,11 +168,46 @@ const STORAGE_KEY = "tracon.quotations.v1";
 let state: State = {};
 const listeners = new Set<() => void>();
 
+/**
+ * Is this a quotation THIS build can read?
+ *
+ * Stored state outlives the code that wrote it. A draft saved before
+ * quotations became first-class objects is keyed by POD and has items with no
+ * `lines` — valid JSON, wrong shape — and reading it takes down every screen
+ * that counts quotations, which includes the home page. So each draft is
+ * checked on the way in.
+ */
+function isReadableDraft(value: unknown): value is QuoteDraft {
+  if (!value || typeof value !== "object") return false;
+  const d = value as QuoteDraft;
+  return (
+    typeof d.id === "string" &&
+    typeof d.podId === "string" &&
+    Array.isArray(d.items) &&
+    d.items.every(
+      (i) =>
+        Boolean(i) &&
+        typeof i === "object" &&
+        typeof i.id === "string" &&
+        Array.isArray(i.lines) &&
+        Array.isArray(i.members),
+    )
+  );
+}
+
 function load() {
   if (typeof window === "undefined") return;
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) state = JSON.parse(raw) as State;
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    state = {};
+    if (parsed && typeof parsed === "object") {
+      // Drop only what cannot be read — one unreadable draft is no reason to
+      // throw away the quotations the user can still work on.
+      for (const [id, draft] of Object.entries(parsed as Record<string, unknown>)) {
+        if (isReadableDraft(draft) && draft.id === id) state[id] = draft;
+      }
+    }
   } catch {
     state = {};
   }

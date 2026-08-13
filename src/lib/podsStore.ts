@@ -247,6 +247,21 @@ function seed(): Pod[] {
 let pods: Pod[] = [];
 const listeners = new Set<() => void>();
 
+/** The minimum a stored pod must have for the app to be able to read it. */
+function isPodList(value: unknown): value is Pod[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (p): p is Pod =>
+        Boolean(p) &&
+        typeof p === "object" &&
+        typeof (p as Pod).id === "string" &&
+        Array.isArray((p as Pod).articles) &&
+        (p as Pod).articles.every((a) => Boolean(a) && typeof a.id === "string"),
+    )
+  );
+}
+
 function loadInitial() {
   if (typeof window === "undefined") {
     pods = seed();
@@ -254,8 +269,14 @@ function loadInitial() {
   }
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      pods = JSON.parse(raw);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    // Stored state outlives the code that wrote it. A record saved by an older
+    // build can be valid JSON and still be the wrong SHAPE, and trusting it
+    // takes the whole app down on load with nothing but an error boundary to
+    // show for it — so what comes back is checked, and anything unrecognisable
+    // is replaced by the seed rather than propagated.
+    if (isPodList(parsed)) {
+      pods = parsed;
       return;
     }
   } catch {

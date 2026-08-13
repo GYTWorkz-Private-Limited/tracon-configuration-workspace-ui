@@ -114,7 +114,7 @@ export function nextTierFor(tiers: RateTier[] | undefined, metres: number): Rate
 /** Articles that share a fabric pool. Kits contribute through their members. */
 function costableArticles(pod: Pod): Article[] {
   const out: Article[] = [];
-  for (const a of pod.articles) {
+  for (const a of pod.articles ?? []) {
     // A kit is not a thing that consumes fabric — its members are, and they
     // are already articles on the POD. Counting both would double the metres.
     if (a.type === "kit") continue;
@@ -135,13 +135,22 @@ export function fabricRequirementsFor(pod: Pod | undefined): FabricRequirement[]
   const byMaster = new Map<string, { master: MaterialMaster; metres: number; uses: FabricUse[] }>();
 
   for (const article of costableArticles(pod)) {
-    const bundle = resolveCostingModel(article.srfRef);
-    const seeded = seedVariantFor(bundle.defaultVariant, article);
-    const priced = applyParameters(seeded, seeded.parameters, bundle.masters);
-    const moq = moqOf(priced.parameters);
+    // One unreadable article must not cost the page its other fabrics — this
+    // is a summary, and a partial summary beats an error boundary.
+    let components;
+    let moq: number;
+    try {
+      const bundle = resolveCostingModel(article.srfRef);
+      const seeded = seedVariantFor(bundle.defaultVariant, article);
+      const priced = applyParameters(seeded, seeded.parameters, bundle.masters);
+      moq = moqOf(priced.parameters);
+      components = rollupVariant(priced, bundle.masters).components;
+    } catch {
+      continue;
+    }
     if (moq <= 0) continue;
 
-    for (const c of rollupVariant(priced, bundle.masters).components) {
+    for (const c of components) {
       const master = c.material?.master;
       // Only real fabric masters tier — a trim bought by the piece has no
       // metre count to aggregate, and inventing one would be noise.
