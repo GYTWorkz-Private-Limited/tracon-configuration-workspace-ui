@@ -13,7 +13,7 @@ import { BookOpen, Check, ChevronDown, Layers, Plus, Settings2, Trash2 } from "l
 import { cn } from "@/lib/utils";
 import type { MoneyFormatter } from "@/lib/money";
 import type { CostLine, LineSection, OptionGroup } from "@/lib/costLines";
-import { fabricCost, metres, tierLabel, type FabricRequirement } from "@/lib/fabricRequirement";
+import { fabricLine, inrShort, type FabricRequirement } from "@/lib/fabricRequirement";
 
 type Props = {
   sections: LineSection[];
@@ -100,30 +100,15 @@ function FabricRollupRow({
   return (
     <tr className="border-b border-hairline bg-surface-alt/50">
       <td colSpan={cols - 2} className="px-5 py-1.5">
-        <span className="inline-flex flex-wrap items-baseline gap-x-2 gap-y-0.5">
+        <span className="inline-flex items-baseline gap-x-2">
           <Layers className="h-3 w-3 shrink-0 self-center text-ink-400" aria-hidden />
-          <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-700">
-            {req.name}
-          </span>
-          <span className="text-[11px] text-ink-500">
-            {metres(req.metres)} for this POD · {tierLabel(req.tier)} at ₹{req.tier.rate}/m
-          </span>
-          {!compact && req.savingPct > 0 && (
-            <span className="text-[11px] font-medium text-emerald-700">
-              {req.savingPct}% below the base rate · saves {fabricCost(req.savingInr)}
-            </span>
-          )}
-          {!compact && req.nextTier && (
-            <span className="text-[11px] text-ink-400">
-              {metres(req.nextTier.metresAway)} more reaches the next tier
-            </span>
-          )}
+          <span className="text-[11.5px] font-medium text-ink-700">{fabricLine(req)}</span>
         </span>
       </td>
-      {/* The two numbers that matter for a purchase: how much cloth, and what
-          it costs. The per-metre rate is already on every row above. */}
+      {/* The two numbers a purchase is made of: how much cloth, and what it
+          costs. The per-metre rate is stated in the line itself. */}
       <td className="px-3 py-1.5 text-right text-[11.5px] font-semibold tabular-nums text-ink-700">
-        {fabricCost(req.costInr)}
+        {inrShort(req.costInr)}
       </td>
       <td className="px-3 pr-5 py-1.5" />
     </tr>

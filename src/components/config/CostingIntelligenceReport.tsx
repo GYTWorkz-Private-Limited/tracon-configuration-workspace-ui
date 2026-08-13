@@ -7,10 +7,12 @@
 import { useMemo, useState } from "react";
 import { usePod } from "@/lib/podsStore";
 import {
+  FABRIC_INSIGHT_TITLE,
   fabricCost,
+  fabricInsightText,
   fabricRequirementsFor,
+  inrShort,
   metres,
-  tierInsight,
   tierLabel,
 } from "@/lib/fabricRequirement";
 import { useNavigate } from "@tanstack/react-router";
@@ -987,13 +989,8 @@ function FabricRequirementStrip({ podId }: { podId?: string }) {
   const reqs = useMemo(() => fabricRequirementsFor(pod), [pod]);
   if (reqs.length === 0) return null;
 
-  // The best offer still on the table — the one worth writing a note about.
-  const prompt = reqs
-    .filter((r) => r.nextTier)
-    .sort(
-      (a, b) =>
-        (b.nextTier?.savingPerMetre ?? 0) * b.metres - (a.nextTier?.savingPerMetre ?? 0) * a.metres,
-    )[0];
+  // The fabric carrying the most money is the one worth a paragraph.
+  const lead = [...reqs].sort((a, b) => b.costInr - a.costInr)[0];
 
   return (
     <section className="col-span-12 rounded-2xl border border-hairline bg-white p-4">
@@ -1038,12 +1035,13 @@ function FabricRequirementStrip({ podId }: { podId?: string }) {
         ))}
       </div>
 
-      {prompt && (
+      {lead && (
         <div className="mt-3 rounded-lg bg-brand-50 p-3">
           <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.1em] text-brand-700">
-            <Sparkles className="h-3 w-3" /> AI recommendation
+            <Sparkles className="h-3 w-3" /> AI insight
           </div>
-          <p className="mt-1 text-[12px] leading-relaxed text-ink-600">{tierInsight(prompt)}</p>
+          <p className="mt-0.5 text-[12.5px] font-semibold text-ink-900">{FABRIC_INSIGHT_TITLE}</p>
+          <p className="mt-1 text-[12px] leading-relaxed text-ink-600">{fabricInsightText(lead)}</p>
         </div>
       )}
     </section>
@@ -3930,13 +3928,18 @@ function AiInsightsTab({
           (a.nextTier?.savingPerMetre ?? 0) * a.metres,
       )[0];
 
+    const lead = [...fabrics].sort((a, b) => b.costInr - a.costInr)[0];
+    const others = fabrics.length - 1;
+
     return {
-      title: `Fabric requirement — ${metres(totalMetres)} across ${fabrics.length} cloth${fabrics.length === 1 ? "" : "s"}`,
-      impact:
-        saved > 0 ? `${fabricCost(saved)} saved on fabric` : `${fabricCost(spend)} fabric spend`,
-      detail: reachable
-        ? `${fabricCost(spend)} at the tiers this order reaches. ${tierInsight(reachable)}`
-        : `${fabricCost(spend)} at the tiers this order reaches — every cloth is already buying at its best band.`,
+      title: FABRIC_INSIGHT_TITLE,
+      impact: saved > 0 ? `${inrShort(saved)} cost advantage` : `${inrShort(spend)} fabric spend`,
+      // The same paragraph the sheet and the fabric card carry, so the three
+      // surfaces read as one finding rather than three.
+      detail:
+        others > 0
+          ? `${fabricInsightText(lead)} ${others} other cloth${others === 1 ? "" : "s"} on this POD account for the remaining ${inrShort(spend - lead.costInr)} of a ${metres(totalMetres)} fabric order.`
+          : fabricInsightText(lead),
       applyLabel: reachable ? "Review order quantity" : "Fabric priced at best tier",
       good: true,
     };

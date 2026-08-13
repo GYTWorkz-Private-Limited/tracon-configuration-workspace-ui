@@ -271,21 +271,46 @@ export const metres = (n: number) => `${Math.round(n).toLocaleString("en-IN")} m
 /** Fabric spend, in whole rupees — the figure a buyer would recognise. */
 export const fabricCost = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 
-export const tierLabel = (t: RateTier) => `${t.minMetres.toLocaleString("en-IN")} m tier`;
+export const tierLabel = (t: RateTier) => `${t.minMetres.toLocaleString("en-IN")} m MOQ tier`;
+
+/** The same band, said the way the insight sentence says it. */
+export const bandLabel = (t: RateTier) => `${t.minMetres.toLocaleString("en-IN")} m MOQ band`;
 
 /**
- * The one-line prompt: what is within reach, and what it is worth.
- * Returns null when the order already buys at the cheapest band.
+ * Indian short-form money — ₹20.77L, ₹1.24Cr.
+ *
+ * Fabric spend runs to seven figures, and at that size a full ₹20,77,470 is
+ * harder to hold in the head than the magnitude it stands for. The exact
+ * figure is still one hover away in the sheet.
  */
-export function tierInsight(r: FabricRequirement): string | null {
-  if (!r.nextTier) return null;
-  const { tier, metresAway, savingPerMetre, piecesAway } = r.nextTier;
-  const perPiece = round2((savingPerMetre * r.metres) / Math.max(totalPieces(r), 1));
-  const pieces =
-    piecesAway > 0
-      ? `${piecesAway.toLocaleString("en-IN")} more piece${piecesAway === 1 ? "" : "s"}`
-      : "A little more volume";
-  return `${pieces} (${metres(metresAway)}) would unlock the ${tierLabel(tier)} at ₹${tier.rate}/m — saving ₹${savingPerMetre.toFixed(2)}/m, about ₹${perPiece.toFixed(2)}/pc.`;
+export const inrShort = (n: number) => {
+  const abs = Math.abs(n);
+  if (abs >= 1e7) return `₹${(n / 1e7).toFixed(2)}Cr`;
+  if (abs >= 1e5) return `₹${(n / 1e5).toFixed(2)}L`;
+  return `₹${Math.round(n).toLocaleString("en-IN")}`;
+};
+
+/** The Configuration sheet's one-line statement of a fabric requirement. */
+export const fabricLine = (r: FabricRequirement) =>
+  `${r.name} · ${metres(r.metres)} required · ${tierLabel(r.tier)} · ₹${r.tier.rate}/m`;
+
+export const FABRIC_INSIGHT_TITLE = "MOQ-driven fabric optimization";
+
+/**
+ * One paragraph, same words wherever it appears — the sheet, the report's
+ * fabric card and the AI insights tab are describing one fact, and three
+ * phrasings of it would read as three different findings.
+ */
+export function fabricInsightText(r: FabricRequirement): string {
+  const opening = `The current requirement of ${metres(r.metres)} falls across the ${bandLabel(r.tier)} at ₹${r.tier.rate}/m, resulting in a modeled fabric cost of ${inrShort(r.costInr)}.`;
+
+  if (r.savingPct > 0) {
+    return `${opening} This rate is ${r.savingPct}% below the base/reference rate, creating an estimated ${inrShort(r.savingInr)} cost advantage at the current volume.`;
+  }
+  if (r.nextTier) {
+    return `${opening} This is the base/reference rate — a further ${metres(r.nextTier.metresAway)} would reach the ${bandLabel(r.nextTier.tier)} at ₹${r.nextTier.tier.rate}/m, worth an estimated ${inrShort(r.nextTier.savingPerMetre * r.metres)} at the current volume.`;
+  }
+  return `${opening} This is the base/reference rate.`;
 }
 
 /** Pieces the fabric is being bought for — per article, not per component. */
