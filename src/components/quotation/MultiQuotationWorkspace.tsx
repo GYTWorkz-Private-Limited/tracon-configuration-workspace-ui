@@ -33,8 +33,15 @@ import { cn } from "@/lib/utils";
 import { usePod } from "@/lib/podsStore";
 import { inr, pct, usd } from "@/lib/commercialProvisions";
 import { useCostingSelections } from "@/lib/costingSelectionStore";
-import { addProducts, createRequote, removeItems, useQuotation } from "@/lib/quoteDraftStore";
 import {
+  addProducts,
+  createRequote,
+  removeItems,
+  revisionNo,
+  useQuotation,
+} from "@/lib/quoteDraftStore";
+import {
+  STATUS_LABEL,
   latestVersion,
   startNewVersion,
   useQuotationHistory,
@@ -124,6 +131,13 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
                 Quotation
               </span>
               <h1 className="text-[19px] font-semibold text-ink-900">{quotation.id}</h1>
+              {/* A requote is a new commercial round — say which one, so nobody
+                  mistakes the revision for the document the buyer already has. */}
+              {quotation.requoteOf && (
+                <span className="rounded-full bg-brand-700 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-white">
+                  V{revisionNo(quotation.id)} · Revised
+                </span>
+              )}
               {sent ? (
                 <VersionStatusPill status={sent.status} />
               ) : (
@@ -363,17 +377,41 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
         <RequotePicker
           quotationId={quotation.id}
           items={items}
+          versionNo={sent?.no}
+          statusLabel={sent ? STATUS_LABEL[sent.status] : "Draft"}
           priceOf={(id) => {
             const v = views.find((x) => x.item.id === id);
             return v ? v.priced.commercial.sellingUsd : 0;
           }}
           onClose={() => setRequoteOpen(false)}
-          onConfirm={(picks) => {
-            const next = createRequote(quotation.id, picks);
+          onConfirm={(itemIds, destination) => {
+            // Editing the configuration means the costing is being redone, so
+            // hand-set cost and price must not survive into the new round;
+            // editing the quotation keeps the costing and moves only the
+            // commercial position. Same distinction createRequote always drew.
+            const scope = destination === "configuration" ? "full" : "override";
+            const next = createRequote(
+              quotation.id,
+              itemIds.map((itemId) => ({ itemId, scope })),
+            );
             setRequoteOpen(false);
-            // Land in the new cycle, not back on the list — this is where the
-            // work continues.
-            if (next) navigate({ to: "/quotations/$quotationId", params: { quotationId: next } });
+            if (!next) return;
+
+            if (destination === "configuration") {
+              // The work continues in Configuration, on the first selected
+              // article; the requote reads its costs live from there, so the
+              // path back is Costing Report → Quotation as always.
+              const first = items.find((i) => i.id === itemIds[0]);
+              if (first) {
+                navigate({
+                  to: "/config/$podId/$articleId",
+                  params: { podId: pod.id, articleId: first.articleId },
+                  search: { sel: undefined },
+                });
+                return;
+              }
+            }
+            navigate({ to: "/quotations/$quotationId", params: { quotationId: next } });
           }}
         />
       )}

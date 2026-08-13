@@ -1018,6 +1018,26 @@ export function createRequote(
   return id;
 }
 
+/**
+ * Which revision of the commercial conversation this quotation is.
+ *
+ * The original is V1; each requote in the chain is one more. Computed from the
+ * `requoteOf` links rather than stored, so it cannot drift from the chain that
+ * defines it. The chain is finite, but a cycle written by a broken client must
+ * not hang the header — hence the visited set.
+ */
+export function revisionNo(quotationId: string): number {
+  let no = 1;
+  const seen = new Set<string>();
+  let current = state[quotationId];
+  while (current?.requoteOf && !seen.has(current.requoteOf)) {
+    seen.add(current.requoteOf);
+    no += 1;
+    current = state[current.requoteOf];
+  }
+  return no;
+}
+
 /** Choose which configured position is the price that goes to the buyer. */
 export function setQuotedLine(quotationId: string, itemId: string, lineId: string) {
   const item = itemOf(quotationId, itemId);
