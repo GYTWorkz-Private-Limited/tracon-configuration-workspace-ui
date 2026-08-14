@@ -14,6 +14,7 @@ import { cn } from "@/lib/utils";
 import type { MoneyFormatter } from "@/lib/money";
 import type { CostLine, LineSection, OptionGroup } from "@/lib/costLines";
 import { fabricLine, inrShort, type FabricRequirement } from "@/lib/fabricRequirement";
+import { FabricDetailModal } from "./FabricDetailModal";
 
 type Props = {
   sections: LineSection[];
@@ -91,11 +92,11 @@ function groupByFabric(
 function FabricRollupRow({
   req,
   cols,
-  compact,
+  onViewDetails,
 }: {
   req: FabricRequirement;
   cols: number;
-  compact?: boolean;
+  onViewDetails: () => void;
 }) {
   return (
     <tr className="border-b border-hairline bg-surface-alt/50">
@@ -110,7 +111,16 @@ function FabricRollupRow({
       <td className="px-3 py-1.5 text-right text-[11.5px] font-semibold tabular-nums text-ink-700">
         {inrShort(req.costInr)}
       </td>
-      <td className="px-3 pr-5 py-1.5" />
+      <td className="px-3 pr-5 py-1.5 text-right">
+        <button
+          type="button"
+          onClick={onViewDetails}
+          aria-label={`View ${req.name} requirement details`}
+          className="whitespace-nowrap text-[11px] font-medium text-brand-700 underline-offset-2 transition-colors hover:text-brand-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+        >
+          View Details
+        </button>
+      </td>
     </tr>
   );
 }
@@ -136,6 +146,9 @@ export function CostLineTable({
   fabricRollups,
 }: Props) {
   const [dense, setDense] = useState(false);
+  // The open fabric detail modal, if any — held here so one modal at the table
+  // root serves every rollup row instead of each row mounting its own dialog.
+  const [openFabric, setOpenFabric] = useState<FabricRequirement | null>(null);
   // + 1 for the row-actions column
   const cols = (compact ? 5 : 8) + 1;
   const populated = sections.filter((s) => s.lines.length > 0);
@@ -261,7 +274,11 @@ export function CostLineTable({
                     />
                   ))}
                   {block.rollup && (
-                    <FabricRollupRow req={block.rollup} cols={cols} compact={compact} />
+                    <FabricRollupRow
+                      req={block.rollup}
+                      cols={cols}
+                      onViewDetails={() => setOpenFabric(block.rollup!)}
+                    />
                   )}
                 </Fragment>
               ))}
@@ -313,6 +330,8 @@ export function CostLineTable({
           {money(total)}
         </span>
       </footer>
+
+      {openFabric && <FabricDetailModal req={openFabric} onClose={() => setOpenFabric(null)} />}
     </section>
   );
 }

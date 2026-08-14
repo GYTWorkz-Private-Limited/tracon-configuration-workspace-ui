@@ -64,6 +64,8 @@ export type FabricRequirement = {
     piecesAway: number;
   };
   uses: FabricUse[];
+  /** the full price-break ladder, so a detail view can show every band, not just the one reached */
+  tiers: RateTier[];
 };
 
 const round2 = (n: number) => Math.round(n * 100) / 100;
@@ -217,6 +219,7 @@ export function fabricRequirementsFor(pod: Pod | undefined): FabricRequirement[]
             metresPerPiece > 0 ? Math.ceil((next.minMetres - rounded) / metresPerPiece) : 0,
         },
         uses,
+        tiers,
       };
     })
     .sort((a, b) => b.metres - a.metres);

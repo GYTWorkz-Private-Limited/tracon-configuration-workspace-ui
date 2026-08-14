@@ -9,8 +9,16 @@
 // never feeds back into it — the component table and the cost strip remain a
 // pure manufacturing roll-up.
 
-import { useState } from "react";
-import { Check, ChevronDown, ChevronRight, Plus, RefreshCw } from "lucide-react";
+import { useEffect, useState } from "react";
+import {
+  Check,
+  ChevronDown,
+  ChevronRight,
+  PanelLeftClose,
+  PanelLeftOpen,
+  Plus,
+  RefreshCw,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MoneyFormatter } from "@/lib/money";
 import {
@@ -21,6 +29,20 @@ import {
   type ParameterOption,
   type VariantParameter,
 } from "@/lib/pricingVariants";
+
+const COLLAPSE_KEY = "tracon.configRail.v1";
+
+// sessionStorage, not localStorage: collapsing is a per-sitting screen-space
+// trade-off, not a lasting preference — a fresh visit should start with the
+// full panel visible again.
+function loadCollapsed(): boolean {
+  if (typeof window === "undefined") return false;
+  try {
+    return window.sessionStorage.getItem(COLLAPSE_KEY) === "1";
+  } catch {
+    return false;
+  }
+}
 
 type Props = {
   scenarioName: string;
@@ -50,15 +72,85 @@ export function ConfigurationRail({
   onRecalculate,
   live,
 }: Props) {
+  // Start expanded on the server pass; the stored choice applies after
+  // hydration so both passes render the same markup (same pattern as
+  // AppShell's sidebar).
+  const [collapsed, setCollapsed] = useState(false);
+  useEffect(() => setCollapsed(loadCollapsed()), []);
+  const toggleCollapsed = () => {
+    setCollapsed((c) => {
+      try {
+        window.sessionStorage.setItem(COLLAPSE_KEY, c ? "0" : "1");
+      } catch {
+        // ignore
+      }
+      return !c;
+    });
+  };
+
+  if (collapsed) {
+    return (
+      <aside
+        aria-label="Configuration and commercials"
+        className="flex h-full w-[48px] shrink-0 flex-col items-center border-r border-hairline bg-surface transition-[width] duration-150"
+      >
+        <div className="flex shrink-0 justify-center border-b border-hairline py-3">
+          <button
+            type="button"
+            onClick={toggleCollapsed}
+            aria-label="Expand configuration panel"
+            aria-expanded={false}
+            className="rounded-md p-1.5 text-ink-500 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          >
+            <PanelLeftOpen className="h-4 w-4" aria-hidden />
+          </button>
+        </div>
+
+        {/* The output figures stay visible even collapsed: these are the
+            numbers the user is steering toward, so hiding them would force a
+            re-expand after every change just to see the effect. */}
+        <div
+          aria-live="polite"
+          className="mt-3 flex min-h-0 flex-1 flex-col items-center gap-2.5 overflow-y-auto px-1"
+        >
+          <RailFigure label="Cost" value={money(output.totalCostInr)} live={live} />
+          <RailFigure label="Sell" value={`$${output.sellingUsd.toFixed(2)}`} />
+          <RailFigure label="Mgn" value={`${output.marginPct}%`} />
+        </div>
+
+        <div className="shrink-0 border-t border-hairline py-2.5">
+          <button
+            type="button"
+            onClick={onRecalculate}
+            title="Recalculate costs"
+            aria-label="Recalculate costs"
+            className="rounded-lg bg-brand-800 p-2 text-white transition-colors hover:bg-brand-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 focus-visible:ring-offset-1"
+          >
+            <RefreshCw className={cn("h-3.5 w-3.5", live && "animate-spin")} aria-hidden />
+          </button>
+        </div>
+      </aside>
+    );
+  }
+
   return (
     <aside
       aria-label="Configuration and commercials"
-      className="flex h-full w-[300px] shrink-0 flex-col border-r border-hairline bg-surface"
+      className="flex h-full w-[300px] shrink-0 flex-col border-r border-hairline bg-surface transition-[width] duration-150"
     >
-      <header className="shrink-0 border-b border-hairline px-4 py-3">
+      <header className="flex shrink-0 items-center justify-between gap-2 border-b border-hairline px-4 py-3">
         <h2 className="text-[10.5px] font-semibold uppercase tracking-[0.14em] text-ink-600">
           Configuration &amp; Commercials
         </h2>
+        <button
+          type="button"
+          onClick={toggleCollapsed}
+          aria-label="Collapse configuration panel"
+          aria-expanded={true}
+          className="-my-1 rounded-md p-1 text-ink-500 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+        >
+          <PanelLeftClose className="h-4 w-4" aria-hidden />
+        </button>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto px-3 py-3">
@@ -377,6 +469,23 @@ function Output({
         {value}
       </div>
       <div className="truncate text-[9.5px] text-ink-400">{sub}</div>
+    </div>
+  );
+}
+
+/** Stacked micro-figure for the collapsed rail — sized to fit 48px. */
+function RailFigure({ label, value, live }: { label: string; value: string; live?: boolean }) {
+  return (
+    <div className="w-full text-center">
+      <div className="text-[9px] font-medium uppercase tracking-[0.06em] text-ink-500">{label}</div>
+      <div
+        className={cn(
+          "break-all text-[10px] font-semibold tabular-nums transition-colors",
+          live ? "text-brand-600" : "text-ink-900",
+        )}
+      >
+        {value}
+      </div>
     </div>
   );
 }

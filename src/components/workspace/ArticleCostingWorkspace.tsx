@@ -53,7 +53,9 @@ import {
   rollupVariant,
   sourced,
   type CostRollup,
+  type PackagingItem,
   type Product,
+  type TestingItem,
   type Variant,
 } from "@/lib/costingModel";
 import {
@@ -122,6 +124,14 @@ export type ArticleCosting = {
   name: string;
   image?: string;
   rollup: CostRollup;
+  /**
+   * The priced packaging and testing lines behind the rollup's category
+   * totals. The rollup itself only carries component detail, and the kit's
+   * merged table needs LINES for every section — without these it could show
+   * "Packaging ₹4.20" but never say what the polybag is.
+   */
+  packaging: PackagingItem[];
+  testing: TestingItem[];
   scenarioName: string;
   variantName: string;
   moq: number;
@@ -177,6 +187,7 @@ export function ArticleCostingWorkspace({
   buyerRef,
   identity,
   onCosted,
+  focusSignal,
   copilotOpen: copilotOpenProp,
   onCopilotOpenChange,
 }: {
@@ -185,6 +196,12 @@ export function ArticleCostingWorkspace({
   buyerRef: string;
   identity: CostingIdentity;
   onCosted?: (summary: ArticleCosting) => void;
+  /**
+   * A kit's merged table can point at one line of this sheet. Bumping the
+   * nonce re-selects even when the same component is clicked twice — the
+   * inspector may have been closed in between.
+   */
+  focusSignal?: { componentId: string; nonce: number };
   /** let the page header drive the copilot; omit to keep it self-managing */
   copilotOpen?: boolean;
   onCopilotOpenChange?: (open: boolean) => void;
@@ -233,6 +250,13 @@ export function ArticleCostingWorkspace({
     setFilter(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bundle.product.id, identity.articleId]);
+
+  // The kit's merged table asked for this line — select it here so the sheet
+  // opens already focused on what was clicked.
+  useEffect(() => {
+    if (focusSignal) setSelectedId(focusSignal.componentId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusSignal?.nonce]);
 
   const activeVariant = variants.find((v) => v.id === activeVariantId) ?? variants[0];
   const activeScenario = scenarios.find((s) => s.id === activeScenarioId) ?? scenarios[0];
@@ -292,6 +316,8 @@ export function ArticleCostingWorkspace({
       name: identity.name,
       image: identity.image,
       rollup,
+      packaging: pricedVariant.packaging,
+      testing: pricedVariant.testing,
       scenarioName: activeScenario.name,
       variantName: activeVariant.name,
       moq: moqOf(pricedVariant.parameters),

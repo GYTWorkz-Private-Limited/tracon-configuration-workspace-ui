@@ -2,21 +2,24 @@
  * Costing a KIT.
  *
  * A kit is not a product with a bill of materials of its own — it is several
- * articles ordered as one unit. So this is not a different costing experience:
- * it is a tab per member article, each running the SAME single-product
- * workspace, plus one summary tab that consolidates them.
+ * articles ordered as one unit. Earlier this screen was a tab per member; the
+ * tabs made the user cost each decision N times from memory, so the kit is now
+ * ONE merged workspace:
  *
- *   Kit: Placemat + Runner
- *   [ Placemat ] [ Runner ] [ Kit Summary ]
+ *   [ Placemat card ] [ Runner card ]            Kit direct cost ₹848 / set
+ *   ─ merged table: one row per variable, one column per member ─
  *
- * Every member tab stays mounted. That is deliberate: the Kit Summary has to
- * show a live consolidation, and unmounting a tab would throw away that
- * member's scenarios, variants and options the moment you looked at another
- * one.
+ * The header's product cards are the only navigation. The default view is the
+ * merged variable-by-variable table; a card (or any table cell) opens that
+ * member's full sheet; "Compare side by side" mounts every sheet in a grid.
+ *
+ * Every member's sheet stays mounted through all of it. That is deliberate:
+ * the merged table and the Kit Summary render from the roll-ups those sheets
+ * report, and unmounting one would throw away its scenarios, variants and
+ * options the moment you looked elsewhere.
  */
 
 import { useCallback, useState } from "react";
-import { Boxes, LayoutGrid, Package, Sigma } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { Article, Pod } from "@/lib/podsStore";
@@ -24,10 +27,15 @@ import {
   ArticleCostingWorkspace,
   type ArticleCosting,
 } from "@/components/workspace/ArticleCostingWorkspace";
+import {
+  KitProductHeader,
+  memberOf,
+  memberView,
+  type KitView,
+} from "@/components/workspace/KitProductHeader";
+import { KitMergedConfigTable } from "@/components/workspace/KitMergedConfigTable";
 import { KitSummary } from "@/components/workspace/KitSummary";
 import { fabricRequirementsFor, metres, tierLabel } from "@/lib/fabricRequirement";
-
-const SUMMARY_TAB = "__kit_summary__";
 
 export function KitCostingWorkspace({
   pod,
@@ -36,19 +44,16 @@ export function KitCostingWorkspace({
 }: {
   pod: Pod;
   kit: Article;
-  /** the workflow band — rendered once, above the tabs */
+  /** the workflow band — rendered once, above the header */
   stepper?: React.ReactNode;
 }) {
   const members = kit.kitItems ?? [];
-  const [activeTab, setActiveTab] = useState(members[0]?.id ?? SUMMARY_TAB);
+  const [view, setView] = useState<KitView>("merged");
   const [costed, setCosted] = useState<Record<string, ArticleCosting>>({});
-  // Process cost rarely matches across members — a pillowcase is not a sheet —
-  // so one-tab-at-a-time forces users to cost from memory. Compare mode puts
-  // every member's sheet on screen at once so each can be adjusted against the
-  // others. The Kit Summary still takes the full width: it is already the
-  // consolidated view, so splitting it into a column would say nothing new.
-  const [compare, setCompare] = useState(false);
-  const comparing = compare && activeTab !== SUMMARY_TAB;
+  // A merged-table click carries a target line into the member's sheet. The
+  // nonce makes the same cell clickable twice — the inspector may have been
+  // closed since — without the signal object churning on unrelated renders.
+  const [focus, setFocus] = useState<{ memberId: string; componentId: string; nonce: number }>();
 
   // Members report their roll-up as they change. A stable callback keeps the
   // child effect from re-firing on every parent render.
@@ -58,6 +63,11 @@ export function KitCostingWorkspace({
         ? prev
         : { ...prev, [summary.articleId]: summary },
     );
+  }, []);
+
+  const focusLine = useCallback((memberId: string, componentId: string) => {
+    setFocus((prev) => ({ memberId, componentId, nonce: (prev?.nonce ?? 0) + 1 }));
+    setView(memberView(memberId));
   }, []);
 
   if (members.length === 0) {
@@ -75,128 +85,20 @@ export function KitCostingWorkspace({
     );
   }
 
+  const comparing = view === "compare";
+  const openMemberId = memberOf(view);
+
   return (
     <div className="flex min-h-0 flex-1 flex-col">
       {stepper}
 
-      {/* kit identity + product tabs */}
-      <div className="shrink-0 border-b border-hairline bg-surface">
-        <div className="flex flex-wrap items-center gap-x-3 gap-y-1 px-6 pt-2.5 lg:px-8">
-          <span className="inline-flex items-center gap-1.5 rounded-full bg-[var(--color-cfg-strong)] px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.08em] text-white">
-            <Boxes className="h-3 w-3" aria-hidden /> Kit
-          </span>
-          <h2 className="text-[14px] font-semibold text-ink-900">{kit.name}</h2>
-          <span className="text-[11.5px] text-ink-500">
-            {members.length} article{members.length === 1 ? "" : "s"} per set · each configured and
-            costed on its own
-          </span>
+      <KitProductHeader kit={kit} members={members} costed={costed} view={view} onView={setView} />
 
-          {/* A single member has nothing to sit beside, so the toggle would
-              only invite a no-op. */}
-          {members.length > 1 && (
-            <button
-              type="button"
-              onClick={() => setCompare((v) => !v)}
-              aria-pressed={compare}
-              className={cn(
-                "ml-auto inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-                compare
-                  ? "border-brand-700 bg-brand-50 text-brand-700"
-                  : "border-hairline bg-surface text-ink-700 hover:bg-surface-alt",
-              )}
-            >
-              <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
-              Compare side by side
-            </button>
-          )}
-        </div>
-
-        <div
-          role="tablist"
-          aria-label="Articles in this kit"
-          className="flex items-stretch gap-1 overflow-x-auto px-6 pt-2 lg:px-8"
-        >
-          {members.map((m) => {
-            const active = m.id === activeTab;
-            const c = costed[m.id];
-            return (
-              <button
-                key={m.id}
-                role="tab"
-                aria-selected={active}
-                onClick={() => setActiveTab(m.id)}
-                className={cn(
-                  "flex shrink-0 items-center gap-2 rounded-t-lg border border-b-0 px-3.5 py-2 text-left transition-colors",
-                  active
-                    ? "border-hairline bg-canvas"
-                    : "border-transparent text-ink-500 hover:bg-surface-alt",
-                )}
-              >
-                {m.image ? (
-                  <img
-                    src={m.image}
-                    alt=""
-                    className="h-7 w-7 shrink-0 rounded border border-hairline object-cover"
-                  />
-                ) : (
-                  <Package className="h-4 w-4 shrink-0 text-ink-400" aria-hidden />
-                )}
-                <span className="min-w-0">
-                  <span
-                    className={cn(
-                      "block whitespace-nowrap text-[12.5px]",
-                      active ? "font-semibold text-ink-900" : "font-medium",
-                    )}
-                  >
-                    {m.name}
-                    {m.qty > 1 && (
-                      <span className="ml-1 text-[10.5px] font-normal tabular-nums text-ink-500">
-                        ×{m.qty}
-                      </span>
-                    )}
-                  </span>
-                  <span className="block whitespace-nowrap text-[10.5px] tabular-nums text-ink-400">
-                    {c ? `₹${c.rollup.directCost.toFixed(2)} / pc` : "not costed yet"}
-                  </span>
-                </span>
-              </button>
-            );
-          })}
-
-          <button
-            role="tab"
-            aria-selected={activeTab === SUMMARY_TAB}
-            onClick={() => setActiveTab(SUMMARY_TAB)}
-            className={cn(
-              "ml-1 flex shrink-0 items-center gap-2 rounded-t-lg border border-b-0 px-3.5 py-2 transition-colors",
-              activeTab === SUMMARY_TAB
-                ? "border-[var(--color-cfg)] bg-canvas"
-                : "border-transparent text-ink-500 hover:bg-surface-alt",
-            )}
-          >
-            <Sigma
-              className={cn(
-                "h-4 w-4",
-                activeTab === SUMMARY_TAB ? "text-[var(--color-cfg-strong)]" : "text-ink-400",
-              )}
-              aria-hidden
-            />
-            <span
-              className={cn(
-                "whitespace-nowrap text-[12.5px]",
-                activeTab === SUMMARY_TAB ? "font-semibold text-ink-900" : "font-medium",
-              )}
-            >
-              Kit Summary
-            </span>
-          </button>
-        </div>
-      </div>
-
-      {/* Every member stays mounted so its configuration survives a tab switch
-          and the summary always reflects the live build. Compare mode reuses
-          those same instances — same map, same keys, only the wrapper layout
-          changes — so toggling it never costs anyone their in-progress work. */}
+      {/* Every member stays mounted so its configuration survives a view
+          switch and the merged table always reflects the live build. Compare
+          mode reuses those same instances — same map, same keys, only the
+          wrapper layout changes — so no arrangement ever costs anyone their
+          in-progress work. */}
       <div
         className={cn(
           "min-h-0 flex-1",
@@ -209,7 +111,7 @@ export function KitCostingWorkspace({
         )}
       >
         {members.map((m) => {
-          const shown = comparing || m.id === activeTab;
+          const shown = comparing || m.id === openMemberId;
           const c = costed[m.id];
           return (
             <div
@@ -222,8 +124,9 @@ export function KitCostingWorkspace({
                   : cn("flex-1 flex-col", shown && "flex"),
               )}
             >
-              {/* In the grid the tab strip no longer says which sheet is
-                  which, so each column restates its identity and live price. */}
+              {/* In the grid the header cards no longer say which sheet is
+                  which column, so each column restates its identity and live
+                  price. */}
               {comparing && (
                 <div className="flex shrink-0 items-baseline justify-between gap-2 border-b border-hairline bg-surface px-4 py-1.5">
                   <span className="truncate text-[12.5px] font-semibold text-ink-900">
@@ -253,13 +156,21 @@ export function KitCostingWorkspace({
                   currency: kit.currency,
                 }}
                 onCosted={report}
+                focusSignal={
+                  focus?.memberId === m.id
+                    ? { componentId: focus.componentId, nonce: focus.nonce }
+                    : undefined
+                }
               />
             </div>
           );
         })}
 
-        {activeTab === SUMMARY_TAB && (
+        {view === "merged" && (
           <div className="min-h-0 flex-1 overflow-y-auto bg-canvas">
+            <div className="mx-4 mt-4">
+              <KitMergedConfigTable members={members} costed={costed} onFocusLine={focusLine} />
+            </div>
             {/* Fabric FIRST, then the rate: for a set cut from common cloth
                 the metres must be summed across every member before any rate
                 is chosen — pick the rate per article and the team is guessing
