@@ -25,7 +25,7 @@
  */
 
 import { useMemo, useState } from "react";
-import { Check, ChevronDown, Plus, SquareArrowOutUpRight } from "lucide-react";
+import { Check, ChevronDown, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { KitItem } from "@/lib/podsStore";
@@ -431,30 +431,18 @@ function MemberCell({
     );
   }
 
+  // No second control beside the dropdown: this table IS where a kit is
+  // configured, so the cell's only job is to change the value. The full sheet
+  // stays one click away on the row label, which is the same door for every
+  // member and never competes with the picker for the same pixels.
   return (
-    <div className="group px-3 py-2">
-      <div className="flex items-start gap-1">
-        <OptionPicker
-          group={line.optionGroup as OptionGroup}
-          onPick={(optionId) =>
-            actions?.selectOption(
-              line.kind,
-              line.target!.componentId,
-              line.target!.itemId,
-              optionId,
-            )
-          }
-        />
-        <button
-          type="button"
-          onClick={onOpenSheet}
-          title={`Open ${memberName} on this line`}
-          aria-label={`Open ${memberName} on ${line.name}`}
-          className="mt-1 rounded p-0.5 text-ink-400 opacity-0 transition-opacity hover:text-brand-700 focus-visible:opacity-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700 group-hover:opacity-100"
-        >
-          <SquareArrowOutUpRight className="h-3 w-3" aria-hidden />
-        </button>
-      </div>
+    <div className="px-3 py-2">
+      <OptionPicker
+        group={line.optionGroup as OptionGroup}
+        onPick={(optionId) =>
+          actions?.selectOption(line.kind, line.target!.componentId, line.target!.itemId, optionId)
+        }
+      />
       <span className="mt-0.5 block text-[10.5px] tabular-nums text-ink-500">
         {cell.rate} · <span className="font-medium text-ink-700">{inr2(cell.cost)} / pc</span>
       </span>

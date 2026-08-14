@@ -8,10 +8,12 @@
  * because for a kit the set IS the unit being costed.
  *
  * Clicking a card opens that member's full sheet; "Merged view" returns to the
- * variable-by-variable table; "Compare side by side" is the third arrangement.
+ * variable-by-variable table. There is no side-by-side arrangement any more:
+ * the merged table already puts every member on one screen, so a second
+ * comparison mode was two answers to a question the default view had settled.
  */
 
-import { Boxes, LayoutGrid, Package, Rows3 } from "lucide-react";
+import { Boxes, Package, Rows3 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { Article, KitItem } from "@/lib/podsStore";
@@ -20,7 +22,7 @@ import { inrShort } from "@/lib/fabricRequirement";
 import { createMoney } from "@/lib/money";
 
 /** Which arrangement of the kit is on screen. */
-export type KitView = "merged" | "compare" | `member:${string}`;
+export type KitView = "merged" | `member:${string}`;
 
 export const memberView = (id: string): KitView => `member:${id}`;
 export const memberOf = (view: KitView): string | null =>
@@ -78,24 +80,6 @@ export function KitProductHeader({
             >
               <Rows3 className="h-3.5 w-3.5" aria-hidden />
               Merged view
-            </button>
-          )}
-          {/* A single member has nothing to sit beside, so the toggle would
-              only invite a no-op. */}
-          {members.length > 1 && (
-            <button
-              type="button"
-              onClick={() => onView(view === "compare" ? "merged" : "compare")}
-              aria-pressed={view === "compare"}
-              className={cn(
-                "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[12px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-                view === "compare"
-                  ? "border-brand-700 bg-brand-50 text-brand-700"
-                  : "border-hairline bg-surface text-ink-700 hover:bg-surface-alt",
-              )}
-            >
-              <LayoutGrid className="h-3.5 w-3.5" aria-hidden />
-              Compare side by side
             </button>
           )}
         </div>

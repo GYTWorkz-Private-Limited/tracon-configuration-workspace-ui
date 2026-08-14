@@ -85,12 +85,11 @@ export function KitCostingWorkspace({
     );
   }
 
-  const comparing = view === "compare";
   const openMemberId = memberOf(view);
 
   // The merged view is a DOCUMENT: a long table, then the fabric requirement,
-  // then the summary — read top to bottom, so it scrolls with the page. The
-  // member and compare views are app-like panes that own the viewport height.
+  // then the summary — read top to bottom, so it scrolls with the page. A
+  // member's own sheet is an app-like pane that owns the viewport height.
   // Constraining the merged view the same way gave it a second scroller inside
   // a page that also scrolled, and the reader could never tell which one was
   // "the end".
@@ -103,53 +102,18 @@ export function KitCostingWorkspace({
       <KitProductHeader kit={kit} members={members} costed={costed} view={view} onView={setView} />
 
       {/* Every member stays mounted so its configuration survives a view
-          switch and the merged table always reflects the live build. Compare
-          mode reuses those same instances — same map, same keys, only the
-          wrapper layout changes — so no arrangement ever costs anyone their
-          in-progress work. */}
-      <div
-        className={cn(
-          paneLayout && "min-h-0 flex-1",
-          comparing
-            ? // One implicit row pinned to the container height; columns wide
-              // enough for a full costing sheet, so >2 members scroll sideways
-              // instead of crushing each other.
-              "grid auto-cols-[minmax(640px,1fr)] grid-flow-col grid-rows-[minmax(0,1fr)] overflow-x-auto"
-            : cn("flex flex-col", paneLayout && "overflow-hidden"),
-        )}
-      >
+          switch and the merged table always reflects the live build — the
+          merged table IS the comparison, so the sheets below it only ever
+          surface one at a time. */}
+      <div className={cn("flex flex-col", paneLayout && "min-h-0 flex-1 overflow-hidden")}>
         {members.map((m) => {
-          const shown = comparing || m.id === openMemberId;
-          const c = costed[m.id];
+          const shown = m.id === openMemberId;
           return (
             <div
               key={m.id}
               hidden={!shown}
-              className={cn(
-                "min-h-0 overflow-hidden",
-                comparing
-                  ? "flex min-w-0 flex-col border-r border-hairline last:border-r-0"
-                  : cn("flex-1 flex-col", shown && "flex"),
-              )}
+              className={cn("min-h-0 flex-1 flex-col overflow-hidden", shown && "flex")}
             >
-              {/* In the grid the header cards no longer say which sheet is
-                  which column, so each column restates its identity and live
-                  price. */}
-              {comparing && (
-                <div className="flex shrink-0 items-baseline justify-between gap-2 border-b border-hairline bg-surface px-4 py-1.5">
-                  <span className="truncate text-[12.5px] font-semibold text-ink-900">
-                    {m.name}
-                    {m.qty > 1 && (
-                      <span className="ml-1 text-[10.5px] font-normal tabular-nums text-ink-500">
-                        ×{m.qty}
-                      </span>
-                    )}
-                  </span>
-                  <span className="whitespace-nowrap text-[11px] tabular-nums text-ink-500">
-                    {c ? `₹${c.rollup.directCost.toFixed(2)} / pc` : "not costed yet"}
-                  </span>
-                </div>
-              )}
               <ArticleCostingWorkspace
                 podId={pod.id}
                 buyer={pod.buyer}

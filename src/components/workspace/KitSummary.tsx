@@ -180,6 +180,8 @@ export function KitSummary({
         </div>
       </section>
 
+      <MarginBreakdown priced={priced} />
+
       {/* The set's shippable quantity is a configuration fact, not a
           commercial one, so it stays: it is what every downstream price is
           multiplied by. */}
@@ -190,5 +192,122 @@ export function KitSummary({
         selling price are applied downstream in the Costing Report.
       </p>
     </div>
+  );
+}
+
+/**
+ * Margin per article AND for the set.
+ *
+ * The combined figure alone hides which member is carrying the deal: a set can
+ * sit at a healthy 26% while one article inside it earns almost nothing, and
+ * that is precisely the article to renegotiate. So both are stated, side by
+ * side, and the set's number is shown as what it is — the weighted result of
+ * the members above it, not a separate opinion.
+ *
+ * Every figure is read off the members' own reported costings; nothing is
+ * re-priced here.
+ */
+function MarginBreakdown({ priced }: { priced: { member: KitItem; costing: ArticleCosting }[] }) {
+  const rows = priced.map(({ member, costing }) => {
+    const units = Math.max(1, member.qty);
+    const sellInr = costing.sellingUsd * costing.fxRate;
+    return {
+      id: member.id,
+      name: member.name,
+      units,
+      costInr: costing.rollup.directCost,
+      sellInr,
+      marginInr: sellInr - costing.rollup.directCost,
+      marginPct: sellInr > 0 ? ((sellInr - costing.rollup.directCost) / sellInr) * 100 : 0,
+    };
+  });
+
+  const setCost = rows.reduce((t, r) => t + r.costInr * r.units, 0);
+  const setSell = rows.reduce((t, r) => t + r.sellInr * r.units, 0);
+  const setMarginInr = setSell - setCost;
+  const setMarginPct = setSell > 0 ? (setMarginInr / setSell) * 100 : 0;
+
+  // The member that would move the set's margin most if it were renegotiated.
+  const weakest = rows.reduce<(typeof rows)[number] | null>(
+    (low, r) => (!low || r.marginPct < low.marginPct ? r : low),
+    null,
+  );
+
+  return (
+    <section className="overflow-hidden rounded-xl border border-hairline bg-surface">
+      <div className="border-b border-hairline px-4 py-2.5">
+        <h3 className="text-[12px] font-semibold uppercase tracking-[0.1em] text-ink-600">
+          Margin — per article and combined
+        </h3>
+      </div>
+      <div className="overflow-x-auto">
+        <table className="w-full min-w-[620px] text-[12px]">
+          <thead>
+            <tr className="border-b border-hairline bg-surface-alt/60 text-[10px] uppercase tracking-[0.1em] text-ink-500">
+              <th scope="col" className="px-4 py-2 text-left font-medium">
+                Article
+              </th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">
+                Direct / pc
+              </th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">
+                Selling / pc
+              </th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">
+                Margin / pc
+              </th>
+              <th scope="col" className="px-4 py-2 text-right font-medium">
+                Margin %
+              </th>
+            </tr>
+          </thead>
+          <tbody>
+            {rows.map((r) => (
+              <tr key={r.id} className="border-b border-hairline/70">
+                <th scope="row" className="px-4 py-2.5 text-left font-normal">
+                  <span className="text-[12.5px] font-semibold text-ink-900">{r.name}</span>
+                  {r.units > 1 && (
+                    <span className="ml-1 text-[10.5px] tabular-nums text-ink-500">×{r.units}</span>
+                  )}
+                  {weakest?.id === r.id && rows.length > 1 && (
+                    <span className="ml-2 rounded-full bg-amber-50 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">
+                      thinnest
+                    </span>
+                  )}
+                </th>
+                <td className="px-3 py-2.5 text-right tabular-nums text-ink-600">
+                  {inr(r.costInr)}
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-ink-600">
+                  {inr(r.sellInr)}
+                </td>
+                <td className="px-3 py-2.5 text-right tabular-nums text-ink-700">
+                  {inr(r.marginInr)}
+                </td>
+                <td className="px-4 py-2.5 text-right font-semibold tabular-nums text-ink-900">
+                  {r.marginPct.toFixed(1)}%
+                </td>
+              </tr>
+            ))}
+            <tr className="border-t-2 border-ink-200 bg-surface-alt/40">
+              <th
+                scope="row"
+                className="px-4 py-3 text-left text-[13px] font-semibold text-ink-900"
+              >
+                Combined — per set
+              </th>
+              <td className="px-3 py-3 text-right tabular-nums text-ink-700">{inr(setCost)}</td>
+              <td className="px-3 py-3 text-right tabular-nums text-ink-700">{inr(setSell)}</td>
+              <td className="px-3 py-3 text-right font-medium tabular-nums text-ink-900">
+                {inr(setMarginInr)}
+              </td>
+              <td className="px-4 py-3 text-right text-[16px] font-semibold tabular-nums text-ink-900">
+                {setMarginPct.toFixed(1)}%
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
   );
 }
