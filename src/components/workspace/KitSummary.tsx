@@ -1,31 +1,26 @@
 /**
  * Kit Summary — the consolidation tab.
  *
- * Reads every member's live roll-up and adds them up per SET, then applies the
- * commercial stack once to that figure. It re-costs nothing: the numbers are
- * the same ones each member tab is showing, so opening this tab can never
- * disagree with the sheets behind it.
+ * Reads every member's live roll-up and adds them up per SET. It re-costs
+ * nothing: the numbers are the same ones each member tab is showing, so opening
+ * this tab can never disagree with the sheets behind it.
  *
  *   PLACEMAT  direct  ₹272 / pc
  *   RUNNER    direct  ₹576 / pc
  *   ─────────────────────────────
  *   KIT DIRECT COST / SET  ₹848
- *     → commercial provisions → final kit cost → selling price → margin
+ *
+ * Deliberately stops there. This is a CONFIGURATION screen — what it owns is
+ * the build and the direct cost that falls out of it. Overheads, provisions,
+ * margin and selling price are commercial decisions taken downstream in the
+ * Costing Report and Quotation; showing a second copy here only invited two
+ * versions of the same number.
  */
 
-import { useMemo, useState } from "react";
 import { Boxes, Info } from "lucide-react";
-import { cn } from "@/lib/utils";
 import type { Article, KitItem } from "@/lib/podsStore";
 import type { ArticleCosting } from "@/components/workspace/ArticleCostingWorkspace";
-import {
-  computeKitCommercials,
-  DEFAULT_PROVISIONS,
-  inr,
-  pct,
-  usd,
-} from "@/lib/commercialProvisions";
-import { CommercialBreakdown } from "@/components/quotation/CommercialBreakdown";
+import { inr } from "@/lib/commercialProvisions";
 
 const CATEGORY_ROWS = [
   { key: "rawMaterial", label: "Raw material" },
@@ -48,28 +43,9 @@ export function KitSummary({
     .map((m) => ({ member: m, costing: costed[m.id] }))
     .filter((x): x is { member: KitItem; costing: ArticleCosting } => Boolean(x.costing));
 
-  const [marginPct, setMarginPct] = useState(26);
-
-  const fxRate = priced[0]?.costing.fxRate ?? 90;
-
-  const result = useMemo(
-    () =>
-      computeKitCommercials(
-        priced.map((p) => ({
-          directCostInr: p.costing.rollup.directCost,
-          unitsPerSet: p.member.qty > 0 ? p.member.qty : 1,
-        })),
-        {
-          rates: DEFAULT_PROVISIONS,
-          fxRate,
-          targetMarginPct: marginPct,
-          buyerTargetUsd: priced.reduce(
-            (t, p) => t + p.costing.sellingUsd * (p.member.qty > 0 ? p.member.qty : 1),
-            0,
-          ),
-        },
-      ),
-    [priced, fxRate, marginPct],
+  const directPerSet = priced.reduce(
+    (t, p) => t + p.costing.rollup.directCost * Math.max(1, p.member.qty),
+    0,
   );
 
   // Sets are limited by the scarcest member — you cannot ship more sets than
@@ -196,7 +172,7 @@ export function KitSummary({
                 ))}
                 <td />
                 <td className="px-4 py-3 text-right text-[16px] font-semibold tabular-nums text-ink-900">
-                  {inr(result.directCostInr)}
+                  {inr(directPerSet)}
                 </td>
               </tr>
             </tbody>
@@ -204,76 +180,15 @@ export function KitSummary({
         </div>
       </section>
 
-      {/* commercial stack, applied once to the set */}
-      <CommercialBreakdown
-        result={result}
-        defaultOpen
-        title="Kit Commercial Overheads & Provisions"
-        caption="Applied once to the combined set cost — not separately to each article."
-      />
-
-      {/* final kit position */}
-      <section className="overflow-hidden rounded-xl border-2 border-[var(--color-cfg)] bg-surface">
-        <header className="flex flex-wrap items-center gap-3 bg-[var(--color-cfg-soft)] px-4 py-3">
-          <h3 className="text-[12px] font-semibold uppercase tracking-[0.12em] text-[var(--color-cfg-strong)]">
-            Final kit costing
-          </h3>
-          <label className="ml-auto flex items-center gap-2 text-[11.5px] text-ink-600">
-            Target margin
-            <span className="flex items-baseline">
-              <input
-                type="number"
-                step="0.5"
-                value={marginPct}
-                onChange={(e) => setMarginPct(Number(e.target.value))}
-                aria-label="Kit target margin percent"
-                className="w-16 rounded-md border border-hairline bg-surface px-2 py-1 text-right text-[12px] tabular-nums text-ink-900 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-700/20"
-              />
-              <span className="pl-1" aria-hidden>
-                %
-              </span>
-            </span>
-          </label>
-        </header>
-
-        <dl className="grid grid-cols-2 gap-px bg-hairline sm:grid-cols-3 lg:grid-cols-4">
-          <Cell label="Combined direct cost / set" value={inr(result.directCostInr)} />
-          <Cell label="Commercial overheads" value={inr(result.commercialOverheadsInr)} />
-          <Cell label="Supplier margins" value={inr(result.supplierMarginsInr)} />
-          <Cell label="Other indirect costs" value={inr(result.otherIndirectInr)} />
-          <Cell label="Provisions" value={inr(result.provisionsInr)} />
-          <Cell label="Final kit cost / set" value={inr(result.finalCostInr)} strong />
-          <Cell label="Selling price / set" value={inr(result.sellingInr)} strong />
-          <Cell label="Selling price USD / set" value={usd(result.sellingUsd)} strong />
-          <Cell label="Margin INR / set" value={inr(result.marginInr)} />
-          <Cell label="Margin %" value={pct(result.marginPct, 1)} />
-          <Cell label="MOQ" value={`${sets.toLocaleString("en-IN")} sets`} />
-          <Cell label="Order value" value={usd(result.sellingUsd * sets, 0)} strong />
-        </dl>
-
-        <p className="flex items-start gap-2 border-t border-hairline bg-surface-alt/40 px-4 py-2.5 text-[11.5px] text-ink-500">
-          <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-400" aria-hidden />
-          MOQ is capped by the scarcest member — {sets.toLocaleString("en-IN")} sets is the most
-          this kit can ship at the quantities each article is costed on. This is the figure
-          Quotation picks up.
-        </p>
-      </section>
-    </div>
-  );
-}
-
-function Cell({ label, value, strong }: { label: string; value: string; strong?: boolean }) {
-  return (
-    <div className="bg-surface px-4 py-2.5">
-      <dt className="text-[10px] font-medium uppercase tracking-[0.1em] text-ink-500">{label}</dt>
-      <dd
-        className={cn(
-          "mt-0.5 tabular-nums",
-          strong ? "text-[15px] font-semibold text-ink-900" : "text-[13px] text-ink-700",
-        )}
-      >
-        {value}
-      </dd>
+      {/* The set's shippable quantity is a configuration fact, not a
+          commercial one, so it stays: it is what every downstream price is
+          multiplied by. */}
+      <p className="flex items-start gap-2 rounded-xl border border-hairline bg-surface-alt/40 px-4 py-2.5 text-[11.5px] text-ink-500">
+        <Info className="mt-0.5 h-3.5 w-3.5 shrink-0 text-ink-400" aria-hidden />
+        MOQ is capped by the scarcest member — {sets.toLocaleString("en-IN")} sets is the most this
+        kit can ship at the quantities each article is costed on. Overheads, provisions, margin and
+        selling price are applied downstream in the Costing Report.
+      </p>
     </div>
   );
 }

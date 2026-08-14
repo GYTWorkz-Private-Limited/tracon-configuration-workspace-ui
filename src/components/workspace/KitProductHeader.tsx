@@ -16,6 +16,8 @@ import { Boxes, LayoutGrid, Package, Rows3 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Article, KitItem } from "@/lib/podsStore";
 import type { ArticleCosting } from "@/components/workspace/ArticleCostingWorkspace";
+import { inrShort } from "@/lib/fabricRequirement";
+import { createMoney } from "@/lib/money";
 
 /** Which arrangement of the kit is on screen. */
 export type KitView = "merged" | "compare" | `member:${string}`;
@@ -182,6 +184,123 @@ export function KitProductHeader({
           )}
         </div>
       </div>
+
+      <KitOutputStrip kit={kit} members={members} costed={costed} />
+    </div>
+  );
+}
+
+/** Digits out of a free-text MOQ like "1,500 sets" — 0 when there are none. */
+const moqNumber = (text: string | undefined) => Number((text ?? "").replace(/[^\d]/g, "")) || 0;
+
+/**
+ * What the SET is worth, live.
+ *
+ * The cards below say what each piece costs; this says what the deal is —
+ * quantity, margin and the order value that follows from them. Every figure is
+ * read straight off the members' reported costings (each already carries its
+ * own selling price and FX), so there is exactly one costing engine in the app
+ * and this strip can never disagree with the sheets it sums.
+ *
+ * Money follows the house convention: ₹ is the working currency, $ trails it
+ * for the buyer-facing figure.
+ */
+function KitOutputStrip({
+  kit,
+  members,
+  costed,
+}: {
+  kit: Article;
+  members: KitItem[];
+  costed: Record<string, ArticleCosting>;
+}) {
+  const priced = members
+    .map((m) => ({ m, c: costed[m.id] }))
+    .filter((x): x is { m: KitItem; c: ArticleCosting } => Boolean(x.c));
+  if (priced.length === 0) return null;
+
+  const partial = priced.length !== members.length;
+  const fxRate = priced[0].c.fxRate;
+  const usd = createMoney("USD", fxRate);
+
+  // Weighted by pieces per set: a set with two placemats carries two of their
+  // costs and two of their prices, so both sides of the margin scale together.
+  const costInr = priced.reduce((t, p) => t + p.c.rollup.directCost * Math.max(1, p.m.qty), 0);
+  const sellInr = priced.reduce(
+    (t, p) => t + p.c.sellingUsd * p.c.fxRate * Math.max(1, p.m.qty),
+    0,
+  );
+  const marginInr = sellInr - costInr;
+  const marginPct = sellInr > 0 ? (marginInr / sellInr) * 100 : 0;
+
+  // The set's own MOQ is the commitment the buyer made; the piece MOQs on the
+  // members are what production has to cover to honour it, so a member that
+  // cannot cover its share caps the sets that can actually ship.
+  const declaredSets = moqNumber(kit.moq);
+  const coveredSets = Math.min(...priced.map((p) => Math.floor(p.c.moq / Math.max(1, p.m.qty))));
+  const sets = declaredSets || coveredSets;
+  const short = declaredSets > 0 && coveredSets < declaredSets;
+
+  return (
+    <div className="flex flex-wrap items-stretch gap-x-6 gap-y-2 border-t border-hairline bg-surface-alt/40 px-6 py-2 lg:px-8">
+      <Output
+        label="Set MOQ"
+        value={`${sets.toLocaleString("en-IN")} sets`}
+        note={
+          short
+            ? `pieces cover ${coveredSets.toLocaleString("en-IN")} sets`
+            : priced.map((p) => `${p.c.moq.toLocaleString("en-IN")} pcs`).join(" · ")
+        }
+      />
+      <Output
+        label="Set margin"
+        value={`${marginPct.toFixed(1)}%`}
+        note={`${inrShort(marginInr)} · ${usd(marginInr)} / set`}
+      />
+      <Output label="Set selling value" value={inrShort(sellInr)} note={`${usd(sellInr)} / set`} />
+      {/* The number the room actually argues about, so it gets the emphasis. */}
+      <Output
+        label="Potential order value"
+        value={inrShort(sellInr * sets)}
+        note={`${usd(sellInr * sets, 0)} at ${sets.toLocaleString("en-IN")} sets`}
+        strong
+      />
+      {partial && (
+        <span className="self-center rounded-full bg-amber-50 px-2 py-0.5 text-[10.5px] font-medium text-amber-700">
+          partial — {priced.length} of {members.length} costed
+        </span>
+      )}
+    </div>
+  );
+}
+
+function Output({
+  label,
+  value,
+  note,
+  strong,
+}: {
+  label: string;
+  value: string;
+  note?: string;
+  strong?: boolean;
+}) {
+  return (
+    <div className="min-w-0">
+      <div className="text-[9.5px] font-semibold uppercase tracking-[0.12em] text-ink-400">
+        {label}
+      </div>
+      <div
+        className={cn(
+          "tabular-nums",
+          strong
+            ? "text-[14px] font-semibold text-ink-900"
+            : "text-[13px] font-medium text-ink-800",
+        )}
+      >
+        {value}
+      </div>
+      {note && <div className="truncate text-[10px] tabular-nums text-ink-500">{note}</div>}
     </div>
   );
 }

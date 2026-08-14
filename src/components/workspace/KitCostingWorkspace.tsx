@@ -88,8 +88,16 @@ export function KitCostingWorkspace({
   const comparing = view === "compare";
   const openMemberId = memberOf(view);
 
+  // The merged view is a DOCUMENT: a long table, then the fabric requirement,
+  // then the summary — read top to bottom, so it scrolls with the page. The
+  // member and compare views are app-like panes that own the viewport height.
+  // Constraining the merged view the same way gave it a second scroller inside
+  // a page that also scrolled, and the reader could never tell which one was
+  // "the end".
+  const paneLayout = view !== "merged";
+
   return (
-    <div className="flex min-h-0 flex-1 flex-col">
+    <div className={cn("flex flex-col", paneLayout && "min-h-0 flex-1")}>
       {stepper}
 
       <KitProductHeader kit={kit} members={members} costed={costed} view={view} onView={setView} />
@@ -101,13 +109,13 @@ export function KitCostingWorkspace({
           in-progress work. */}
       <div
         className={cn(
-          "min-h-0 flex-1",
+          paneLayout && "min-h-0 flex-1",
           comparing
             ? // One implicit row pinned to the container height; columns wide
               // enough for a full costing sheet, so >2 members scroll sideways
               // instead of crushing each other.
               "grid auto-cols-[minmax(640px,1fr)] grid-flow-col grid-rows-[minmax(0,1fr)] overflow-x-auto"
-            : "flex flex-col overflow-hidden",
+            : cn("flex flex-col", paneLayout && "overflow-hidden"),
         )}
       >
         {members.map((m) => {
@@ -167,7 +175,7 @@ export function KitCostingWorkspace({
         })}
 
         {view === "merged" && (
-          <div className="min-h-0 flex-1 overflow-y-auto bg-canvas">
+          <div className="bg-canvas pb-8">
             <div className="mx-4 mt-4">
               <KitMergedConfigTable members={members} costed={costed} onFocusLine={focusLine} />
             </div>

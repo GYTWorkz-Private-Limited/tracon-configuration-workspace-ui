@@ -20,7 +20,7 @@
  *      exactly what costing has open — never a list of its own invention.
  */
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Sparkles } from "lucide-react";
 
 import { VariantTabs, type WorkVariant } from "@/components/configuration/VariantTabs";
@@ -118,6 +118,31 @@ export type CostingIdentity = {
   currency?: string;
 };
 
+/**
+ * The write side of the report. A kit's merged table is not a mirror — it is a
+ * second surface onto the SAME sheet, so it needs to be able to act on this
+ * member, not just read it.
+ *
+ * Every callback here is stable for the life of the workspace and reads the
+ * live variant through a ref, because the kit dedupes reports by roll-up
+ * identity: a member that reports again with an unchanged roll-up keeps its
+ * OLD summary object, and a callback that had closed over that render's state
+ * would then write into a variant that has since moved on. `attachTargets` is
+ * a getter for the same reason — a retained object must never hand out a stale
+ * component list.
+ */
+export type ArticleActions = {
+  selectOption: (
+    kind: CostLine["kind"],
+    componentId: string,
+    itemId: string,
+    optionId: string,
+  ) => void;
+  addFromLibrary: (item: LibraryItem, targetComponentId: string | null, slot: string) => void;
+  /** components a process or trim can be attached to, on THIS member */
+  attachTargets: { id: string; name: string }[];
+};
+
 /** What this workspace reports upward, so a kit can consolidate its members. */
 export type ArticleCosting = {
   articleId: string;
@@ -132,6 +157,14 @@ export type ArticleCosting = {
    */
   packaging: PackagingItem[];
   testing: TestingItem[];
+  /**
+   * The very lines the sheet renders. Names and costs alone would let the
+   * merged table LIST a decision but never OFFER it — the option group and the
+   * target travel with the line, so a kit cell can be the same dropdown the
+   * sheet has.
+   */
+  sections: LineSection[];
+  actions: ArticleActions;
   scenarioName: string;
   variantName: string;
   moq: number;
@@ -318,6 +351,8 @@ export function ArticleCostingWorkspace({
       rollup,
       packaging: pricedVariant.packaging,
       testing: pricedVariant.testing,
+      sections: allSections,
+      actions,
       scenarioName: activeScenario.name,
       variantName: activeVariant.name,
       moq: moqOf(pricedVariant.parameters),
@@ -403,15 +438,28 @@ export function ArticleCostingWorkspace({
     category === "direct" ? rollup.directCost : visibleSections.reduce((t, s) => t + s.total, 0);
 
   /* ---- mutations: every change is an immutable variant swap ---- */
-  const pulse = () => {
+
+  /**
+   * The live state the exported actions write against. Keeping it in a ref —
+   * refreshed on every render — is what lets those actions be created ONCE and
+   * still hit the current variant, which the kit's report dedupe requires (see
+   * `ArticleActions`).
+   */
+  const stateRef = useRef({ activeVariant, activeScenario, rollup, bundle });
+  stateRef.current = { activeVariant, activeScenario, rollup, bundle };
+
+  const pulse = useCallback(() => {
     setLive(true);
     setTimeout(() => setLive(false), 1000);
-  };
+  }, []);
 
-  const updateActive = (next: Variant) => {
-    setVariants((prev) => prev.map((v) => (v.id === next.id ? next : v)));
-    pulse();
-  };
+  const updateActive = useCallback(
+    (next: Variant) => {
+      setVariants((prev) => prev.map((v) => (v.id === next.id ? next : v)));
+      pulse();
+    },
+    [pulse],
+  );
 
   const setParameter = (id: ParameterId, optionId: string) =>
     updateActive({
@@ -428,110 +476,118 @@ export function ArticleCostingWorkspace({
   const setCommercial = (patch: Partial<CommercialInputs>) =>
     updateActive({ ...activeVariant, commercial: { ...activeVariant.commercial, ...patch } });
 
-  const applyMaterial = (componentId: string, materialMasterId: string) => {
-    const master = bundle.masters.materials[materialMasterId];
-    if (!master) return;
-    // A scenario that declares its own fabric would re-apply it on the next
-    // render and silently undo this choice, so the scenario is updated to
-    // match rather than left to fight the variant.
-    if (activeScenario.fabricMasterId) {
-      setScenarios((prev) =>
-        prev.map((s) =>
-          s.id === activeScenario.id ? { ...s, fabricMasterId: materialMasterId } : s,
-        ),
-      );
-    }
-    updateActive({
-      ...activeVariant,
-      components: activeVariant.components.map((c) =>
-        c.id === componentId && c.material
-          ? {
-              ...c,
-              material: {
-                ...c.material,
-                relationship: "master",
-                sameAsComponentId: undefined,
-                materialMasterId,
-                rate: sourced(master.rate, "Rate Master", master.rateMasterId),
-                rateUnit: master.rateUnit,
-              },
-            }
-          : c,
-      ),
-    });
-  };
-
-  const inheritMaterial = (componentId: string) =>
-    updateActive({
-      ...activeVariant,
-      components: activeVariant.components.map((c) =>
-        c.id === componentId && c.material
-          ? {
-              ...c,
-              material: {
-                ...c.material,
-                relationship: "same-as-component",
-                sameAsComponentId: c.parentId ?? c.material.sameAsComponentId,
-                materialMasterId: undefined,
-                rate: { ...c.material.rate, override: undefined },
-              },
-            }
-          : c,
-      ),
-    });
-
-  const selectLineOption = (
-    kind: CostLine["kind"],
-    componentId: string,
-    itemId: string,
-    optionId: string,
-  ) => {
-    if (kind === "material") {
-      if (optionId === INHERIT_OPTION_ID) inheritMaterial(componentId);
-      else applyMaterial(componentId, optionId);
-      return;
-    }
-    if (kind === "accessory" || kind === "process") {
+  const applyMaterial = useCallback(
+    (componentId: string, materialMasterId: string) => {
+      const { activeVariant, activeScenario, bundle } = stateRef.current;
+      const master = bundle.masters.materials[materialMasterId];
+      if (!master) return;
+      // A scenario that declares its own fabric would re-apply it on the next
+      // render and silently undo this choice, so the scenario is updated to
+      // match rather than left to fight the variant.
+      if (activeScenario.fabricMasterId) {
+        setScenarios((prev) =>
+          prev.map((s) =>
+            s.id === activeScenario.id ? { ...s, fabricMasterId: materialMasterId } : s,
+          ),
+        );
+      }
       updateActive({
         ...activeVariant,
         components: activeVariant.components.map((c) =>
-          c.id !== componentId
-            ? c
-            : kind === "accessory"
-              ? {
-                  ...c,
-                  accessories: c.accessories.map((a) =>
-                    a.id === itemId ? applyAccessoryOption(a, optionId) : a,
-                  ),
-                }
-              : {
-                  ...c,
-                  processes: c.processes.map((p) =>
-                    p.id === itemId ? applyProcessOption(p, optionId) : p,
-                  ),
+          c.id === componentId && c.material
+            ? {
+                ...c,
+                material: {
+                  ...c.material,
+                  relationship: "master",
+                  sameAsComponentId: undefined,
+                  materialMasterId,
+                  rate: sourced(master.rate, "Rate Master", master.rateMasterId),
+                  rateUnit: master.rateUnit,
                 },
+              }
+            : c,
         ),
       });
-      return;
-    }
-    if (kind === "packaging") {
+    },
+    [updateActive],
+  );
+
+  const inheritMaterial = useCallback(
+    (componentId: string) => {
+      const { activeVariant } = stateRef.current;
       updateActive({
         ...activeVariant,
-        packaging: activeVariant.packaging.map((p) =>
-          p.id === itemId ? applyPackagingOption(p, optionId) : p,
+        components: activeVariant.components.map((c) =>
+          c.id === componentId && c.material
+            ? {
+                ...c,
+                material: {
+                  ...c.material,
+                  relationship: "same-as-component",
+                  sameAsComponentId: c.parentId ?? c.material.sameAsComponentId,
+                  materialMasterId: undefined,
+                  rate: { ...c.material.rate, override: undefined },
+                },
+              }
+            : c,
         ),
       });
-      return;
-    }
-    if (kind === "testing") {
-      updateActive({
-        ...activeVariant,
-        testing: activeVariant.testing.map((t) =>
-          t.id === itemId ? applyTestingOption(t, optionId) : t,
-        ),
-      });
-    }
-  };
+    },
+    [updateActive],
+  );
+
+  const selectLineOption = useCallback(
+    (kind: CostLine["kind"], componentId: string, itemId: string, optionId: string) => {
+      const { activeVariant } = stateRef.current;
+      if (kind === "material") {
+        if (optionId === INHERIT_OPTION_ID) inheritMaterial(componentId);
+        else applyMaterial(componentId, optionId);
+        return;
+      }
+      if (kind === "accessory" || kind === "process") {
+        updateActive({
+          ...activeVariant,
+          components: activeVariant.components.map((c) =>
+            c.id !== componentId
+              ? c
+              : kind === "accessory"
+                ? {
+                    ...c,
+                    accessories: c.accessories.map((a) =>
+                      a.id === itemId ? applyAccessoryOption(a, optionId) : a,
+                    ),
+                  }
+                : {
+                    ...c,
+                    processes: c.processes.map((p) =>
+                      p.id === itemId ? applyProcessOption(p, optionId) : p,
+                    ),
+                  },
+          ),
+        });
+        return;
+      }
+      if (kind === "packaging") {
+        updateActive({
+          ...activeVariant,
+          packaging: activeVariant.packaging.map((p) =>
+            p.id === itemId ? applyPackagingOption(p, optionId) : p,
+          ),
+        });
+        return;
+      }
+      if (kind === "testing") {
+        updateActive({
+          ...activeVariant,
+          testing: activeVariant.testing.map((t) =>
+            t.id === itemId ? applyTestingOption(t, optionId) : t,
+          ),
+        });
+      }
+    },
+    [applyMaterial, inheritMaterial, updateActive],
+  );
 
   const attachTargets = rollup.components.map((c) => ({
     id: c.component.id,
@@ -608,69 +664,91 @@ export function ArticleCostingWorkspace({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [chosenStyle, identity.articleId]);
 
-  const addFromLibrary = (item: LibraryItem, targetComponentId: string | null, slot: string) => {
-    const stamp = Date.now();
+  const addFromLibrary = useCallback(
+    (item: LibraryItem, targetComponentId: string | null, slot: string) => {
+      const { activeVariant, rollup } = stateRef.current;
+      const stamp = Date.now();
 
-    if (item.kind === "fabric" || item.kind === "filling") {
-      const id = `CMP-${stamp}`;
-      const base = activeVariant.components.find((c) => c.consumption)?.consumption;
-      updateActive(
-        addComponentTo(
-          activeVariant,
-          componentFromLibrary(item, {
-            id,
-            productId: activeVariant.productId,
-            sequence: activeVariant.components.length + 1,
-            slot,
-            finishedWidth: base?.finishedWidth ?? 20,
-            finishedLength: base?.finishedLength ?? 26,
+      if (item.kind === "fabric" || item.kind === "filling") {
+        const id = `CMP-${stamp}`;
+        const base = activeVariant.components.find((c) => c.consumption)?.consumption;
+        updateActive(
+          addComponentTo(
+            activeVariant,
+            componentFromLibrary(item, {
+              id,
+              productId: activeVariant.productId,
+              sequence: activeVariant.components.length + 1,
+              slot,
+              finishedWidth: base?.finishedWidth ?? 20,
+              finishedLength: base?.finishedLength ?? 26,
+            }),
+          ),
+        );
+        setSelectedId(id);
+      } else if (item.kind === "process" && targetComponentId) {
+        const target = rollup.components.find((c) => c.component.id === targetComponentId);
+        const quantity =
+          item.process?.basis === "per m"
+            ? (target?.consumptionPerPiece ?? 1)
+            : item.process?.basis === "per 1000 stitches"
+              ? 12.5
+              : 1;
+        updateActive({
+          ...activeVariant,
+          components: activeVariant.components.map((c) => {
+            if (c.id !== targetComponentId) return c;
+            const step = processFromLibrary(item, c.id, c.processes.length + 1, quantity);
+            return step ? { ...c, processes: [...c.processes, step] } : c;
           }),
-        ),
-      );
-      setSelectedId(id);
-    } else if (item.kind === "process" && targetComponentId) {
-      const target = rollup.components.find((c) => c.component.id === targetComponentId);
-      const quantity =
-        item.process?.basis === "per m"
-          ? (target?.consumptionPerPiece ?? 1)
-          : item.process?.basis === "per 1000 stitches"
-            ? 12.5
-            : 1;
-      updateActive({
-        ...activeVariant,
-        components: activeVariant.components.map((c) => {
-          if (c.id !== targetComponentId) return c;
-          const step = processFromLibrary(item, c.id, c.processes.length + 1, quantity);
-          return step ? { ...c, processes: [...c.processes, step] } : c;
-        }),
-      });
-    } else if (item.kind === "trim" && targetComponentId) {
-      updateActive({
-        ...activeVariant,
-        components: activeVariant.components.map((c) =>
-          c.id === targetComponentId
-            ? {
-                ...c,
-                accessories: [...c.accessories, accessoryFromLibrary(item, `ACC-${stamp}`, c.id)],
-              }
-            : c,
-        ),
-      });
-    } else if (item.kind === "packaging") {
-      updateActive({
-        ...activeVariant,
-        packaging: [...activeVariant.packaging, packagingFromLibrary(item, `PKG-${stamp}`)],
-      });
-    } else if (item.kind === "testing") {
-      const lotSize = activeVariant.testing[0]?.lotSize ?? 3000;
-      updateActive({
-        ...activeVariant,
-        testing: [...activeVariant.testing, testingFromLibrary(item, `TST-${stamp}`, lotSize)],
-      });
-    }
+        });
+      } else if (item.kind === "trim" && targetComponentId) {
+        updateActive({
+          ...activeVariant,
+          components: activeVariant.components.map((c) =>
+            c.id === targetComponentId
+              ? {
+                  ...c,
+                  accessories: [...c.accessories, accessoryFromLibrary(item, `ACC-${stamp}`, c.id)],
+                }
+              : c,
+          ),
+        });
+      } else if (item.kind === "packaging") {
+        updateActive({
+          ...activeVariant,
+          packaging: [...activeVariant.packaging, packagingFromLibrary(item, `PKG-${stamp}`)],
+        });
+      } else if (item.kind === "testing") {
+        const lotSize = activeVariant.testing[0]?.lotSize ?? 3000;
+        updateActive({
+          ...activeVariant,
+          testing: [...activeVariant.testing, testingFromLibrary(item, `TST-${stamp}`, lotSize)],
+        });
+      }
 
-    setLibraryOpen(false);
-  };
+      setLibraryOpen(false);
+    },
+    [updateActive],
+  );
+
+  /**
+   * One object, created once. The kit may hold on to a report whose roll-up did
+   * not change, so what it holds must never be a snapshot of this render.
+   */
+  const actions = useMemo<ArticleActions>(
+    () => ({
+      selectOption: selectLineOption,
+      addFromLibrary,
+      get attachTargets() {
+        return stateRef.current.rollup.components.map((c) => ({
+          id: c.component.id,
+          name: c.component.name,
+        }));
+      },
+    }),
+    [selectLineOption, addFromLibrary],
+  );
 
   /** Removing a line removes the thing it stands for. Nothing is soft-deleted. */
   const removeLine = (line: CostLine) => {
