@@ -413,7 +413,13 @@ function defaultArticles(): Article[] {
   }));
 }
 
-export function createPod(input: { buyerRef: string; buyer: string; preparedBy: string }): Pod {
+export function createPod(
+  input: { buyerRef: string; buyer: string; preparedBy: string },
+  // The New Costing stepper collects the POD's real articles before the POD
+  // exists, so it opts out of the demo seed — a wizard that ends with six
+  // articles the user never picked would contradict its own Step 3.
+  opts?: { seedDefaultArticles?: boolean },
+): Pod {
   const p: Pod = {
     id: nextPodId(),
     buyerRef: input.buyerRef,
@@ -423,7 +429,7 @@ export function createPod(input: { buyerRef: string; buyer: string; preparedBy: 
     owner: input.preparedBy,
     createdAt: now(),
     updatedAt: "just now",
-    articles: defaultArticles(),
+    articles: opts?.seedDefaultArticles === false ? [] : defaultArticles(),
   };
   pods = [p, ...pods];
   emit();

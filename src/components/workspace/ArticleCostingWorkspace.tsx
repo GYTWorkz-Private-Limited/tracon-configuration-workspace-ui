@@ -33,7 +33,7 @@ import { CategoryComposition } from "@/components/workspace/CategoryComposition"
 import { CostLineTable } from "@/components/workspace/CostLineTable";
 import { toast } from "sonner";
 import { usePod } from "@/lib/podsStore";
-import { applyStyleParts } from "@/lib/styleMaster";
+import { MANUAL_STYLE_ID, applyStyleParts, useStyleFor } from "@/lib/styleMaster";
 import { StylePickerCard } from "@/components/workspace/StylePickerCard";
 import {
   fabricRateOverrides,
@@ -564,6 +564,23 @@ export function ArticleCostingWorkspace({
       `${fresh.length} part${fresh.length === 1 ? "" : "s"} seeded from the style — pick each part's own fabric on its row`,
     );
   };
+
+  // A style can be chosen before this workspace ever opens — the New Costing
+  // stepper records the choice at POD creation. Without this, the picker strip
+  // would claim "N parts seeded" over a sheet that has none of them. Seeding
+  // only fires when NO part of the style is on the sheet: once any part
+  // exists the user owns the sheet, and re-adding parts they deleted would
+  // turn their pruning into a fight with the machine.
+  const chosenStyle = useStyleFor(podId, identity.articleId);
+  useEffect(() => {
+    if (!chosenStyle || chosenStyle === MANUAL_STYLE_ID) return;
+    const parts = applyStyleParts(chosenStyle);
+    if (parts.length === 0) return;
+    const have = new Set(activeVariant.components.map((c) => c.name));
+    if (parts.some((p) => have.has(p.name))) return;
+    applyStyle(chosenStyle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chosenStyle, identity.articleId]);
 
   const addFromLibrary = (item: LibraryItem, targetComponentId: string | null, slot: string) => {
     const stamp = Date.now();
