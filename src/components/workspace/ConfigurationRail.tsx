@@ -77,6 +77,13 @@ export function ConfigurationRail({
   // AppShell's sidebar).
   const [collapsed, setCollapsed] = useState(false);
   useEffect(() => setCollapsed(loadCollapsed()), []);
+
+  // The commercial layer computes in $ because the buyer's target is quoted in
+  // $, but the configuration stage is a rupee view: convert the derived figures
+  // back at the same FX rate before showing them. Nothing here is stored — the
+  // $ values still travel untouched to Quotation.
+  const fx = commercial.fxRate > 0 ? commercial.fxRate : 1;
+  const inr = (usd: number) => money(usd * fx);
   const toggleCollapsed = () => {
     setCollapsed((c) => {
       try {
@@ -114,7 +121,7 @@ export function ConfigurationRail({
           className="mt-3 flex min-h-0 flex-1 flex-col items-center gap-2.5 overflow-y-auto px-1"
         >
           <RailFigure label="Cost" value={money(output.totalCostInr)} live={live} />
-          <RailFigure label="Sell" value={`$${output.sellingUsd.toFixed(2)}`} />
+          <RailFigure label="Sell" value={inr(output.sellingUsd)} />
           <RailFigure label="Mgn" value={`${output.marginPct}%`} />
         </div>
 
@@ -244,16 +251,16 @@ export function ConfigurationRail({
           />
           <Output
             label="Selling price"
-            value={`$${output.sellingUsd.toFixed(2)}`}
-            sub={`tgt $${output.buyerTargetUsd.toFixed(2)}`}
+            value={inr(output.sellingUsd)}
+            sub={`tgt ${inr(output.buyerTargetUsd)}`}
           />
           <Output label="Margin" value={`${output.marginPct}%`} sub="on plan" />
         </div>
 
         <p className="mt-1.5 text-[10.5px] text-ink-600">
           {output.onTarget
-            ? `$${Math.abs(output.headroomUsd).toFixed(2)} under the buyer target.`
-            : `$${Math.abs(output.headroomUsd).toFixed(2)} over target — reduce cost or margin.`}
+            ? `${inr(Math.abs(output.headroomUsd))} under the buyer target.`
+            : `${inr(Math.abs(output.headroomUsd))} over target — reduce cost or margin.`}
         </p>
       </div>
 

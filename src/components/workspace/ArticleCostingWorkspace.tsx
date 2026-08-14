@@ -337,8 +337,12 @@ export function ArticleCostingWorkspace({
     [rollup.directCost, pricedVariant.commercial],
   );
 
+  // Costing is done in rupees — every rate master, and therefore every figure on
+  // this sheet, is ₹. Dollars belong to the Quotation stage, which converts with
+  // the FX rate reported upward; showing them here only invites reconciling two
+  // versions of the same number.
   const money = useMemo(
-    () => createMoney("USD", pricedVariant.commercial.fxRate),
+    () => createMoney("INR", pricedVariant.commercial.fxRate),
     [pricedVariant.commercial.fxRate],
   );
 

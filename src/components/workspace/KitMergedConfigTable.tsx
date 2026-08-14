@@ -25,10 +25,11 @@
  */
 
 import { useMemo, useState } from "react";
-import { Check, ChevronDown, Plus } from "lucide-react";
+import { Check, ChevronDown, Package, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
-import type { KitItem } from "@/lib/podsStore";
+import type { KitItem, Pod } from "@/lib/podsStore";
+import { fabricRequirementsFor, metres, tierLabel } from "@/lib/fabricRequirement";
 import type { ArticleCosting } from "@/components/workspace/ArticleCostingWorkspace";
 import { ComponentLibraryModal } from "@/components/workspace/ComponentLibraryModal";
 import type { CostLine, LineKind, LineSection, OptionGroup } from "@/lib/costLines";
@@ -109,10 +110,76 @@ function mergeSections(
   });
 }
 
+/* ------------------------------------------------------------------ *
+ * Fabric requirement — the metres behind the Raw Material rows
+ * ------------------------------------------------------------------ */
+
+/** One cloth, said per member and then per set. */
+type KitFabric = {
+  masterId: string;
+  name: string;
+  /** metres this member commits: per-piece consumption × that member's MOQ */
+  byMember: Record<string, { perPiece: number; moq: number; metres: number }>;
+  /** what the SET commits across all its members */
+  setMetres: number;
+  /** the POD-wide total that actually earns the tier */
+  podMetres: number;
+  tierText: string;
+  rate: number;
+  costInr: number;
+};
+
+/**
+ * The cloth belongs with the rows that consume it.
+ *
+ * A placemat and a runner cut from one greige are one purchase, so the metres
+ * are summed across every member BEFORE a rate is read — rate follows quantity,
+ * never the other way round. The tier itself is earned POD-wide (the pass
+ * already sums every article), and this view simply states the share this set
+ * is responsible for.
+ */
+function kitFabrics(pod: Pod, members: KitItem[]): KitFabric[] {
+  const memberIds = new Set(members.map((m) => m.id));
+  return fabricRequirementsFor(pod)
+    .map((r) => {
+      const uses = r.uses.filter((u) => memberIds.has(u.articleId));
+      const byMember: KitFabric["byMember"] = {};
+      for (const u of uses) {
+        // One member can cut the same cloth in two components — that is one
+        // fabric decision bought twice, so the metres add rather than split.
+        const at = byMember[u.articleId] ?? { perPiece: 0, moq: u.moq, metres: 0 };
+        at.perPiece += u.perPiece;
+        at.metres += u.metres;
+        byMember[u.articleId] = at;
+      }
+      const setMetres = uses.reduce((t, u) => t + u.metres, 0);
+      return {
+        masterId: r.masterId,
+        name: r.name,
+        byMember,
+        setMetres: Math.round(setMetres),
+        podMetres: r.metres,
+        tierText: tierLabel(r.tier),
+        rate: r.tier.rate,
+        costInr: Math.round(setMetres * r.tier.rate),
+        used: uses.length > 0,
+      };
+    })
+    .filter((r) => r.used);
+}
+
 /* ------------------------------------------------------------------ */
 
 const inr2 = (n: number) =>
   `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
+/**
+ * Whole rupees, for order-level money.
+ *
+ * Everything on this table is ₹: configuration is the internal costing stage
+ * and dollars only appear once a quotation is being written.
+ */
+const inrWhole = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 
 const HEAD = "px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-400";
 const CELL = "px-3 py-2 align-top text-[12px]";
@@ -121,16 +188,23 @@ const CELL = "px-3 py-2 align-top text-[12px]";
 type AddFlow = { section: LineKind; memberIds: string[] };
 
 export function KitMergedConfigTable({
+  pod,
   members,
   costed,
   onFocusLine,
+  onOpenMember,
 }: {
+  /** the POD this kit sits in — fabric tiers are earned across all of it */
+  pod: Pod;
   members: KitItem[];
   costed: Record<string, ArticleCosting>;
   /** open the member's full sheet with this line's component selected */
   onFocusLine: (memberId: string, componentId: string) => void;
+  /** open the member's sheet with nothing in particular selected */
+  onOpenMember?: (memberId: string) => void;
 }) {
   const sections = useMemo(() => mergeSections(members, costed), [members, costed]);
+  const fabrics = useMemo(() => kitFabrics(pod, members), [pod, members]);
 
   /**
    * The add flow is two decisions — WHICH articles, then WHICH master — and it
@@ -200,12 +274,65 @@ export function KitMergedConfigTable({
           <thead>
             <tr className="border-b border-hairline">
               <th className={cn(HEAD, "sticky left-0 z-10 w-[240px] bg-surface")}>Variable</th>
-              {members.map((m) => (
-                <th key={m.id} className={cn(HEAD, "min-w-[220px]")}>
-                  {m.name}
-                  {m.qty > 1 && <span className="ml-1 normal-case tracking-normal">×{m.qty}</span>}
-                </th>
-              ))}
+              {/* The member's identity lives in its own column header rather
+                  than in a card row above the table: a thumbnail that sits
+                  anywhere else has to be matched to a column by eye, and the
+                  wider the set the more often that matching goes wrong. Here
+                  the picture, the size, the MOQ and the ₹/pc are aligned with
+                  the numbers they belong to by construction. */}
+              {members.map((m) => {
+                const c = costed[m.id];
+                const firstComponentId = c?.sections.flatMap((s) => s.lines)[0]?.componentId;
+                return (
+                  <th key={m.id} className="min-w-[220px] px-3 py-2.5 align-bottom">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        onOpenMember
+                          ? onOpenMember(m.id)
+                          : firstComponentId && onFocusLine(m.id, firstComponentId)
+                      }
+                      title={`Open ${m.name}'s full costing sheet`}
+                      className="flex w-full items-center gap-2.5 rounded-md p-0.5 text-left transition-colors hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                    >
+                      {m.image ? (
+                        <img
+                          src={m.image}
+                          alt=""
+                          className="h-9 w-9 shrink-0 rounded border border-hairline object-cover"
+                        />
+                      ) : (
+                        <Package className="h-5 w-5 shrink-0 text-ink-400" aria-hidden />
+                      )}
+                      <span className="min-w-0">
+                        <span className="block truncate text-[12.5px] font-semibold text-ink-900">
+                          {m.name}
+                          {m.qty > 1 && (
+                            <span className="ml-1 text-[10.5px] font-normal tabular-nums text-ink-500">
+                              ×{m.qty}
+                            </span>
+                          )}
+                        </span>
+                        <span className="block truncate text-[10.5px] font-normal normal-case tracking-normal text-ink-500">
+                          {[m.size, m.moq && `MOQ ${m.moq}`].filter(Boolean).join(" · ") || "—"}
+                        </span>
+                        <span className="block text-[11px] font-normal normal-case tabular-nums tracking-normal text-ink-700">
+                          {c ? (
+                            <>
+                              <strong className="font-semibold text-ink-900">
+                                {inr2(c.rollup.directCost)}
+                              </strong>{" "}
+                              / pc
+                            </>
+                          ) : (
+                            <span className="text-ink-400">not costed yet</span>
+                          )}
+                        </span>
+                      </span>
+                    </button>
+                  </th>
+                );
+              })}
             </tr>
           </thead>
           <tbody>
@@ -215,6 +342,7 @@ export function KitMergedConfigTable({
                 section={section}
                 members={members}
                 costed={costed}
+                fabrics={section.id === "material" ? fabrics : []}
                 onFocusLine={onFocusLine}
                 flow={flow?.section === section.id ? flow : null}
                 onStartAdd={() =>
@@ -287,6 +415,7 @@ function SectionRows({
   section,
   members,
   costed,
+  fabrics,
   onFocusLine,
   flow,
   onStartAdd,
@@ -297,6 +426,8 @@ function SectionRows({
   section: MergedSection;
   members: KitItem[];
   costed: Record<string, ArticleCosting>;
+  /** the cloths this section's rows consume — Raw Material only, empty elsewhere */
+  fabrics: KitFabric[];
   onFocusLine: (memberId: string, componentId: string) => void;
   /** the in-progress add, when it belongs to THIS section */
   flow: AddFlow | null;
@@ -391,8 +522,90 @@ function SectionRows({
           </tr>
         );
       })}
+
+      {/* The cloth sits under the rows that consume it, not in a panel of its
+          own further down the page: the metres are what the fabric decisions
+          above actually commit to, and the tier is the consequence. Rate
+          follows quantity, never the other way round — so the set's metres are
+          stated first and the rate is read off them. */}
+      {fabrics.map((f) => (
+        <tr key={`fabric:${f.masterId}`} className="border-b border-hairline bg-brand-50/40">
+          <td className={cn(CELL, "sticky left-0 z-10 bg-surface")}>
+            <span className="block font-medium text-ink-900">{f.name}</span>
+            <span className="block text-[10.5px] text-ink-500">Fabric requirement</span>
+          </td>
+          {members.map((m) => {
+            const use = f.byMember[m.id];
+            return (
+              <td key={m.id} className={cn(CELL, "tabular-nums text-ink-700")}>
+                {use ? (
+                  <>
+                    {use.perPiece.toFixed(2)} m/pc × {use.moq.toLocaleString("en-IN")} ={" "}
+                    <span className="font-medium text-ink-900">{metres(use.metres)}</span>
+                  </>
+                ) : (
+                  <span className="text-ink-400">—</span>
+                )}
+              </td>
+            );
+          })}
+        </tr>
+      ))}
+      {fabrics.map((f) => (
+        <tr key={`fabric-total:${f.masterId}`} className="border-b border-hairline bg-brand-50/40">
+          <td className={cn(CELL, "sticky left-0 z-10 bg-surface text-[11px] text-ink-500")}>
+            {f.name} — set total
+          </td>
+          <td
+            className={cn(CELL, "tabular-nums text-[11.5px] text-ink-700")}
+            colSpan={members.length}
+          >
+            <span className="font-semibold text-ink-900">{metres(f.setMetres)}</span> for the set ·{" "}
+            {f.tierText} reached at {metres(f.podMetres)} across the POD · ₹{f.rate}/m ·{" "}
+            <span className="font-semibold text-ink-900">{inrWhole(f.costInr)}</span> fabric cost
+          </td>
+        </tr>
+      ))}
+
+      {/* A section that cannot be added up is a list, not a costing. The
+          subtotal carries the section header's own tint so it reads as the
+          band's closing statement rather than one more editable line. */}
+      <tr className="border-b border-hairline bg-surface-alt/60">
+        <td className={cn(CELL, "sticky left-0 z-10 bg-surface-alt font-semibold text-ink-800")}>
+          {section.label} total
+        </td>
+        {members.map((m) => (
+          <td key={m.id} className={cn(CELL, "tabular-nums font-semibold text-ink-800")}>
+            {inr2(sectionTotalFor(section, m.id))} <span className="font-normal">/ pc</span>
+          </td>
+        ))}
+      </tr>
+      <tr className="border-b border-hairline bg-surface-alt/60">
+        <td className={cn(CELL, "sticky left-0 z-10 bg-surface-alt text-[11px] text-ink-500")}>
+          per set
+        </td>
+        <td
+          className={cn(CELL, "tabular-nums text-[11.5px] font-semibold text-ink-800")}
+          colSpan={members.length}
+        >
+          {inr2(
+            members.reduce(
+              (t, m) => t + sectionTotalFor(section, m.id) * (m.qty > 0 ? m.qty : 1),
+              0,
+            ),
+          )}
+          <span className="ml-1.5 text-[11px] font-normal text-ink-500">
+            = Σ member × qty per set
+          </span>
+        </td>
+      </tr>
     </>
   );
+}
+
+/** A member's spend inside one section — the rows are already its own lines. */
+function sectionTotalFor(section: MergedSection, memberId: string) {
+  return section.rows.reduce((t, r) => t + (r.cells[memberId]?.cost ?? 0), 0);
 }
 
 /**

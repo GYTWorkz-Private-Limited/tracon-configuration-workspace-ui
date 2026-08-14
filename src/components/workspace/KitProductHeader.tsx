@@ -1,25 +1,23 @@
 /**
- * The kit's single navigation surface — a row of product cards, not a tab strip.
+ * The kit's identity band: what this set is, and what it costs right now.
  *
- * Tabs said "pick ONE article to look at"; the cards say "here is the whole
- * set". Each card carries the member's live per-piece cost so the kit's shape
- * is readable without opening anything, and the running SET total sits pinned
- * at the right — exactly where a single article's direct-cost figure would sit,
- * because for a kit the set IS the unit being costed.
+ * Member identity used to live here as a row of product cards, but the cards
+ * never lined up with the merged table's columns underneath them — two
+ * different geometries describing the same members. Member identity now sits
+ * in the merged table's own column headers, where the alignment is structural,
+ * and this band keeps only what belongs to the SET: its name, the way back to
+ * the merged view, the running set direct cost, and the output strip.
  *
- * Clicking a card opens that member's full sheet; "Merged view" returns to the
- * variable-by-variable table. There is no side-by-side arrangement any more:
- * the merged table already puts every member on one screen, so a second
- * comparison mode was two answers to a question the default view had settled.
+ * Every figure here is ₹. Configuration is costed in the working currency;
+ * dollars belong to the quotation stage.
  */
 
-import { Boxes, Package, Rows3 } from "lucide-react";
+import { Boxes, Rows3 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import type { Article, KitItem } from "@/lib/podsStore";
 import type { ArticleCosting } from "@/components/workspace/ArticleCostingWorkspace";
 import { inrShort } from "@/lib/fabricRequirement";
-import { createMoney } from "@/lib/money";
 
 /** Which arrangement of the kit is on screen. */
 export type KitView = "merged" | `member:${string}`;
@@ -44,8 +42,6 @@ export function KitProductHeader({
   view: KitView;
   onView: (view: KitView) => void;
 }) {
-  const openMemberId = memberOf(view);
-
   // The set total is honest arithmetic over what has actually been costed —
   // a member without a report contributes nothing rather than a guess, and
   // the label says so while any card still reads "not costed yet".
@@ -55,7 +51,6 @@ export function KitProductHeader({
     (t, m) => t + costed[m.id].rollup.directCost * (m.qty > 0 ? m.qty : 1),
     0,
   );
-  const fxRate = costedMembers.length ? costed[costedMembers[0].id].fxRate : 0;
 
   return (
     <div className="shrink-0 border-b border-hairline bg-surface">
@@ -85,67 +80,7 @@ export function KitProductHeader({
         </div>
       </div>
 
-      <div className="flex items-stretch gap-2 overflow-x-auto px-6 py-2.5 lg:px-8">
-        {members.map((m) => {
-          const c = costed[m.id];
-          const open = m.id === openMemberId;
-          return (
-            <button
-              key={m.id}
-              type="button"
-              onClick={() => onView(memberView(m.id))}
-              aria-pressed={open}
-              title={`Open ${m.name}'s full costing sheet`}
-              className={cn(
-                "flex shrink-0 items-center gap-2.5 rounded-lg border px-3 py-2 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-                open
-                  ? "border-brand-700 bg-brand-50"
-                  : "border-hairline bg-surface hover:bg-surface-alt",
-              )}
-            >
-              {m.image ? (
-                <img
-                  src={m.image}
-                  alt=""
-                  className="h-9 w-9 shrink-0 rounded border border-hairline object-cover"
-                />
-              ) : (
-                <Package className="h-5 w-5 shrink-0 text-ink-400" aria-hidden />
-              )}
-              <span className="min-w-0">
-                <span
-                  className={cn(
-                    "block whitespace-nowrap text-[12.5px]",
-                    open ? "font-semibold text-brand-700" : "font-medium text-ink-900",
-                  )}
-                >
-                  {m.name}
-                  {m.qty > 1 && (
-                    <span className="ml-1 text-[10.5px] font-normal tabular-nums text-ink-500">
-                      ×{m.qty}
-                    </span>
-                  )}
-                </span>
-                <span className="block whitespace-nowrap text-[10.5px] text-ink-500">
-                  {[m.size, m.moq && `MOQ ${m.moq}`].filter(Boolean).join(" · ") || "—"}
-                </span>
-                <span className="block whitespace-nowrap text-[11px] tabular-nums text-ink-700">
-                  {c ? (
-                    <>
-                      <strong className="font-semibold text-ink-900">
-                        {inr2(c.rollup.directCost)}
-                      </strong>{" "}
-                      / pc
-                    </>
-                  ) : (
-                    <span className="text-ink-400">not costed yet</span>
-                  )}
-                </span>
-              </span>
-            </button>
-          );
-        })}
-
+      <div className="flex items-stretch px-6 py-2.5 lg:px-8">
         {/* The set total takes the seat a single article's direct cost would
             occupy: right-aligned, always in view, moving live as any sheet
             changes underneath it. */}
@@ -158,10 +93,7 @@ export function KitProductHeader({
               <span className="text-[14px] font-semibold tabular-nums text-ink-900">
                 {inr2(setInr)} <span className="text-[11px] font-normal text-ink-500">/ set</span>
               </span>
-              <span className="text-[10.5px] tabular-nums text-ink-500">
-                {fxRate > 0 && `$${(setInr / fxRate).toFixed(2)} / set`}
-                {!allCosted && " · partial"}
-              </span>
+              {!allCosted && <span className="text-[10.5px] text-ink-500">partial</span>}
             </>
           ) : (
             <span className="text-[12px] text-ink-400">not costed yet</span>
@@ -180,14 +112,13 @@ const moqNumber = (text: string | undefined) => Number((text ?? "").replace(/[^\
 /**
  * What the SET is worth, live.
  *
- * The cards below say what each piece costs; this says what the deal is —
+ * The merged table says what each piece costs; this says what the deal is —
  * quantity, margin and the order value that follows from them. Every figure is
  * read straight off the members' reported costings (each already carries its
  * own selling price and FX), so there is exactly one costing engine in the app
  * and this strip can never disagree with the sheets it sums.
  *
- * Money follows the house convention: ₹ is the working currency, $ trails it
- * for the buyer-facing figure.
+ * ₹ only: the buyer-facing dollar figure is the quotation stage's job.
  */
 function KitOutputStrip({
   kit,
@@ -204,8 +135,6 @@ function KitOutputStrip({
   if (priced.length === 0) return null;
 
   const partial = priced.length !== members.length;
-  const fxRate = priced[0].c.fxRate;
-  const usd = createMoney("USD", fxRate);
 
   // Weighted by pieces per set: a set with two placemats carries two of their
   // costs and two of their prices, so both sides of the margin scale together.
@@ -239,14 +168,14 @@ function KitOutputStrip({
       <Output
         label="Set margin"
         value={`${marginPct.toFixed(1)}%`}
-        note={`${inrShort(marginInr)} · ${usd(marginInr)} / set`}
+        note={`${inrShort(marginInr)} / set`}
       />
-      <Output label="Set selling value" value={inrShort(sellInr)} note={`${usd(sellInr)} / set`} />
+      <Output label="Set selling value" value={inrShort(sellInr)} note="per set" />
       {/* The number the room actually argues about, so it gets the emphasis. */}
       <Output
         label="Potential order value"
         value={inrShort(sellInr * sets)}
-        note={`${usd(sellInr * sets, 0)} at ${sets.toLocaleString("en-IN")} sets`}
+        note={`at ${sets.toLocaleString("en-IN")} sets`}
         strong
       />
       {partial && (

@@ -6,20 +6,21 @@
  * tabs made the user cost each decision N times from memory, so the kit is now
  * ONE merged workspace:
  *
- *   [ Placemat card ] [ Runner card ]            Kit direct cost ₹848 / set
+ *   kit identity band                            Kit direct cost ₹848 / set
  *   ─ merged table: one row per variable, one column per member ─
  *
- * The header's product cards are the only navigation. The default view is the
- * merged variable-by-variable table; a card (or any table cell) opens that
- * member's full sheet; "Compare side by side" mounts every sheet in a grid.
+ * The merged table carries member identity in its own column headers, so it is
+ * also the navigation: a column header (or any cell) opens that member's full
+ * sheet, and "Merged view" in the band comes back.
  *
  * Every member's sheet stays mounted through all of it. That is deliberate:
- * the merged table and the Kit Summary render from the roll-ups those sheets
- * report, and unmounting one would throw away its scenarios, variants and
- * options the moment you looked elsewhere.
+ * the merged table renders from the roll-ups those sheets report, and
+ * unmounting one would throw away its scenarios, variants and options the
+ * moment you looked elsewhere.
  */
 
 import { useCallback, useState } from "react";
+import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
 import type { Article, Pod } from "@/lib/podsStore";
@@ -34,18 +35,23 @@ import {
   type KitView,
 } from "@/components/workspace/KitProductHeader";
 import { KitMergedConfigTable } from "@/components/workspace/KitMergedConfigTable";
-import { KitSummary } from "@/components/workspace/KitSummary";
-import { fabricRequirementsFor, metres, tierLabel } from "@/lib/fabricRequirement";
+import { CopilotPanel } from "@/components/configuration/CopilotPanel";
+import { inrShort } from "@/lib/fabricRequirement";
 
 export function KitCostingWorkspace({
   pod,
   kit,
   stepper,
+  copilotOpen = false,
+  onCopilotOpenChange,
 }: {
   pod: Pod;
   kit: Article;
   /** the workflow band — rendered once, above the header */
   stepper?: React.ReactNode;
+  /** driven by the page header's AI Copilot button */
+  copilotOpen?: boolean;
+  onCopilotOpenChange?: (open: boolean) => void;
 }) {
   const members = kit.kitItems ?? [];
   const [view, setView] = useState<KitView>("merged");
@@ -86,6 +92,25 @@ export function KitCostingWorkspace({
   }
 
   const openMemberId = memberOf(view);
+
+  const setCopilotOpen = (open: boolean) => onCopilotOpenChange?.(open);
+
+  // There is exactly one copilot on screen: with a member's sheet open the
+  // header's toggle is forwarded to THAT sheet (which knows its own variant),
+  // and the kit-level panel below only exists in the merged view.
+  const setInr = members.reduce(
+    (t, m) => t + (costed[m.id]?.rollup.directCost ?? 0) * Math.max(1, m.qty),
+    0,
+  );
+  const memberNames = members.map((m) => m.name).join(" + ");
+  const kitContext = [
+    kit.name,
+    // Kits are often named after their members; saying it twice reads as noise.
+    kit.name.includes(memberNames) ? null : memberNames,
+    `${inrShort(setInr)} / set direct`,
+  ]
+    .filter(Boolean)
+    .join(" · ");
 
   // The merged view is a DOCUMENT: a long table, then the fabric requirement,
   // then the summary — read top to bottom, so it scrolls with the page. A
@@ -128,6 +153,7 @@ export function KitCostingWorkspace({
                   currency: kit.currency,
                 }}
                 onCosted={report}
+                {...(shown ? { copilotOpen, onCopilotOpenChange: setCopilotOpen } : {})}
                 focusSignal={
                   focus?.memberId === m.id
                     ? { componentId: focus.componentId, nonce: focus.nonce }
@@ -139,73 +165,32 @@ export function KitCostingWorkspace({
         })}
 
         {view === "merged" && (
-          <div className="bg-canvas pb-8">
-            <div className="mx-4 mt-4">
-              <KitMergedConfigTable members={members} costed={costed} onFocusLine={focusLine} />
+          <div className="flex bg-canvas pb-24">
+            <div className="min-w-0 flex-1">
+              <div className="mx-4 mt-4">
+                <KitMergedConfigTable
+                  pod={pod}
+                  members={members}
+                  costed={costed}
+                  onFocusLine={focusLine}
+                  onOpenMember={(id) => setView(memberView(id))}
+                />
+              </div>
             </div>
-            {/* Fabric FIRST, then the rate: for a set cut from common cloth
-                the metres must be summed across every member before any rate
-                is chosen — pick the rate per article and the team is guessing
-                which MOQ band the mill will actually quote. */}
-            <KitFabricRequirement pod={pod} kit={kit} />
-            <KitSummary kit={kit} members={members} costed={costed} />
+            {copilotOpen && (
+              /* The merged view scrolls with the page, so the panel sticks to
+                 the viewport instead of scrolling off with the table. */
+              <div className="sticky top-0 h-screen w-[360px] shrink-0 self-start">
+                <CopilotPanel
+                  context={kitContext}
+                  onClose={() => setCopilotOpen(false)}
+                  onApply={() => toast("Open an article's sheet to apply this")}
+                />
+              </div>
+            )}
           </div>
         )}
       </div>
     </div>
-  );
-}
-
-/**
- * Stage one of the kit's material cost: the combined metres.
- *
- * The POD-wide requirement pass already sums consumption × MOQ per fabric;
- * here it is filtered to this kit's member articles so the summary states,
- * per cloth, the total the SET commits to — and only then the tier that
- * total buys. The ordering is the point: rate follows quantity, never the
- * other way round.
- */
-function KitFabricRequirement({ pod, kit }: { pod: Pod; kit: Article }) {
-  const memberIds = new Set((kit.kitItems ?? []).map((m) => m.id));
-  const reqs = fabricRequirementsFor(pod)
-    .map((r) => {
-      const uses = r.uses.filter((u) => memberIds.has(u.articleId));
-      const metresForKit = uses.reduce((t, u) => t + u.metres, 0);
-      return { ...r, uses, metresForKit: Math.round(metresForKit) };
-    })
-    .filter((r) => r.uses.length > 0);
-  if (reqs.length === 0) return null;
-
-  return (
-    <section className="mx-4 mt-4 overflow-hidden rounded-xl border border-hairline bg-surface">
-      <header className="flex flex-wrap items-baseline gap-x-2 border-b border-hairline bg-surface-alt/60 px-4 py-2.5">
-        <h3 className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-ink-700">
-          Kit fabric requirement
-        </h3>
-        <p className="text-[11.5px] text-ink-500">
-          Total metres across every member first — the tier and rate follow from the total.
-        </p>
-      </header>
-      <ul className="divide-y divide-hairline">
-        {reqs.map((r) => (
-          <li
-            key={r.masterId}
-            className="flex flex-wrap items-baseline gap-x-3 gap-y-1 px-4 py-2.5"
-          >
-            <span className="text-[12.5px] font-medium text-ink-900">{r.name}</span>
-            <span className="text-[11.5px] text-ink-500">
-              {r.uses
-                .map((u) => `${u.componentName} (${u.articleName}) ${metres(u.metres)}`)
-                .join(" + ")}
-            </span>
-            <span className="ml-auto whitespace-nowrap text-[12px] tabular-nums text-ink-700">
-              set total {metres(r.metresForKit)} · POD total {metres(r.metres)} →{" "}
-              {tierLabel(r.tier)}{" "}
-              <strong className="font-semibold text-ink-900">₹{r.tier.rate}/m</strong>
-            </span>
-          </li>
-        ))}
-      </ul>
-    </section>
   );
 }

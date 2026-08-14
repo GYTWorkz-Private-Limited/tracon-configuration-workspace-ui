@@ -37,7 +37,7 @@ import { addKit, addLibraryArticles, usePod } from "@/lib/podsStore";
 import { rollupVariant } from "@/lib/costingModel";
 import { applyParameters, commercialOutput } from "@/lib/pricingVariants";
 import { resolveCostingModel } from "@/lib/costingModels";
-import { estimateKitDirectUsd, seedVariantFor } from "@/lib/articleCosting";
+import { estimateKitDirectInr, seedVariantFor } from "@/lib/articleCosting";
 
 export const Route = createFileRoute("/config/$podId/$articleId")({
   validateSearch: (s: Record<string, unknown>) => ({
@@ -61,6 +61,9 @@ export const Route = createFileRoute("/config/$podId/$articleId")({
   }),
   component: ConfigurationWorkspacePage,
 });
+
+const inr2 = (n: number) =>
+  `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
 function ConfigurationWorkspacePage() {
   const { podId, articleId } = Route.useParams();
@@ -144,17 +147,22 @@ function ConfigurationWorkspacePage() {
   );
 
   return (
-    <div className="flex h-screen w-full flex-col bg-canvas">
+    /* The tab bar is docked to the viewport bottom; the padding keeps the
+       last rows of any sheet clear of it. */
+    <div className="flex h-screen w-full flex-col bg-canvas pb-[52px]">
       <ProductHeader
         pod={pod}
         article={article}
         mounted={mounted}
+        /* ₹ throughout the configuration stage — the dollar figure is the
+           quotation's, and two currencies on one screen invited the room to
+           argue about FX instead of cost. */
         totalCost={
           isKit
-            ? `USD $${estimateKitDirectUsd(article.kitItems).toFixed(2)} / set`
+            ? `${inr2(estimateKitDirectInr(article.kitItems))} / set`
             : costing
-              ? `USD $${(costing.rollup.directCost / costing.fxRate).toFixed(2)} / pc`
-              : "USD —"
+              ? `${inr2(costing.rollup.directCost)} / pc`
+              : "₹ —"
         }
         backTo={
           <Link
@@ -209,7 +217,13 @@ function ConfigurationWorkspacePage() {
 
       {isKit ? (
         /* ---- a kit: a tab per member article, plus the consolidation ---- */
-        <KitCostingWorkspace pod={pod} kit={article} stepper={stepper} />
+        <KitCostingWorkspace
+          pod={pod}
+          kit={article}
+          stepper={stepper}
+          copilotOpen={copilotOpen}
+          onCopilotOpenChange={setCopilotOpen}
+        />
       ) : (
         /* ---- a single product: the sheet, unchanged ---- */
         <>
@@ -245,7 +259,6 @@ function ConfigurationWorkspacePage() {
         articles={sheets}
         activeId={article.id}
         sel={sel}
-        fixed={false}
         stage="Configuration"
         actions={
           <>
