@@ -14,10 +14,11 @@
  * once, for the whole quotation, because one quotation is sent as one number.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeft,
+  ChevronDown,
   FileText,
   History,
   Layers,
@@ -52,6 +53,10 @@ import { inrShort } from "@/lib/fabricRequirement";
 import { requestRecost } from "@/lib/recostingStore";
 import { toast } from "sonner";
 import { QuoteItemCard } from "./QuoteItemCard";
+import { WorkingSheet } from "./WorkingSheet";
+import { QuotationRiskBanner } from "./QuotationRiskBanner";
+import { VersionInputCompare } from "./VersionInputCompare";
+import { recordSnapshot, snapshotFromViews } from "@/lib/masterSnapshot";
 import { ConfigLegend } from "./ConfigChips";
 import { ArticleSelectionModal } from "./ArticleSelectionModal";
 import { QuotationPreview } from "./QuotationPreview";
@@ -73,6 +78,9 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
   const [focus, setFocus] = useState<string>("all");
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const [requoteOpen, setRequoteOpen] = useState(false);
+  // The detail cards default to open: the working sheet is a new entry point,
+  // not a curtain over what users already rely on seeing.
+  const [detailsOpen, setDetailsOpen] = useState(true);
 
   const items = useMemo(() => quotation?.items ?? [], [quotation]);
   const views: ViewedItem[] = useMemo(
@@ -80,6 +88,16 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
     [quotation, items, selections],
   );
   const totals = totalsOf(views);
+
+  /* ---- masters this pricing referenced, date-stamped ----
+     Recorded every time the quotation is read, so the snapshot always names
+     the rates the figures on screen were actually built from. The risk banner
+     compares these against the (simulated) refreshed masters. */
+  useEffect(() => {
+    if (quotation && views.length > 0) {
+      recordSnapshot(quotation.id, snapshotFromViews(views));
+    }
+  }, [quotation, views]);
 
   if (!quotation || !pod) {
     return (
@@ -114,6 +132,19 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
     if (next.has(id)) next.delete(id);
     else next.add(id);
     setPicked(next);
+  };
+
+  /**
+   * A working-sheet row is an index entry; opening it must defeat both things
+   * that could be hiding the card — the details collapse and a focus pill —
+   * before the scroll, or the jump lands on nothing.
+   */
+  const openCard = (id: string) => {
+    setDetailsOpen(true);
+    if (activeFocus !== "all") setFocus("all");
+    requestAnimationFrame(() => {
+      document.getElementById(`card-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+    });
   };
 
   return (
@@ -292,6 +323,19 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
             />
           )}
 
+          {/* Summary first, the way the Excel working sheet opens — the cards
+              below are the drill-down, not the entry point. */}
+          {items.length > 0 && (
+            <>
+              {/* Input-cost drift first: a quotation whose masters have moved
+                  is not safe to send, and that must be visible before the
+                  numbers. */}
+              <QuotationRiskBanner quotationId={quotation.id} />
+              <VersionInputCompare quotationId={quotation.id} requoteOfId={quotation.requoteOf} />
+              <WorkingSheet views={views} quotationId={quotation.id} onOpen={openCard} />
+            </>
+          )}
+
           <ConfigLegend className="mb-3" />
 
           {items.length === 0 ? (
@@ -311,23 +355,48 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
               </button>
             </div>
           ) : (
-            <div className="space-y-5">
-              {items.map((item, i) =>
-                activeFocus === "all" || activeFocus === item.id ? (
-                  <QuoteItemCard
-                    key={item.id}
-                    podId={quotation.podId}
-                    quotationId={quotation.id}
-                    item={item}
-                    index={i}
-                    readOnly={locked}
-                    siblings={items}
-                    // One quotation, one summary — at the end, over everything.
-                    showSummary={false}
-                  />
-                ) : null,
+            <section aria-label="Article details">
+              <button
+                type="button"
+                onClick={() => setDetailsOpen((o) => !o)}
+                aria-expanded={detailsOpen}
+                className="mb-3 flex w-full items-center gap-2 rounded-md px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                <ChevronDown
+                  aria-hidden
+                  className={cn(
+                    "h-4 w-4 text-ink-500 transition-transform",
+                    !detailsOpen && "-rotate-90",
+                  )}
+                />
+                <h2 className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-ink-700">
+                  Article details
+                </h2>
+                <span className="text-[11.5px] tabular-nums text-ink-500">{items.length}</span>
+              </button>
+              {detailsOpen && (
+                <div className="space-y-5">
+                  {items.map((item, i) =>
+                    activeFocus === "all" || activeFocus === item.id ? (
+                      // The id is the working sheet's jump target; scroll-mt
+                      // keeps the landed-on card clear of the viewport edge.
+                      <div key={item.id} id={`card-${item.id}`} className="scroll-mt-4">
+                        <QuoteItemCard
+                          podId={quotation.podId}
+                          quotationId={quotation.id}
+                          item={item}
+                          index={i}
+                          readOnly={locked}
+                          siblings={items}
+                          // One quotation, one summary — at the end, over everything.
+                          showSummary={false}
+                        />
+                      </div>
+                    ) : null,
+                  )}
+                </div>
               )}
-            </div>
+            </section>
           )}
 
           {items.length > 0 && <CombinedSummary views={views} quotationId={quotation.id} />}

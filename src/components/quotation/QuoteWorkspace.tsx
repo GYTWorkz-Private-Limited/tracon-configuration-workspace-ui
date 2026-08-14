@@ -40,6 +40,8 @@ import {
   workingVersionNo,
 } from "@/lib/quotationHistory";
 import { totalsOf, viewQuote, type ViewedItem } from "@/lib/quotationView";
+import { recordSnapshot, snapshotFromViews } from "@/lib/masterSnapshot";
+import { QuotationRiskBanner } from "./QuotationRiskBanner";
 import { QuoteItemCard } from "./QuoteItemCard";
 import { ConfigLegend } from "./ConfigChips";
 import { QuotationEntryFlow } from "./QuotationEntryFlow";
@@ -81,6 +83,14 @@ export function QuoteWorkspace({
     [quotation, items, selections],
   );
   const totals = totalsOf(views);
+
+  /* Same date-stamped master record the multi-article workspace keeps: a
+     single-article quotation is no less exposed to a moving cotton market. */
+  useEffect(() => {
+    if (quotation && views.length > 0) {
+      recordSnapshot(quotation.id, snapshotFromViews(views));
+    }
+  }, [quotation, views]);
 
   if (!pod || !article) {
     return (
@@ -208,6 +218,7 @@ export function QuoteWorkspace({
         />
 
         <div className="mx-auto max-w-[1320px] px-6 py-4 lg:px-8">
+          {quotation && <QuotationRiskBanner quotationId={quotation.id} />}
           {sent && (
             <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-hairline bg-surface-alt px-4 py-3">
               <Lock className="h-4 w-4 shrink-0 text-ink-500" aria-hidden />

@@ -24,6 +24,8 @@ import {
   useRecostRequest,
   useRecostRequests,
 } from "@/lib/recostingStore";
+import { TemplateMappingCard } from "@/components/templates/TemplateMappingCard";
+import { PodComparisonTable } from "@/components/pods/PodComparisonTable";
 import { AddKitDrawer } from "@/components/articles/AddKitDrawer";
 import {
   usePod,
@@ -273,6 +275,14 @@ function PodDetail() {
           </div>
         </div>
 
+        {/* Template before costing: the agreed sequence is POD → Template →
+            Style → Costing, because the template carries the cost structure
+            (overheads, testing %, special packs) that stops components being
+            missed downstream. */}
+        <div className="mt-5">
+          <TemplateMappingCard podId={pod.id} buyer={pod.buyer} />
+        </div>
+
         <div className="mt-6 rounded-lg border border-hairline bg-surface">
           <div className="flex items-center justify-between rounded-t-lg border-b border-hairline bg-surface-alt px-4 py-2.5">
             <div className="flex items-center gap-2 text-[12px]">
@@ -396,6 +406,12 @@ function PodDetail() {
           <span className="mx-1 font-medium text-ink-900">Not Started</span> and can be costed
           later.
         </div>
+      </div>
+
+      {/* The pre-release sanity check: every article and set of this POD in
+            one grid, margin building up SKU by SKU. */}
+      <div className="mt-6">
+        <PodComparisonTable podId={pod.id} />
       </div>
 
       <ArticleLibraryDrawer

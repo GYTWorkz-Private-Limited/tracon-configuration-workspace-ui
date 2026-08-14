@@ -2,6 +2,8 @@ import { ChevronRight, Check } from "lucide-react";
 import { Link } from "@tanstack/react-router";
 import { cn } from "@/lib/utils";
 import { useRequestedChanges } from "@/lib/requestedChangesStore";
+import { useTemplateFor } from "@/lib/costTemplates";
+import { styleById, useStyleFor } from "@/lib/styleMaster";
 
 // The costing workflow, end to end. Quotation is a STEP in this band, not a
 // module beside it — reaching it must never feel like leaving the workspace.
@@ -29,6 +31,30 @@ export type WorkflowStep = (typeof WORKFLOW_STEPS)[number] | "Configuration" | "
 const normalize = (s: WorkflowStep): (typeof WORKFLOW_STEPS)[number] =>
   s === "Configuration" || s === "Costing" ? "Configuration & Costing" : s;
 
+/**
+ * A pre-costing decision in the master flow. Done = a quiet check; not done =
+ * a visible gap, which is the whole point — the chip is the reminder that a
+ * step was skipped.
+ */
+function PrestepChip({ label, done, title }: { label: string; done: boolean; title?: string }) {
+  return (
+    <span
+      title={title ?? (done ? undefined : `${label} not mapped yet`)}
+      className={cn(
+        "flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-medium",
+        done ? "text-brand-700" : "text-ink-400",
+      )}
+    >
+      {done ? (
+        <Check className="h-3 w-3" strokeWidth={3} />
+      ) : (
+        <span className="h-2 w-2 rounded-full border border-ink-300" aria-hidden />
+      )}
+      {label}
+    </span>
+  );
+}
+
 /** Full-width workflow band shown directly below the page header on every step. */
 export function WorkflowStepper({
   active,
@@ -51,6 +77,10 @@ export function WorkflowStepper({
 }) {
   const activeIndex = WORKFLOW_STEPS.indexOf(normalize(active));
   const rc = useRequestedChanges();
+  const template = useTemplateFor(podId ?? "");
+  const styleChoice = useStyleFor(podId ?? "", articleId ?? "");
+  const styleName =
+    styleChoice && styleChoice !== "manual" ? styleById(styleChoice)?.name : undefined;
   // Commercial sign-off progress now rides on the Quotation step (1/4 → 4/4).
   const approvalBadge = rc.submitted ? `${rc.approvalDone ? 4 : 1}/4` : null;
 
@@ -74,6 +104,28 @@ export function WorkflowStepper({
   return (
     <div className="border-b border-hairline bg-surface">
       <div className="flex items-center gap-1 overflow-x-auto px-6 py-2.5 lg:px-8">
+        {/* The master flow ahead of the module steps: POD → Template → Style
+            are decisions made BEFORE costing starts, and showing them here is
+            what stops a user skipping one — the band answers "where am I in
+            the whole journey", not just "where am I in this module". */}
+        {podId && (
+          <>
+            <Link
+              to="/pods/$id"
+              params={{ id: podId }}
+              className="flex items-center gap-1.5 whitespace-nowrap rounded-full px-2.5 py-1 text-[11.5px] font-medium text-brand-700 hover:bg-brand-50"
+            >
+              <Check className="h-3 w-3" strokeWidth={3} /> POD
+            </Link>
+            <PrestepChip label="Template" done={Boolean(template)} title={template?.name} />
+            <PrestepChip
+              label="Style"
+              done={Boolean(styleChoice)}
+              title={styleChoice === "manual" ? "Manual build" : styleName}
+            />
+            <span className="mx-1 h-4 w-px shrink-0 bg-hairline" aria-hidden />
+          </>
+        )}
         {WORKFLOW_STEPS.map((step, i) => {
           const isActive = i === activeIndex;
           const isDone = i < activeIndex;

@@ -31,7 +31,10 @@ import { AddOptionModal, type OptionEntry } from "@/components/configuration/Add
 import { CostBreakdownStrip, type CostCategory } from "@/components/workspace/CostBreakdownStrip";
 import { CategoryComposition } from "@/components/workspace/CategoryComposition";
 import { CostLineTable } from "@/components/workspace/CostLineTable";
+import { toast } from "sonner";
 import { usePod } from "@/lib/podsStore";
+import { applyStyleParts } from "@/lib/styleMaster";
+import { StylePickerCard } from "@/components/workspace/StylePickerCard";
 import {
   fabricRateOverrides,
   fabricRequirementsFor,
@@ -515,6 +518,53 @@ export function ArticleCostingWorkspace({
   };
 
   /** A library entry becomes a real costed object — never a placeholder row. */
+  /**
+   * A chosen style seeds the sheet's parts in one act — the fabric for each
+   * part is still picked from the library afterwards, which is exactly the
+   * division of labour the style master exists for: the style knows the
+   * geometry, the buyer's order decides the cloth.
+   */
+  const applyStyle = (styleId: string) => {
+    const parts = applyStyleParts(styleId);
+    if (parts.length === 0) return;
+    const have = new Set(activeVariant.components.map((c) => c.name));
+    const fresh = parts.filter((p) => !have.has(p.name));
+    if (fresh.length === 0) {
+      toast(`Every part of this style is already on the sheet`);
+      return;
+    }
+    // Seeded parts start as self-fabric — inherited from the sheet's face
+    // cloth — because a part with no material has no cost line and would be
+    // invisible on the sheet it was just added to. Re-pointing a part at its
+    // own cloth is then one click on its row, which is the style master's
+    // division of labour: the style knows the geometry, the buyer's order
+    // decides the cloth.
+    const face = activeVariant.components.find((c) => c.material?.relationship === "master");
+    updateActive({
+      ...activeVariant,
+      components: [
+        ...activeVariant.components,
+        ...fresh.map((p, i) => ({
+          ...p,
+          productId: activeVariant.productId,
+          sequence: activeVariant.components.length + 1 + i,
+          material: face?.material
+            ? {
+                id: `MAT-${p.id}`,
+                relationship: "same-as-component" as const,
+                sameAsComponentId: face.id,
+                rate: face.material.rate,
+                rateUnit: face.material.rateUnit,
+              }
+            : undefined,
+        })),
+      ],
+    });
+    toast.success(
+      `${fresh.length} part${fresh.length === 1 ? "" : "s"} seeded from the style — pick each part's own fabric on its row`,
+    );
+  };
+
   const addFromLibrary = (item: LibraryItem, targetComponentId: string | null, slot: string) => {
     const stamp = Date.now();
 
@@ -703,10 +753,37 @@ export function ArticleCostingWorkspace({
       />
 
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-canvas p-4">
-        {/* The page header above already states the identity and the running
-            total; repeating them in a card here made the page read as two
-            stacked headers. The sheet starts at the variants, the way the
-            Costing Report starts at its tabs. */}
+        {/* Style before parts: the agreed sequence is Template → Style →
+            Costing. A style seeds the part list; without one the sheet is
+            built manually from the library, and the card says which of the
+            two is in play. */}
+        <div className="mb-2 shrink-0">
+          <StylePickerCard podId={podId} articleId={identity.articleId} onApply={applyStyle} />
+        </div>
+
+        {/* One line of identity, not a second header: on a standalone article
+            it restates the essentials next to the sheet they govern, and for a
+            kit member it is the ONLY place that member's own size, MOQ and
+            reference are stated — the page header above belongs to the kit. */}
+        <div className="mb-2 flex shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1 px-1 text-[11.5px] text-ink-500">
+          {identity.image && (
+            <img
+              src={identity.image}
+              alt=""
+              className="h-6 w-6 rounded border border-hairline object-cover"
+            />
+          )}
+          <span className="text-[12.5px] font-semibold text-ink-900">{product.name}</span>
+          <IdMeta label="Ref" value={`# ${product.articleNo}`} />
+          <IdMeta label="Size" value={product.size || "—"} />
+          <IdMeta label="MOQ" value={product.moq || "—"} />
+          <IdMeta label="Buyer" value={product.buyer} />
+          {product.colour && <IdMeta label="Colour" value={product.colour} />}
+          <span className="ml-auto tabular-nums text-ink-700">
+            Direct cost{" "}
+            <strong className="font-semibold text-ink-900">{money(rollup.directCost)}</strong> / pc
+          </span>
+        </div>
         {/* scenarios — whole costing positions */}
         <div className="shrink-0 overflow-hidden rounded-xl border border-hairline bg-surface">
           {/* Scenario navigation lives in the variant tabs below — a second
@@ -855,4 +932,12 @@ function toBuildRef(v: Variant): BuildRef {
       option: p.options.find((o) => o.id === p.selectedId) ?? p.options[0],
     })),
   };
+}
+
+function IdMeta({ label, value }: { label: string; value: string }) {
+  return (
+    <span>
+      {label} <span className="font-medium text-ink-900">{value}</span>
+    </span>
+  );
 }
