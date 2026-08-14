@@ -80,7 +80,13 @@ export function KitProductHeader({
         </div>
       </div>
 
-      <div className="flex items-stretch px-6 py-2.5 lg:px-8">
+      {/* The output figures sit on the SAME line as the kit's direct cost
+          rather than in a band of their own: they are one statement of where
+          the set stands, and splitting them across two rows left a stripe of
+          empty white between the identity and the numbers it belongs to. */}
+      <div className="flex flex-wrap items-center gap-x-8 gap-y-3 px-6 pb-3 pt-1 lg:px-8">
+        <KitOutputStrip kit={kit} members={members} costed={costed} />
+
         {/* The set total takes the seat a single article's direct cost would
             occupy: right-aligned, always in view, moving live as any sheet
             changes underneath it. */}
@@ -100,8 +106,6 @@ export function KitProductHeader({
           )}
         </div>
       </div>
-
-      <KitOutputStrip kit={kit} members={members} costed={costed} />
     </div>
   );
 }
@@ -154,8 +158,10 @@ function KitOutputStrip({
   const sets = declaredSets || coveredSets;
   const short = declaredSets > 0 && coveredSets < declaredSets;
 
+  // No band of its own any more — it shares the header's white row, so it
+  // brings no border, no tint and no padding of its own.
   return (
-    <div className="flex flex-wrap items-stretch gap-x-6 gap-y-2 border-t border-hairline bg-surface-alt/40 px-6 py-2 lg:px-8">
+    <div className="flex flex-wrap items-center gap-x-8 gap-y-2">
       <Output
         label="Set MOQ"
         value={`${sets.toLocaleString("en-IN")} sets`}

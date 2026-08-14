@@ -24,14 +24,20 @@
  * behind it because there is only one sheet.
  */
 
-import { useMemo, useState } from "react";
+import { Fragment, useMemo, useState } from "react";
 import { Check, ChevronDown, Package, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { KitItem, Pod } from "@/lib/podsStore";
-import { fabricRequirementsFor, metres, tierLabel } from "@/lib/fabricRequirement";
+import {
+  fabricRequirementsFor,
+  metres,
+  tierLabel,
+  type FabricRequirement,
+} from "@/lib/fabricRequirement";
 import type { ArticleCosting } from "@/components/workspace/ArticleCostingWorkspace";
 import { ComponentLibraryModal } from "@/components/workspace/ComponentLibraryModal";
+import { FabricDetailModal } from "@/components/workspace/FabricDetailModal";
 import type { CostLine, LineKind, LineSection, OptionGroup } from "@/lib/costLines";
 import type { LibraryItem } from "@/lib/library";
 
@@ -118,15 +124,29 @@ function mergeSections(
 type KitFabric = {
   masterId: string;
   name: string;
-  /** metres this member commits: per-piece consumption × that member's MOQ */
-  byMember: Record<string, { perPiece: number; moq: number; metres: number }>;
+  /**
+   * What this member commits to this cloth: metres per piece, the pieces its
+   * MOQ buys, the metres that multiplies out to, and the money — per piece and
+   * for the whole run. Cost per piece is the figure that reaches the sheet's
+   * material lines; the run total is the figure that reaches a purchase order.
+   */
+  byMember: Record<
+    string,
+    { perPiece: number; moq: number; metres: number; costPerPc: number; costInr: number }
+  >;
   /** what the SET commits across all its members */
   setMetres: number;
+  /** metres in one set — the per-set consumption, before MOQ */
+  setPerSet: number;
+  /** cost of this cloth in a single set */
+  setCostPerSet: number;
   /** the POD-wide total that actually earns the tier */
   podMetres: number;
   tierText: string;
   rate: number;
   costInr: number;
+  /** the full requirement, so the breakdown modal can be opened on it */
+  req: FabricRequirement;
 };
 
 /**
@@ -140,6 +160,7 @@ type KitFabric = {
  */
 function kitFabrics(pod: Pod, members: KitItem[]): KitFabric[] {
   const memberIds = new Set(members.map((m) => m.id));
+  const qtyOf = new Map(members.map((m) => [m.id, Math.max(1, m.qty)]));
   return fabricRequirementsFor(pod)
     .map((r) => {
       const uses = r.uses.filter((u) => memberIds.has(u.articleId));
@@ -147,21 +168,43 @@ function kitFabrics(pod: Pod, members: KitItem[]): KitFabric[] {
       for (const u of uses) {
         // One member can cut the same cloth in two components — that is one
         // fabric decision bought twice, so the metres add rather than split.
-        const at = byMember[u.articleId] ?? { perPiece: 0, moq: u.moq, metres: 0 };
+        const at = byMember[u.articleId] ?? {
+          perPiece: 0,
+          moq: u.moq,
+          metres: 0,
+          costPerPc: 0,
+          costInr: 0,
+        };
         at.perPiece += u.perPiece;
         at.metres += u.metres;
         byMember[u.articleId] = at;
       }
+      // Money is read off the TIER rate, not the master's base rate: the tier
+      // is what these metres actually buy, so pricing a piece at anything else
+      // would quote a rate the mill never offered.
+      for (const at of Object.values(byMember)) {
+        at.costPerPc = at.perPiece * r.tier.rate;
+        at.costInr = at.metres * r.tier.rate;
+      }
       const setMetres = uses.reduce((t, u) => t + u.metres, 0);
+      // One set's worth: each member's per-piece consumption times how many of
+      // that member go into a set.
+      const setPerSet = Object.entries(byMember).reduce(
+        (t, [id, at]) => t + at.perPiece * (qtyOf.get(id) ?? 1),
+        0,
+      );
       return {
         masterId: r.masterId,
         name: r.name,
         byMember,
         setMetres: Math.round(setMetres),
+        setPerSet,
+        setCostPerSet: setPerSet * r.tier.rate,
         podMetres: r.metres,
         tierText: tierLabel(r.tier),
         rate: r.tier.rate,
         costInr: Math.round(setMetres * r.tier.rate),
+        req: r,
         used: uses.length > 0,
       };
     })
@@ -214,6 +257,8 @@ export function KitMergedConfigTable({
    */
   const [flow, setFlow] = useState<AddFlow | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
+  /** which cloth's full breakdown is open, if any */
+  const [fabricDetail, setFabricDetail] = useState<FabricRequirement | null>(null);
 
   if (sections.length === 0) return null;
 
@@ -343,6 +388,7 @@ export function KitMergedConfigTable({
                 members={members}
                 costed={costed}
                 fabrics={section.id === "material" ? fabrics : []}
+                onFabricDetail={setFabricDetail}
                 onFocusLine={onFocusLine}
                 flow={flow?.section === section.id ? flow : null}
                 onStartAdd={() =>
@@ -400,6 +446,10 @@ export function KitMergedConfigTable({
         </table>
       </div>
 
+      {fabricDetail && (
+        <FabricDetailModal req={fabricDetail} onClose={() => setFabricDetail(null)} />
+      )}
+
       <ComponentLibraryModal
         open={libraryOpen && Boolean(flow)}
         onClose={() => setLibraryOpen(false)}
@@ -416,6 +466,7 @@ function SectionRows({
   members,
   costed,
   fabrics,
+  onFabricDetail,
   onFocusLine,
   flow,
   onStartAdd,
@@ -428,6 +479,7 @@ function SectionRows({
   costed: Record<string, ArticleCosting>;
   /** the cloths this section's rows consume — Raw Material only, empty elsewhere */
   fabrics: KitFabric[];
+  onFabricDetail: (req: FabricRequirement) => void;
   onFocusLine: (memberId: string, componentId: string) => void;
   /** the in-progress add, when it belongs to THIS section */
   flow: AddFlow | null;
@@ -529,43 +581,84 @@ function SectionRows({
           follows quantity, never the other way round — so the set's metres are
           stated first and the rate is read off them. */}
       {fabrics.map((f) => (
-        <tr key={`fabric:${f.masterId}`} className="border-b border-hairline bg-brand-50/40">
-          <td className={cn(CELL, "sticky left-0 z-10 bg-surface")}>
-            <span className="block font-medium text-ink-900">{f.name}</span>
-            <span className="block text-[10.5px] text-ink-500">Fabric requirement</span>
-          </td>
-          {members.map((m) => {
-            const use = f.byMember[m.id];
-            return (
-              <td key={m.id} className={cn(CELL, "tabular-nums text-ink-700")}>
-                {use ? (
-                  <>
-                    {use.perPiece.toFixed(2)} m/pc × {use.moq.toLocaleString("en-IN")} ={" "}
-                    <span className="font-medium text-ink-900">{metres(use.metres)}</span>
-                  </>
-                ) : (
-                  <span className="text-ink-400">—</span>
-                )}
-              </td>
-            );
-          })}
-        </tr>
+        <Fragment key={`fabric:${f.masterId}`}>
+          <tr className="border-b border-hairline bg-brand-50/40">
+            <td className={cn(CELL, "sticky left-0 z-10 bg-surface")}>
+              <span className="block font-medium text-ink-900">{f.name}</span>
+              <span className="block text-[10.5px] text-ink-500">
+                Fabric requirement · ₹{f.rate}/m
+              </span>
+              {/* The same breakdown the single-article sheet opens, so a set and
+                  an article answer "where did this rate come from" the same way. */}
+              <button
+                type="button"
+                onClick={() => onFabricDetail(f.req)}
+                aria-label={`View ${f.name} requirement details`}
+                className="mt-1 text-[11px] font-medium text-brand-700 underline-offset-2 transition-colors hover:text-brand-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                View Details
+              </button>
+            </td>
+            {members.map((m) => {
+              const use = f.byMember[m.id];
+              return (
+                <td key={m.id} className={cn(CELL, "tabular-nums text-ink-700")}>
+                  {use ? (
+                    <>
+                      <span className="block">
+                        {use.perPiece.toFixed(2)} m/pc × {use.moq.toLocaleString("en-IN")} pcs ={" "}
+                        <span className="font-medium text-ink-900">{metres(use.metres)}</span>
+                      </span>
+                      {/* Per piece is what the sheet's material lines charge;
+                          the run total is what the purchase order will say. */}
+                      <span className="mt-0.5 block text-[11px] text-ink-500">
+                        <span className="font-medium text-ink-700">{inr2(use.costPerPc)}</span> / pc
+                        · <span className="font-medium text-ink-700">{inrWhole(use.costInr)}</span>{" "}
+                        at this MOQ
+                      </span>
+                    </>
+                  ) : (
+                    <span className="text-ink-400">—</span>
+                  )}
+                </td>
+              );
+            })}
+          </tr>
+          <tr className="border-b border-hairline bg-brand-50/40">
+            <td className={cn(CELL, "sticky left-0 z-10 bg-surface text-[11px] text-ink-500")}>
+              {f.name} — set total
+            </td>
+            <td
+              className={cn(CELL, "tabular-nums text-[11.5px] text-ink-700")}
+              colSpan={members.length}
+            >
+              <span className="font-semibold text-ink-900">{f.setPerSet.toFixed(2)} m</span> per set
+              at <span className="font-semibold text-ink-900">{inr2(f.setCostPerSet)}</span> ·{" "}
+              <span className="font-semibold text-ink-900">{metres(f.setMetres)}</span> for the full
+              run · {f.tierText} reached at {metres(f.podMetres)} across the POD · ₹{f.rate}/m ·{" "}
+              <span className="font-semibold text-ink-900">{inrWhole(f.costInr)}</span> fabric cost
+            </td>
+          </tr>
+        </Fragment>
       ))}
-      {fabrics.map((f) => (
-        <tr key={`fabric-total:${f.masterId}`} className="border-b border-hairline bg-brand-50/40">
-          <td className={cn(CELL, "sticky left-0 z-10 bg-surface text-[11px] text-ink-500")}>
-            {f.name} — set total
+      {/* Several cloths are several purchases; the section still commits to one
+          number, so it is stated rather than left to be added up by eye. */}
+      {fabrics.length > 1 && (
+        <tr className="border-b border-hairline bg-brand-50/60">
+          <td className={cn(CELL, "sticky left-0 z-10 bg-surface font-semibold text-ink-900")}>
+            All fabrics — total
           </td>
           <td
-            className={cn(CELL, "tabular-nums text-[11.5px] text-ink-700")}
+            className={cn(CELL, "tabular-nums text-[11.5px] font-semibold text-ink-900")}
             colSpan={members.length}
           >
-            <span className="font-semibold text-ink-900">{metres(f.setMetres)}</span> for the set ·{" "}
-            {f.tierText} reached at {metres(f.podMetres)} across the POD · ₹{f.rate}/m ·{" "}
-            <span className="font-semibold text-ink-900">{inrWhole(f.costInr)}</span> fabric cost
+            {fabrics.reduce((t, f) => t + f.setPerSet, 0).toFixed(2)} m per set at{" "}
+            {inr2(fabrics.reduce((t, f) => t + f.setCostPerSet, 0))} ·{" "}
+            {metres(fabrics.reduce((t, f) => t + f.setMetres, 0))} for the full run ·{" "}
+            {inrWhole(fabrics.reduce((t, f) => t + f.costInr, 0))} fabric cost
           </td>
         </tr>
-      ))}
+      )}
 
       {/* A section that cannot be added up is a list, not a costing. The
           subtotal carries the section header's own tint so it reads as the
