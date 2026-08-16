@@ -23,6 +23,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { PodArticleTabs } from "@/components/layout/ArticleTabsBar";
+import { QuotationEntryFlow } from "@/components/quotation/QuotationEntryFlow";
 import { markSubmittedForApproval, useRequestedChanges } from "@/lib/requestedChangesStore";
 
 import { WorkflowStepper } from "@/components/layout/WorkflowStepper";
@@ -174,6 +175,9 @@ export function ApprovalWorkspace({
   const [reviewStatusRaw, setReviewStatus] = useState<Record<string, ReviewStatus>>({});
   const [changes, setChanges] = useState<ChangeRequest[]>([]);
   const [rail, setRail] = useState<null | "copilot" | "changes" | "revisions">(null);
+  // Generating a quotation asks the same two questions here as it does on the
+  // Costing Report — one product, or several.
+  const [quotationOpen, setQuotationOpen] = useState(false);
 
   const allAssigned = TEAMS.every((t) => (assign[t.id]?.length ?? 0) > 0);
   const openChanges = changes.filter((c) => c.status === "Open");
@@ -280,22 +284,21 @@ export function ApprovalWorkspace({
                   "inline-flex items-center gap-1.5 rounded-md px-3.5 py-2 text-[13px] font-medium text-white transition-colors",
                   allAssigned ? "bg-brand-700 hover:bg-brand-800" : "cursor-not-allowed bg-ink-200",
                 )}
-                title={allAssigned ? "Ready for quotation" : "Assign at least one reviewer per team"}
+                title={
+                  allAssigned ? "Ready for quotation" : "Assign at least one reviewer per team"
+                }
               >
                 <Send className="h-4 w-4" /> Ready for quotation
               </button>
             ) : rc.approvalDone && navPodId && navArticleId ? (
-              <Link
-                to="/quotation/$podId/$articleId"
-                params={{ podId: navPodId, articleId: navArticleId }}
-                search={{ sel: undefined }}
-
-                replace
+              <button
+                type="button"
+                onClick={() => setQuotationOpen(true)}
                 className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white transition-colors hover:bg-brand-800"
                 title="Generate quotation"
               >
                 <FileText className="h-4 w-4" /> Generate Quotation
-              </Link>
+              </button>
             ) : null}
           </ActionGroup>
         </div>
@@ -453,7 +456,10 @@ export function ApprovalWorkspace({
                 <div className="grid gap-4 sm:grid-cols-3 lg:grid-cols-4">
                   <Final label="Product cost" value={inr(sheet.nums.materialTotal)} />
                   <Final label="Grand total" value={inr(sheet.grandTotal)} />
-                  <Final label="FX rate" value={`₹${active.variant.inputs.fxRate.toFixed(2)} / $`} />
+                  <Final
+                    label="FX rate"
+                    value={`₹${active.variant.inputs.fxRate.toFixed(2)} / $`}
+                  />
                   <Final label="Margin %" value={`${(sheet.marginPct * 100).toFixed(1)}%`} />
                 </div>
                 <div className="mt-3 flex flex-wrap items-center gap-3 border-t border-white/10 pt-2.5 text-[11.5px] text-white/70">
@@ -570,6 +576,16 @@ export function ApprovalWorkspace({
         activeId={activeArticleId ?? navArticleId}
         stage="Approval"
       />
+
+      {navPodId && (
+        <QuotationEntryFlow
+          open={quotationOpen}
+          onClose={() => setQuotationOpen(false)}
+          podId={navPodId}
+          articleId={navArticleId}
+          articleName={productName}
+        />
+      )}
     </div>
   );
 }
@@ -857,16 +873,20 @@ function ChangesPanel({
       return {
         to: "/product/$podId/$articleId",
         params: { podId: navPodId, articleId: navArticleId },
+        search: { sel: undefined },
       } as const;
     if (stage === "Configuration")
       return {
         to: "/config/$podId/$articleId",
         params: { podId: navPodId, articleId: navArticleId },
+        search: { sel: undefined },
       } as const;
+    // Costing is the sheet on the configuration route; the Costing REPORT is
+    // the separate step above.
     return {
-      to: "/costing/$id",
-      params: { id: costingRef },
-      search: { podId: navPodId, articleId: navArticleId },
+      to: "/config/$podId/$articleId",
+      params: { podId: navPodId, articleId: navArticleId },
+      search: { sel: undefined },
     } as const;
   };
 

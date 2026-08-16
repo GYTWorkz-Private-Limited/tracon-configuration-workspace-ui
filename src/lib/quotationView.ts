@@ -21,6 +21,7 @@ import {
   type PricedLine,
 } from "./quotationPricing";
 import { buildsIn, scenariosIn, type State as SelectionState } from "./costingSelectionStore";
+import { podFabricRates } from "./fabricRequirement";
 import type { QuoteItem } from "./quoteDraftStore";
 
 export type ViewedProduct = {
@@ -43,6 +44,10 @@ export function viewQuote(
   items: QuoteItem[],
   selections: SelectionState,
 ): ViewedItem[] {
+  // The price break belongs to the POD's fabric order, not to any one line, so
+  // it is resolved once and every item is priced against the same rates.
+  const fabricRates = podFabricRates(podId);
+
   return items.map((item): ViewedItem => {
     if (item.kind === "kit") {
       const priced = priceKit(
@@ -54,12 +59,21 @@ export function viewQuote(
           rates: item.rates,
           targetMarginPct: m.line.targetMarginPct,
           moqOverride: m.line.moqOverride,
+          finalCostOverrideInr: m.line.finalCostOverrideInr,
+          sellingPriceOverrideUsd: m.line.sellingPriceOverrideUsd,
           unitsPerSet: m.unitsPerSet,
+          fabricRates,
           name: m.name,
           articleId: m.articleId,
           image: m.image,
         })),
-        { rates: item.rates, targetMarginPct: item.targetMarginPct, sets: item.sets },
+        {
+          rates: item.rates,
+          targetMarginPct: item.targetMarginPct,
+          sets: item.sets,
+          finalCostOverrideInr: item.finalCostOverrideInr,
+          sellingPriceOverrideUsd: item.sellingPriceOverrideUsd,
+        },
       );
       return { kind: "kit", item, priced };
     }
@@ -73,6 +87,9 @@ export function viewQuote(
       rates: item.rates,
       targetMarginPct: line.targetMarginPct ?? item.targetMarginPct,
       moqOverride: line.moqOverride,
+      finalCostOverrideInr: line.finalCostOverrideInr,
+      sellingPriceOverrideUsd: line.sellingPriceOverrideUsd,
+      fabricRates,
     });
     return { kind: "product", item, priced };
   });

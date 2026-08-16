@@ -10,6 +10,7 @@ export function DrawerShell({
   subtitle,
   width = "max-w-[1100px]",
   footer,
+  headerAction,
   children,
 }: {
   open: boolean;
@@ -18,6 +19,8 @@ export function DrawerShell({
   subtitle?: ReactNode;
   width?: string;
   footer?: ReactNode;
+  /** Control that belongs to the drawer as a whole, beside its title. */
+  headerAction?: ReactNode;
   children: ReactNode;
 }) {
   if (!open) return null;
@@ -30,10 +33,11 @@ export function DrawerShell({
         aria-modal="true"
       >
         <header className="flex items-start justify-between gap-4 border-b border-hairline px-5 py-4">
-          <div>
+          <div className="min-w-0">
             <h2 className="text-[15px] font-semibold tracking-tight text-ink-900">{title}</h2>
             {subtitle && <p className="mt-0.5 text-[12px] text-ink-500">{subtitle}</p>}
           </div>
+          {headerAction && <div className="ml-auto shrink-0">{headerAction}</div>}
           <button
             onClick={onClose}
             className="rounded p-1.5 text-ink-500 hover:bg-surface-alt hover:text-ink-900"
@@ -62,6 +66,8 @@ export function ConfidenceBadge({ value }: { value: number }) {
         ? "bg-amber-50 text-amber-700"
         : "bg-danger-50 text-danger-600";
   return (
-    <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums", tone)}>{pct}%</span>
+    <span className={cn("rounded-full px-1.5 py-0.5 text-[10px] font-medium tabular-nums", tone)}>
+      {pct}%
+    </span>
   );
 }

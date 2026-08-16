@@ -17,6 +17,25 @@ import { ArrowRight, Boxes, Check, Info, Lock, Package, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ARTICLE_STATUS_LABEL, type Article } from "@/lib/podsStore";
 import { NOT_READY_LABEL, READY_LABEL, isReadyIn, useReadiness } from "@/lib/quotationReadiness";
+import { RECOSTING_LABEL, recostRequestIn, useRecostRequests } from "@/lib/recostingStore";
+
+/**
+ * Articles and kits are two different decisions, so they are two different
+ * groups: quoting a kit prices a set as one line, quoting its members prices
+ * them separately, and a flat list invites doing both by accident.
+ */
+const SECTIONS = [
+  {
+    key: "product" as const,
+    heading: "Individual articles",
+    blurb: "Each one priced on its own line.",
+  },
+  {
+    key: "kit" as const,
+    heading: "Bundles / Kits",
+    blurb: "Costed and priced as one set.",
+  },
+];
 
 export function ArticleSelectionModal({
   open,
@@ -41,6 +60,7 @@ export function ArticleSelectionModal({
   preselect?: string[];
 }) {
   const readiness = useReadiness();
+  const recosts = useRecostRequests();
   const [picked, setPicked] = useState<Set<string>>(new Set());
   const closeRef = useRef<HTMLButtonElement>(null);
 
@@ -49,9 +69,10 @@ export function ArticleSelectionModal({
       articles.map((a) => {
         const ready = isReadyIn(readiness, podId, a.id);
         const quoted = alreadyQuotedIds?.has(a.id) ?? false;
-        return { article: a, ready, quoted, selectable: ready && !quoted };
+        const recost = recostRequestIn(recosts, podId, a.id);
+        return { article: a, ready, quoted, recost, selectable: ready && !quoted };
       }),
-    [articles, readiness, podId, alreadyQuotedIds],
+    [articles, readiness, recosts, podId, alreadyQuotedIds],
   );
 
   // Opening fresh must not resurrect a stale tick, and the article the user
@@ -80,8 +101,20 @@ export function ArticleSelectionModal({
     setPicked(next);
   };
 
+  /** Tick or clear a whole group at once — "quote the lot" is a real intent. */
+  const setAll = (group: typeof rows, on: boolean) => {
+    const next = new Set(picked);
+    for (const r of group) {
+      if (on) next.add(r.article.id);
+      else next.delete(r.article.id);
+    }
+    setPicked(next);
+  };
+
   const chosen = rows.filter((r) => picked.has(r.article.id));
-  const eligibleCount = rows.filter((r) => r.selectable).length;
+  const eligible = rows.filter((r) => r.selectable);
+  const eligibleCount = eligible.length;
+  const allOn = eligibleCount > 0 && eligible.every((r) => picked.has(r.article.id));
 
   return (
     <div
@@ -102,32 +135,87 @@ export function ArticleSelectionModal({
               Report can be quoted.
             </p>
           </div>
+          {eligibleCount > 1 && (
+            <button
+              type="button"
+              onClick={() => setAll(eligible, !allOn)}
+              className="ml-auto shrink-0 self-center rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              {allOn ? "Clear all" : `Select everything ready (${eligibleCount})`}
+            </button>
+          )}
           <button
             ref={closeRef}
             onClick={onClose}
             aria-label="Close"
-            className="ml-auto shrink-0 rounded-md p-1.5 text-ink-500 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            className="shrink-0 rounded-md p-1.5 text-ink-500 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
           >
             <X className="h-4 w-4" />
           </button>
         </header>
 
         <div className="min-h-0 flex-1 overflow-y-auto px-5 py-4">
+          {/* Said inline, before the choice — a second popup after Continue
+              would be the same fact delivered as a surprise. */}
+          {eligibleCount > 0 && eligibleCount < rows.length && (
+            <p className="mb-3 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3.5 py-2.5 text-[12px] text-amber-900">
+              <Info className="mt-0.5 h-3.5 w-3.5 shrink-0" aria-hidden />
+              <span>
+                {rows.length - eligibleCount} of {rows.length} article
+                {rows.length === 1 ? " is" : "s are"} not yet costed and cannot be selected.
+                Continue with the remaining {eligibleCount}, or cancel and finish their costing
+                first.
+              </span>
+            </p>
+          )}
           {rows.length === 0 ? (
             <p className="py-12 text-center text-[13px] text-ink-500">
               This POD has no articles yet.
             </p>
           ) : (
-            <ul className="space-y-2">
-              {rows.map((row) => (
-                <ArticleRow
-                  key={row.article.id}
-                  {...row}
-                  checked={picked.has(row.article.id)}
-                  onToggle={() => toggle(row.article.id)}
-                />
-              ))}
-            </ul>
+            <div className="space-y-5">
+              {SECTIONS.map(({ key, heading, blurb }) => {
+                const section = rows.filter((r) =>
+                  key === "kit" ? r.article.type === "kit" : r.article.type !== "kit",
+                );
+                if (section.length === 0) return null;
+                const eligible = section.filter((r) => r.selectable);
+                const allOn =
+                  eligible.length > 0 && eligible.every((r) => picked.has(r.article.id));
+
+                return (
+                  <section key={key}>
+                    <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+                      <h3 className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-ink-500">
+                        {heading}
+                      </h3>
+                      <p className="min-w-0 flex-1 text-[11.5px] text-ink-500">{blurb}</p>
+                      {eligible.length > 1 && (
+                        <button
+                          type="button"
+                          onClick={() => setAll(eligible, !allOn)}
+                          className="shrink-0 rounded-md border border-hairline bg-surface px-2.5 py-1 text-[11.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                        >
+                          {allOn
+                            ? `Clear ${heading.toLowerCase()}`
+                            : `Select all ${eligible.length}`}
+                        </button>
+                      )}
+                    </div>
+                    <ul className="mt-2 space-y-2">
+                      {section.map((row) => (
+                        <ArticleRow
+                          key={row.article.id}
+                          {...row}
+                          checked={picked.has(row.article.id)}
+                          onToggle={() => toggle(row.article.id)}
+                        />
+                      ))}
+                    </ul>
+                  </section>
+                );
+              })}
+            </div>
           )}
 
           {eligibleCount === 0 && rows.length > 0 && (
@@ -194,6 +282,7 @@ function ArticleRow({
   article,
   ready,
   quoted,
+  recost,
   selectable,
   checked,
   onToggle,
@@ -201,6 +290,8 @@ function ArticleRow({
   article: Article;
   ready: boolean;
   quoted: boolean;
+  /** a quotation is waiting on this article being re-costed */
+  recost?: { reason: string; quotationId: string };
   selectable: boolean;
   checked: boolean;
   onToggle: () => void;
@@ -291,8 +382,17 @@ function ArticleRow({
         )}
       </span>
 
-      <span className="shrink-0 self-start">
+      <span className="shrink-0 self-start text-right">
         <StatusPill ready={ready} quoted={quoted} />
+        {/* Not ready is a fact; WHY it is not ready is what the user needs. */}
+        {recost && (
+          <span
+            title={recost.reason}
+            className="mt-1 block max-w-[170px] truncate text-[10.5px] font-medium text-amber-900"
+          >
+            {RECOSTING_LABEL} · {recost.quotationId}
+          </span>
+        )}
       </span>
     </>
   );

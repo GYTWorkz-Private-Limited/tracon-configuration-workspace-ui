@@ -43,10 +43,13 @@ function linkFor(podId: string, a: TabArticle, stage: FlowStage, sel?: string) {
       params: { id: a.srfRef },
       search: { podId, articleId: a.id, report: true, approval: true },
     } as const;
+  // "Costing" is the costing sheet, which lives on the configuration route —
+  // the same screen the Configuration stage opens. The Costing REPORT is a
+  // separate step and keeps its own link above.
   return {
-    to: "/costing/$id",
-    params: { id: a.srfRef },
-    search: { podId, articleId: a.id },
+    to: "/config/$podId/$articleId",
+    params: { podId, articleId: a.id },
+    search: { sel },
   } as const;
 }
 
@@ -69,10 +72,12 @@ export function ArticleTabsBar({
   /** Stage of the screen rendering this bar — advances the demo flow. */
   stage?: FlowStage;
 }) {
-  const { reached } = useArticleFlow();
+  const { reached, stages } = useArticleFlow();
   const activeName = articles.find((a) => a.id === activeId)?.name ?? "";
+  // Only the article being looked at advances — visiting a Quotation screen
+  // says nothing about the other articles in the same workspace.
   useEffect(() => {
-    if (stage && activeName && !isPendingApproval(activeName)) recordStage(stage);
+    if (stage && activeName && !isPendingApproval(activeName)) recordStage(stage, activeName);
   }, [stage, activeName]);
   return (
     <div
@@ -85,7 +90,7 @@ export function ArticleTabsBar({
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
           {articles.map((a) => {
             const active = a.id === activeId;
-            const aStage = stageOf(a, reached);
+            const aStage = stageOf(a, reached, stages);
             return (
               <Link
                 key={a.id}

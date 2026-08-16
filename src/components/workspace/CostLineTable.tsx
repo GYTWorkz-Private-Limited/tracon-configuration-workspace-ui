@@ -8,11 +8,13 @@
 // Accessories → Packaging → Testing) with its own subtotal, so the sheet reads
 // the same way the roll-up is computed.
 
-import { useState } from "react";
-import { BookOpen, Check, ChevronDown, Plus, Settings2, Trash2 } from "lucide-react";
+import { Fragment, useState } from "react";
+import { BookOpen, Check, ChevronDown, Layers, Plus, Settings2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MoneyFormatter } from "@/lib/money";
 import type { CostLine, LineSection, OptionGroup } from "@/lib/costLines";
+import { fabricLine, inrShort, type FabricRequirement } from "@/lib/fabricRequirement";
+import { FabricDetailModal } from "./FabricDetailModal";
 
 type Props = {
   sections: LineSection[];
@@ -42,7 +44,86 @@ type Props = {
   compact?: boolean;
   /** the sheet is being read, not edited (e.g. a member article inside a set) */
   readOnly?: boolean;
+  /**
+   * The POD's fabric requirement, so each fabric can state its aggregated
+   * metres and the tier that bought it, under the rows that consume it.
+   */
+  fabricRollups?: FabricRequirement[];
 };
+
+/**
+ * Fabric rows regrouped so every component cut from one cloth sits together,
+ * with that cloth's order-level total closing the group.
+ *
+ * The sheet is per piece; the purchase is not. Without this the metre total
+ * that decided the rate would exist only in a report somewhere else, and the
+ * rate on these rows would look like it came from nowhere.
+ */
+function groupByFabric(
+  section: LineSection,
+  rollups: FabricRequirement[] | undefined,
+): { key: string; lines: CostLine[]; rollup?: FabricRequirement }[] {
+  if (section.id !== "material" || !rollups?.length) {
+    return [{ key: section.id, lines: section.lines }];
+  }
+
+  const blocks: { key: string; lines: CostLine[]; rollup?: FabricRequirement }[] = [];
+  const taken = new Set<string>();
+
+  for (const line of section.lines) {
+    const req = line.libraryId ? rollups.find((r) => r.masterId === line.libraryId) : undefined;
+    if (!req) continue;
+    if (taken.has(req.masterId)) continue;
+    taken.add(req.masterId);
+    blocks.push({
+      key: req.masterId,
+      lines: section.lines.filter((l) => l.libraryId === req.masterId),
+      rollup: req,
+    });
+  }
+
+  // Anything not cut from a tiered fabric keeps its place at the end rather
+  // than being dropped — a trim is still a raw material.
+  const rest = section.lines.filter((l) => !l.libraryId || !taken.has(l.libraryId));
+  if (rest.length) blocks.push({ key: `${section.id}-rest`, lines: rest });
+  return blocks;
+}
+
+function FabricRollupRow({
+  req,
+  cols,
+  onViewDetails,
+}: {
+  req: FabricRequirement;
+  cols: number;
+  onViewDetails: () => void;
+}) {
+  return (
+    <tr className="border-b border-hairline bg-surface-alt/50">
+      <td colSpan={cols - 2} className="px-5 py-1.5">
+        <span className="inline-flex items-baseline gap-x-2">
+          <Layers className="h-3 w-3 shrink-0 self-center text-ink-400" aria-hidden />
+          <span className="text-[11.5px] font-medium text-ink-700">{fabricLine(req)}</span>
+        </span>
+      </td>
+      {/* The two numbers a purchase is made of: how much cloth, and what it
+          costs. The per-metre rate is stated in the line itself. */}
+      <td className="px-3 py-1.5 text-right text-[11.5px] font-semibold tabular-nums text-ink-700">
+        {inrShort(req.costInr)}
+      </td>
+      <td className="px-3 pr-5 py-1.5 text-right">
+        <button
+          type="button"
+          onClick={onViewDetails}
+          aria-label={`View ${req.name} requirement details`}
+          className="whitespace-nowrap text-[11px] font-medium text-brand-700 underline-offset-2 transition-colors hover:text-brand-800 hover:underline focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+        >
+          View Details
+        </button>
+      </td>
+    </tr>
+  );
+}
 
 const HEAD =
   "px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-400 whitespace-nowrap";
@@ -62,8 +143,12 @@ export function CostLineTable({
   live,
   compact,
   readOnly,
+  fabricRollups,
 }: Props) {
   const [dense, setDense] = useState(false);
+  // The open fabric detail modal, if any — held here so one modal at the table
+  // root serves every rollup row instead of each row mounting its own dialog.
+  const [openFabric, setOpenFabric] = useState<FabricRequirement | null>(null);
   // + 1 for the row-actions column
   const cols = (compact ? 5 : 8) + 1;
   const populated = sections.filter((s) => s.lines.length > 0);
@@ -171,20 +256,31 @@ export function CostLineTable({
                   <td className="px-3 pr-5 py-1.5" />
                 </tr>
               )}
-              {section.lines.map((line) => (
-                <LineRow
-                  key={line.id}
-                  line={line}
-                  dense={dense}
-                  compact={compact}
-                  money={money}
-                  live={live}
-                  selected={selectedId === line.componentId}
-                  onSelect={() => onSelect(line.componentId)}
-                  onSelectOption={onSelectOption}
-                  onRemove={() => onRemove(line)}
-                  readOnly={readOnly}
-                />
+              {groupByFabric(section, fabricRollups).map((block) => (
+                <Fragment key={block.key}>
+                  {block.lines.map((line) => (
+                    <LineRow
+                      key={line.id}
+                      line={line}
+                      dense={dense}
+                      compact={compact}
+                      money={money}
+                      live={live}
+                      selected={selectedId === line.componentId}
+                      onSelect={() => onSelect(line.componentId)}
+                      onSelectOption={onSelectOption}
+                      onRemove={() => onRemove(line)}
+                      readOnly={readOnly}
+                    />
+                  ))}
+                  {block.rollup && (
+                    <FabricRollupRow
+                      req={block.rollup}
+                      cols={cols}
+                      onViewDetails={() => setOpenFabric(block.rollup!)}
+                    />
+                  )}
+                </Fragment>
               ))}
               {!readOnly && (
                 <tr className="border-b border-hairline">
@@ -234,6 +330,8 @@ export function CostLineTable({
           {money(total)}
         </span>
       </footer>
+
+      {openFabric && <FabricDetailModal req={openFabric} onClose={() => setOpenFabric(null)} />}
     </section>
   );
 }
@@ -351,10 +449,18 @@ function LineRow({
         )}
       </td>
 
-      {!compact && <td className={cn(cell, "text-right tabular-nums")}>{line.quantity}</td>}
-      {!compact && <td className={cn(cell, "text-right tabular-nums")}>{line.consumption}</td>}
+      {!compact && (
+        <td className={cn(cell, "whitespace-nowrap text-right tabular-nums")}>{line.quantity}</td>
+      )}
+      {!compact && (
+        <td className={cn(cell, "whitespace-nowrap text-right tabular-nums")}>
+          {line.consumption}
+        </td>
+      )}
       {!compact && <td className={cn(cell, "text-right tabular-nums")}>{line.wastage}</td>}
-      <td className={cn(cell, "text-right tabular-nums")}>{line.rate}</td>
+      {/* "82.00 / metre" is one fact — broken over three lines it stops
+          reading as a rate. */}
+      <td className={cn(cell, "whitespace-nowrap text-right tabular-nums")}>{line.rate}</td>
       <td className={cn("px-3 text-right align-middle", pad)}>
         <span
           className={cn(

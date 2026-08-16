@@ -29,12 +29,12 @@ const KIND_COLOR: Record<string, { dot: string; ring: string }> = {
   "input-setup": { dot: "bg-slate-400", ring: "ring-slate-100" },
   "fabric-per-m": { dot: "bg-teal-500", ring: "ring-teal-100" },
   "cost-per-pc": { dot: "bg-teal-500", ring: "ring-teal-100" },
-  "group": { dot: "bg-indigo-500", ring: "ring-indigo-100" },
-  "overhead": { dot: "bg-amber-500", ring: "ring-amber-100" },
-  "fx": { dot: "bg-amber-500", ring: "ring-amber-100" },
+  group: { dot: "bg-indigo-500", ring: "ring-indigo-100" },
+  overhead: { dot: "bg-amber-500", ring: "ring-amber-100" },
+  fx: { dot: "bg-amber-500", ring: "ring-amber-100" },
   "target-margin": { dot: "bg-amber-500", ring: "ring-amber-100" },
-  "total": { dot: "bg-ink-900", ring: "ring-ink-100" },
-  "quote": { dot: "bg-emerald-500", ring: "ring-emerald-100" },
+  total: { dot: "bg-ink-900", ring: "ring-ink-100" },
+  quote: { dot: "bg-emerald-500", ring: "ring-emerald-100" },
 };
 
 const EDGE_STROKE: Record<string, string> = {
@@ -77,7 +77,8 @@ export function CostGraph({
   const scrollRef = useRef<HTMLDivElement>(null);
   const highlightSet = useMemo(() => new Set(highlightedNodes ?? []), [highlightedNodes]);
 
-  const clampZoom = (z: number) => Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
+  const clampZoom = (z: number) =>
+    Math.min(ZOOM_MAX, Math.max(ZOOM_MIN, Math.round(z * 100) / 100));
 
   const isEdgeActive = (fromId: string, toId: string) =>
     !!hover && (hover === fromId || hover === toId);
@@ -152,7 +153,6 @@ export function CostGraph({
               transformOrigin: "top left",
             }}
           >
-
             {/* Column headers */}
             <div className="absolute inset-x-0 top-0" style={{ height: 32 }}>
               {[
@@ -221,7 +221,8 @@ export function CostGraph({
                     "absolute flex flex-col justify-center rounded-xl border border-hairline bg-white px-3 py-2 text-left shadow-sm transition-all",
                     "hover:-translate-y-0.5 hover:shadow-md ring-2 ring-transparent",
                     isHover && "ring-brand-200 border-brand-300",
-                    highlighted && "border-brand-400 shadow-[0_0_0_3px_rgba(16,185,129,0.15)] animate-pulse",
+                    highlighted &&
+                      "border-brand-400 shadow-[0_0_0_3px_rgba(16,185,129,0.15)] animate-pulse",
                     n.kind === "quote" && "border-emerald-300 bg-emerald-50",
                     n.kind === "total" && "border-ink-900 bg-ink-900 text-white",
                   )}
@@ -235,15 +236,31 @@ export function CostGraph({
                 >
                   <div className="flex items-center gap-1.5">
                     <span className={cn("h-1.5 w-1.5 rounded-full", color.dot)} />
-                    <span className={cn("text-[10.5px] font-medium uppercase tracking-[0.08em]", n.kind === "total" ? "text-white/70" : "text-ink-500")}>
+                    <span
+                      className={cn(
+                        "text-[10.5px] font-medium uppercase tracking-[0.08em]",
+                        n.kind === "total" ? "text-white/70" : "text-ink-500",
+                      )}
+                    >
                       {n.label}
                     </span>
                   </div>
-                  <div className={cn("mt-0.5 font-semibold tabular-nums", showBig ? "text-[19px]" : "text-[14.5px]", n.kind === "total" ? "text-white" : "text-ink-900")}>
+                  <div
+                    className={cn(
+                      "mt-0.5 font-semibold tabular-nums",
+                      showBig ? "text-[19px]" : "text-[14.5px]",
+                      n.kind === "total" ? "text-white" : "text-ink-900",
+                    )}
+                  >
                     {n.format(value)}
                   </div>
                   {n.sub && (
-                    <div className={cn("text-[10.5px]", n.kind === "total" ? "text-white/60" : "text-ink-400")}>
+                    <div
+                      className={cn(
+                        "text-[10.5px]",
+                        n.kind === "total" ? "text-white/60" : "text-ink-400",
+                      )}
+                    >
                       {n.sub}
                     </div>
                   )}
@@ -265,7 +282,9 @@ export function CostGraph({
         <LegendDot color="#6366F1" label="making path" />
         <LegendDot color="#F59E0B" label="overhead / FX / margin" />
         <LegendDot color="#10B981" label="output (quote)" />
-        <span className="ml-auto italic">dotted connectors · hover any node for math · zoom to explore</span>
+        <span className="ml-auto italic">
+          dotted connectors · hover any node for math · zoom to explore
+        </span>
       </div>
     </div>
   );

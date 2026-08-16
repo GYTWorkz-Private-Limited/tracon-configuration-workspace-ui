@@ -46,12 +46,7 @@ export function MasterLibraryPanel({ activeVariantKind, onApply, className }: Pr
     const filtered = MASTER_COMPONENTS.filter((m) => {
       if (m.tab !== tab) return false;
       if (!q) return true;
-      const hay = [
-        m.name,
-        m.meta ?? "",
-        m.price,
-        ...m.attributes.flatMap((a) => [a.key, a.value]),
-      ]
+      const hay = [m.name, m.meta ?? "", m.price, ...m.attributes.flatMap((a) => [a.key, a.value])]
         .join(" ")
         .toLowerCase();
       return hay.includes(q);
@@ -74,7 +69,12 @@ export function MasterLibraryPanel({ activeVariantKind, onApply, className }: Pr
   };
 
   return (
-    <section className={cn("flex min-h-[300px] flex-col overflow-hidden rounded-2xl border border-hairline bg-white", className)}>
+    <section
+      className={cn(
+        "flex min-h-[300px] flex-col overflow-hidden rounded-2xl border border-hairline bg-white",
+        className,
+      )}
+    >
       {/* Dark header */}
       <div className="flex items-center gap-2 bg-slate-800 px-3.5 py-2.5 text-white">
         <BookOpen className="h-4 w-4 text-amber-300" />
@@ -131,9 +131,7 @@ export function MasterLibraryPanel({ activeVariantKind, onApply, className }: Pr
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0 flex-1">
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[12.5px] font-semibold text-ink-900">
-                    {m.name}
-                  </span>
+                  <span className="text-[12.5px] font-semibold text-ink-900">{m.name}</span>
                   {m.tag && (
                     <span
                       className={cn(
@@ -145,9 +143,7 @@ export function MasterLibraryPanel({ activeVariantKind, onApply, className }: Pr
                     </span>
                   )}
                 </div>
-                {m.meta && (
-                  <div className="mt-0.5 text-[11px] text-ink-500">{m.meta}</div>
-                )}
+                {m.meta && <div className="mt-0.5 text-[11px] text-ink-500">{m.meta}</div>}
               </div>
               <div className="flex shrink-0 flex-col items-end gap-1">
                 <span className="whitespace-nowrap text-[12px] font-semibold text-emerald-700">
@@ -187,8 +183,8 @@ export function MasterLibraryPanel({ activeVariantKind, onApply, className }: Pr
       <div className="mx-3 mb-3 flex shrink-0 items-start gap-1.5 rounded-md border border-dashed border-amber-300 bg-amber-50/60 px-2.5 py-2 text-[11px] text-ink-700">
         <Settings className="mt-0.5 h-3 w-3 shrink-0 text-amber-600" />
         <span>
-          <span className="font-semibold">TECH NOTE:</span> Rates from Ready
-          Reckoner. Last updated 12 days ago · 3-month avg shown.
+          <span className="font-semibold">TECH NOTE:</span> Rates from Ready Reckoner. Last updated
+          12 days ago · 3-month avg shown.
         </span>
       </div>
     </section>

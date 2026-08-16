@@ -2,9 +2,20 @@ import { useSyncExternalStore } from "react";
 import { SRFS, IMG } from "./inquiries-data";
 import { EXCEL_ARTICLES, EXCEL_POD, ARTICLE_IMAGES } from "./excelArticles";
 
-export type PodStatus = "draft" | "in_progress" | "pending_approval" | "approved" | "completed";
+/**
+ * The order's lifecycle, exactly four states. Draft collapsed into
+ * In Progress (an order exists because work started) and Completed into
+ * Approved (approval IS the terminal state). Recosting is the send-back
+ * state — an approver returned it, or a requote pulled it back.
+ */
+export type PodStatus = "in_progress" | "pending_approval" | "approved" | "recosting";
+/**
+ * Same four lifecycle states as the POD, plus "not_started" — an article can
+ * sit on an order before anyone opens its costing, and that pre-lifecycle
+ * fact drives the intake affordances (Start costing vs Open).
+ */
 export type ArticleStatus =
-  "not_started" | "in_progress" | "pending_approval" | "approved" | "completed";
+  "not_started" | "in_progress" | "pending_approval" | "approved" | "recosting";
 
 export type ArticleType = "article" | "kit";
 
@@ -235,17 +246,68 @@ function seed(): Pod[] {
       buyerRef: "WE-AW26-HOME-11",
       buyer: "West Elm",
       preparedBy: "Priya S.",
-      status: "completed",
+      status: "approved",
       owner: "Priya S.",
       createdAt: now(),
       updatedAt: "4d ago",
-      articles: [mkArticle("SRF-1017", "completed"), mkArticle("SRF-1031", "approved")],
+      articles: [mkArticle("SRF-1017", "approved"), mkArticle("SRF-1031", "approved")],
     },
   ];
 }
 
 let pods: Pod[] = [];
 const listeners = new Set<() => void>();
+
+/** The minimum a stored pod must have for the app to be able to read it. */
+const POD_STATUS_MIGRATION: Record<string, PodStatus> = {
+  draft: "in_progress",
+  completed: "approved",
+};
+const ARTICLE_STATUS_MIGRATION: Record<string, ArticleStatus> = {
+  completed: "approved",
+};
+// Self-contained on purpose: this runs during module init, BEFORE the label
+// consts further down exist — reaching for them here throws and the catch
+// silently reseeds, wiping the user's stored pods.
+const POD_STATUSES = new Set<PodStatus>([
+  "in_progress",
+  "pending_approval",
+  "approved",
+  "recosting",
+]);
+const ARTICLE_STATUSES = new Set<ArticleStatus>([
+  "not_started",
+  "in_progress",
+  "pending_approval",
+  "approved",
+  "recosting",
+]);
+
+function migrateStatuses(p: Pod): Pod {
+  const status = POD_STATUS_MIGRATION[p.status as string] ?? p.status;
+  return {
+    ...p,
+    status: POD_STATUSES.has(status) ? status : "in_progress",
+    articles: p.articles.map((a) => {
+      const as = ARTICLE_STATUS_MIGRATION[a.status as string] ?? a.status;
+      return { ...a, status: ARTICLE_STATUSES.has(as) ? as : "in_progress" };
+    }),
+  };
+}
+
+function isPodList(value: unknown): value is Pod[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (p): p is Pod =>
+        Boolean(p) &&
+        typeof p === "object" &&
+        typeof (p as Pod).id === "string" &&
+        Array.isArray((p as Pod).articles) &&
+        (p as Pod).articles.every((a) => Boolean(a) && typeof a.id === "string"),
+    )
+  );
+}
 
 function loadInitial() {
   if (typeof window === "undefined") {
@@ -254,8 +316,16 @@ function loadInitial() {
   }
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
-    if (raw) {
-      pods = JSON.parse(raw);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    // Stored state outlives the code that wrote it. A record saved by an older
+    // build can be valid JSON and still be the wrong SHAPE, and trusting it
+    // takes the whole app down on load with nothing but an error boundary to
+    // show for it — so what comes back is checked, and anything unrecognisable
+    // is replaced by the seed rather than propagated.
+    if (isPodList(parsed)) {
+      // Stored state may predate the four-status model — old values are
+      // folded into their successors rather than crashing a Record lookup.
+      pods = parsed.map(migrateStatuses);
       return;
     }
   } catch {
@@ -343,17 +413,23 @@ function defaultArticles(): Article[] {
   }));
 }
 
-export function createPod(input: { buyerRef: string; buyer: string; preparedBy: string }): Pod {
+export function createPod(
+  input: { buyerRef: string; buyer: string; preparedBy: string },
+  // The New Costing stepper collects the POD's real articles before the POD
+  // exists, so it opts out of the demo seed — a wizard that ends with six
+  // articles the user never picked would contradict its own Step 3.
+  opts?: { seedDefaultArticles?: boolean },
+): Pod {
   const p: Pod = {
     id: nextPodId(),
     buyerRef: input.buyerRef,
     buyer: input.buyer,
     preparedBy: input.preparedBy,
-    status: "draft",
+    status: "in_progress",
     owner: input.preparedBy,
     createdAt: now(),
     updatedAt: "just now",
-    articles: defaultArticles(),
+    articles: opts?.seedDefaultArticles === false ? [] : defaultArticles(),
   };
   pods = [p, ...pods];
   emit();
@@ -450,6 +526,24 @@ export function deleteArticle(podId: string, articleId: string) {
   emit();
 }
 
+/**
+ * Move one article to a lifecycle state — the recosting loop's write side.
+ * The POD's own status stays derived on the surfaces that show it; storing a
+ * second copy here would just be one more thing to fall out of sync.
+ */
+export function setArticleStatus(podId: string, articleId: string, status: ArticleStatus) {
+  pods = pods.map((p) =>
+    p.id === podId
+      ? {
+          ...p,
+          updatedAt: "just now",
+          articles: p.articles.map((a) => (a.id === articleId ? { ...a, status } : a)),
+        }
+      : p,
+  );
+  emit();
+}
+
 export function markArticlesInProgress(podId: string, articleIds: string[]) {
   pods = pods.map((p) => {
     if (p.id !== podId) return p;
@@ -468,11 +562,10 @@ export function markArticlesInProgress(podId: string, articleIds: string[]) {
 }
 
 export const POD_STATUS_LABEL: Record<PodStatus, string> = {
-  draft: "Draft",
   in_progress: "In Progress",
   pending_approval: "Pending Approval",
   approved: "Approved",
-  completed: "Completed",
+  recosting: "Recosting",
 };
 
 export const ARTICLE_STATUS_LABEL: Record<ArticleStatus, string> = {
@@ -480,13 +573,11 @@ export const ARTICLE_STATUS_LABEL: Record<ArticleStatus, string> = {
   in_progress: "In Progress",
   pending_approval: "Pending Approval",
   approved: "Approved",
-  completed: "Completed",
+  recosting: "Recosting",
 };
 
 export function articleProgress(pod: Pod): { costed: number; total: number } {
-  const done = pod.articles.filter(
-    (a) => a.status === "approved" || a.status === "completed",
-  ).length;
+  const done = pod.articles.filter((a) => a.status === "approved").length;
   return { costed: done, total: pod.articles.length };
 }
 
@@ -586,6 +677,6 @@ export function cloneArticle(podId: string, articleId: string) {
 /** Costed count for a kit, based on its underlying article lines. */
 export function kitProgress(a: Article): { costed: number; total: number } {
   const items = a.kitItems ?? [];
-  const costed = items.filter((i) => i.status === "approved" || i.status === "completed").length;
+  const costed = items.filter((i) => i.status === "approved").length;
   return { costed, total: items.length };
 }

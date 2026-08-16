@@ -17,12 +17,13 @@
 
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import { ArrowLeft, ArrowRight, Boxes, PackagePlus } from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, PackagePlus, Sparkles } from "lucide-react";
 
 import { ProductHeader } from "@/components/layout/ProductHeader";
 import { WorkflowStepper } from "@/components/layout/WorkflowStepper";
 import { ArticleTabsBar } from "@/components/layout/ArticleTabsBar";
 import { ActionGroup, ModuleRevisionAction } from "@/components/changes/FlowActions";
+import { CompareVariantsAction } from "@/components/config/CompareVariantsAction";
 import { BundleBuilderDrawer } from "@/components/configuration/BundleBuilderDrawer";
 import { ArticleLibraryDrawer } from "@/components/articles/ArticleLibraryDrawer";
 import {
@@ -31,11 +32,12 @@ import {
 } from "@/components/workspace/ArticleCostingWorkspace";
 import { KitCostingWorkspace } from "@/components/workspace/KitCostingWorkspace";
 
+import { cn } from "@/lib/utils";
 import { addKit, addLibraryArticles, usePod } from "@/lib/podsStore";
 import { rollupVariant } from "@/lib/costingModel";
 import { applyParameters, commercialOutput } from "@/lib/pricingVariants";
 import { resolveCostingModel } from "@/lib/costingModels";
-import { estimateKitDirectUsd, seedVariantFor } from "@/lib/articleCosting";
+import { estimateKitDirectInr, seedVariantFor } from "@/lib/articleCosting";
 
 export const Route = createFileRoute("/config/$podId/$articleId")({
   validateSearch: (s: Record<string, unknown>) => ({
@@ -60,6 +62,9 @@ export const Route = createFileRoute("/config/$podId/$articleId")({
   component: ConfigurationWorkspacePage,
 });
 
+const inr2 = (n: number) =>
+  `₹${n.toLocaleString("en-IN", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+
 function ConfigurationWorkspacePage() {
   const { podId, articleId } = Route.useParams();
   const { sel } = Route.useSearch();
@@ -72,6 +77,7 @@ function ConfigurationWorkspacePage() {
   /** late intake: an article the team forgot, or several combined into a set */
   const [addArticleOpen, setAddArticleOpen] = useState(false);
   const [bundleOpen, setBundleOpen] = useState(false);
+  const [copilotOpen, setCopilotOpen] = useState(false);
 
   /** the live roll-up, lifted so the page header can report the running cost */
   const [costing, setCosting] = useState<ArticleCosting | null>(null);
@@ -141,17 +147,22 @@ function ConfigurationWorkspacePage() {
   );
 
   return (
-    <div className="flex h-screen w-full flex-col bg-canvas">
+    /* The tab bar is docked to the viewport bottom; the padding keeps the
+       last rows of any sheet clear of it. */
+    <div className="flex h-screen w-full flex-col bg-canvas pb-[52px]">
       <ProductHeader
         pod={pod}
         article={article}
         mounted={mounted}
+        /* ₹ throughout the configuration stage — the dollar figure is the
+           quotation's, and two currencies on one screen invited the room to
+           argue about FX instead of cost. */
         totalCost={
           isKit
-            ? `USD $${estimateKitDirectUsd(article.kitItems).toFixed(2)} / set`
+            ? `${inr2(estimateKitDirectInr(article.kitItems))} / set`
             : costing
-              ? `USD $${(costing.rollup.directCost / costing.fxRate).toFixed(2)} / pc`
-              : "USD —"
+              ? `${inr2(costing.rollup.directCost)} / pc`
+              : "₹ —"
         }
         backTo={
           <Link
@@ -166,6 +177,7 @@ function ConfigurationWorkspacePage() {
       >
         <ActionGroup>
           <ModuleRevisionAction />
+          <CompareVariantsAction productName={article.name} />
           <button
             onClick={() =>
               navigate({
@@ -183,33 +195,63 @@ function ConfigurationWorkspacePage() {
           >
             Continue to Costing Report <ArrowRight className="h-4 w-4" />
           </button>
+          {/* Last in the group, so it lands at the top-right corner of the
+              page whether or not the header wraps — the place a costing user
+              goes looking for it. */}
+          <button
+            type="button"
+            onClick={() => setCopilotOpen((o) => !o)}
+            aria-pressed={copilotOpen}
+            title="Ask the costing copilot about this configuration"
+            className={cn(
+              "inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-[13px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
+              copilotOpen
+                ? "border-brand-700 bg-brand-50 text-brand-700"
+                : "border-hairline bg-surface text-ink-700 hover:bg-surface-alt",
+            )}
+          >
+            <Sparkles className="h-4 w-4" /> AI Copilot
+          </button>
         </ActionGroup>
       </ProductHeader>
 
       {isKit ? (
         /* ---- a kit: a tab per member article, plus the consolidation ---- */
-        <KitCostingWorkspace pod={pod} kit={article} stepper={stepper} />
+        <KitCostingWorkspace
+          pod={pod}
+          kit={article}
+          stepper={stepper}
+          copilotOpen={copilotOpen}
+          onCopilotOpenChange={setCopilotOpen}
+        />
       ) : (
         /* ---- a single product: the sheet, unchanged ---- */
-        <ArticleCostingWorkspace
-          podId={pod.id}
-          buyer={pod.buyer}
-          buyerRef={pod.buyerRef}
-          headerSlot={stepper}
-          identity={{
-            articleId: article.id,
-            name: article.name,
-            srfRef: article.srfRef,
-            size: article.size,
-            moq: article.moq,
-            image: article.image,
-            articleNo: article.articleNo,
-            styleNo: article.styleNo,
-            colour: article.colour,
-            currency: article.currency,
-          }}
-          onCosted={setCosting}
-        />
+        <>
+          {/* Same band, same place, as the Costing Report, Quotation and
+              Approval — the workflow strip is the spine of the workspace and
+              must not scroll away inside a card. */}
+          {stepper}
+          <ArticleCostingWorkspace
+            copilotOpen={copilotOpen}
+            onCopilotOpenChange={setCopilotOpen}
+            podId={pod.id}
+            buyer={pod.buyer}
+            buyerRef={pod.buyerRef}
+            identity={{
+              articleId: article.id,
+              name: article.name,
+              srfRef: article.srfRef,
+              size: article.size,
+              moq: article.moq,
+              image: article.image,
+              articleNo: article.articleNo,
+              styleNo: article.styleNo,
+              colour: article.colour,
+              currency: article.currency,
+            }}
+            onCosted={setCosting}
+          />
+        </>
       )}
 
       <ArticleTabsBar
@@ -217,7 +259,6 @@ function ConfigurationWorkspacePage() {
         articles={sheets}
         activeId={article.id}
         sel={sel}
-        fixed={false}
         stage="Configuration"
         actions={
           <>

@@ -139,6 +139,16 @@ export function buildsIn(snapshot: State, podId: string, articleId: string): Bui
   return sel && sel.builds.length > 0 ? sel.builds : [BASE_BUILD];
 }
 
+/**
+ * Unsubscribed reads — for stores and event handlers, never for render.
+ * A component that called these would silently stop updating.
+ */
+export const buildsFor = (podId: string, articleId: string): BuildRef[] =>
+  buildsIn(state, podId, articleId);
+
+export const scenariosFor = (podId: string, articleId: string): Scenario[] =>
+  scenariosIn(state, podId, articleId);
+
 /** Subscribed read for one article — what components should use. */
 export function useArticleSelection(podId: string, articleId: string) {
   const snapshot = useCostingSelections();

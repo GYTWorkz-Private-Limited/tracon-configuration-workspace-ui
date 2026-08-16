@@ -20,22 +20,29 @@
  *      exactly what costing has open — never a list of its own invention.
  */
 
-import { useEffect, useMemo, useState } from "react";
-import { Scale, Sparkles } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { Sparkles } from "lucide-react";
 
 import { VariantTabs, type WorkVariant } from "@/components/configuration/VariantTabs";
 import { CopilotPanel } from "@/components/configuration/CopilotPanel";
 import { AddVariantModal } from "@/components/configuration/AddVariantModal";
 import { AddOptionModal, type OptionEntry } from "@/components/configuration/AddOptionModal";
-import { CompareWorkspace, type CompareRow } from "@/components/configuration/CompareWorkspace";
 
 import { CostBreakdownStrip, type CostCategory } from "@/components/workspace/CostBreakdownStrip";
 import { CategoryComposition } from "@/components/workspace/CategoryComposition";
 import { CostLineTable } from "@/components/workspace/CostLineTable";
+import { toast } from "sonner";
+import { usePod } from "@/lib/podsStore";
+import { MANUAL_STYLE_ID, applyStyleParts, useStyleFor } from "@/lib/styleMaster";
+import { StylePickerCard } from "@/components/workspace/StylePickerCard";
+import {
+  fabricRateOverrides,
+  fabricRequirementsFor,
+  type FabricRequirement,
+} from "@/lib/fabricRequirement";
 import { ComponentInspector } from "@/components/workspace/ComponentInspector";
 import { ComponentLibraryModal } from "@/components/workspace/ComponentLibraryModal";
 import { ConfigurationRail } from "@/components/workspace/ConfigurationRail";
-import { ScenarioBar } from "@/components/workspace/ScenarioBar";
 
 import { cn } from "@/lib/utils";
 import { createMoney } from "@/lib/money";
@@ -46,7 +53,9 @@ import {
   rollupVariant,
   sourced,
   type CostRollup,
+  type PackagingItem,
   type Product,
+  type TestingItem,
   type Variant,
 } from "@/lib/costingModel";
 import {
@@ -109,12 +118,53 @@ export type CostingIdentity = {
   currency?: string;
 };
 
+/**
+ * The write side of the report. A kit's merged table is not a mirror — it is a
+ * second surface onto the SAME sheet, so it needs to be able to act on this
+ * member, not just read it.
+ *
+ * Every callback here is stable for the life of the workspace and reads the
+ * live variant through a ref, because the kit dedupes reports by roll-up
+ * identity: a member that reports again with an unchanged roll-up keeps its
+ * OLD summary object, and a callback that had closed over that render's state
+ * would then write into a variant that has since moved on. `attachTargets` is
+ * a getter for the same reason — a retained object must never hand out a stale
+ * component list.
+ */
+export type ArticleActions = {
+  selectOption: (
+    kind: CostLine["kind"],
+    componentId: string,
+    itemId: string,
+    optionId: string,
+  ) => void;
+  addFromLibrary: (item: LibraryItem, targetComponentId: string | null, slot: string) => void;
+  /** components a process or trim can be attached to, on THIS member */
+  attachTargets: { id: string; name: string }[];
+};
+
 /** What this workspace reports upward, so a kit can consolidate its members. */
 export type ArticleCosting = {
   articleId: string;
   name: string;
   image?: string;
   rollup: CostRollup;
+  /**
+   * The priced packaging and testing lines behind the rollup's category
+   * totals. The rollup itself only carries component detail, and the kit's
+   * merged table needs LINES for every section — without these it could show
+   * "Packaging ₹4.20" but never say what the polybag is.
+   */
+  packaging: PackagingItem[];
+  testing: TestingItem[];
+  /**
+   * The very lines the sheet renders. Names and costs alone would let the
+   * merged table LIST a decision but never OFFER it — the option group and the
+   * target travel with the line, so a kit cell can be the same dropdown the
+   * sheet has.
+   */
+  sections: LineSection[];
+  actions: ArticleActions;
   scenarioName: string;
   variantName: string;
   moq: number;
@@ -169,19 +219,25 @@ export function ArticleCostingWorkspace({
   buyer,
   buyerRef,
   identity,
-  headerSlot,
-  productCard = true,
   onCosted,
+  focusSignal,
+  copilotOpen: copilotOpenProp,
+  onCopilotOpenChange,
 }: {
   podId: string;
   buyer: string;
   buyerRef: string;
   identity: CostingIdentity;
-  /** the workflow band, when this workspace owns the page */
-  headerSlot?: React.ReactNode;
-  /** kits render their own header, so the product card is suppressed there */
-  productCard?: boolean;
   onCosted?: (summary: ArticleCosting) => void;
+  /**
+   * A kit's merged table can point at one line of this sheet. Bumping the
+   * nonce re-selects even when the same component is clicked twice — the
+   * inspector may have been closed in between.
+   */
+  focusSignal?: { componentId: string; nonce: number };
+  /** let the page header drive the copilot; omit to keep it self-managing */
+  copilotOpen?: boolean;
+  onCopilotOpenChange?: (open: boolean) => void;
 }) {
   const bundle = resolveCostingModel(identity.srfRef);
 
@@ -201,10 +257,18 @@ export function ArticleCostingWorkspace({
   const [librarySection, setLibrarySection] = useState<LineSection["id"] | null>(null);
   const [filter, setFilter] = useState<CostCategory | null>(null);
   const [live, setLive] = useState(false);
-  const [copilotOpen, setCopilotOpen] = useState(false);
+  // The copilot can be driven from the page header, where costing users expect
+  // to find it, or from the sheet's own toolbar. Controlled when the page owns
+  // the state, self-managing when it does not.
+  const [ownCopilotOpen, setOwnCopilotOpen] = useState(false);
+  const copilotOpen = copilotOpenProp ?? ownCopilotOpen;
+  const setCopilotOpen = (next: boolean | ((o: boolean) => boolean)) => {
+    const value = typeof next === "function" ? next(copilotOpen) : next;
+    if (onCopilotOpenChange) onCopilotOpenChange(value);
+    else setOwnCopilotOpen(value);
+  };
   const [variantModalOpen, setVariantModalOpen] = useState(false);
   const [optionModalOpen, setOptionModalOpen] = useState(false);
-  const [compareOpen, setCompareOpen] = useState(false);
 
   // Switching to an article backed by a different product bundle (Placemat →
   // Quilt) re-seeds everything derived from it. Param-only navigation does not
@@ -219,6 +283,13 @@ export function ArticleCostingWorkspace({
     setFilter(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bundle.product.id, identity.articleId]);
+
+  // The kit's merged table asked for this line — select it here so the sheet
+  // opens already focused on what was clicked.
+  useEffect(() => {
+    if (focusSignal) setSelectedId(focusSignal.componentId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [focusSignal?.nonce]);
 
   const activeVariant = variants.find((v) => v.id === activeVariantId) ?? variants[0];
   const activeScenario = scenarios.find((s) => s.id === activeScenarioId) ?? scenarios[0];
@@ -240,11 +311,20 @@ export function ArticleCostingWorkspace({
     [bundle.product, identity, buyer, buyerRef],
   );
 
+  /**
+   * What the fabric costs at THIS POD's volume. The same greige cut for a
+   * placemat and a runner is one purchase, so the price break is earned by the
+   * order, not by the article — see `fabricRequirement`.
+   */
+  const pod = usePod(podId);
+  const fabricReqs = useMemo(() => fabricRequirementsFor(pod), [pod]);
+  const fabricRates = useMemo(() => fabricRateOverrides(fabricReqs), [fabricReqs]);
+
   /** base variant → scenario overrides → parameter application. All pure. */
   const pricedVariant = useMemo(() => {
     const scoped = applyScenario(activeVariant, activeScenario);
-    return applyParameters(scoped, scoped.parameters, bundle.masters);
-  }, [activeVariant, activeScenario, bundle.masters]);
+    return applyParameters(scoped, scoped.parameters, bundle.masters, fabricRates);
+  }, [activeVariant, activeScenario, bundle.masters, fabricRates]);
 
   /** One roll-up — the single computation every column reads from. */
   const rollup: CostRollup = useMemo(
@@ -257,8 +337,12 @@ export function ArticleCostingWorkspace({
     [rollup.directCost, pricedVariant.commercial],
   );
 
+  // Costing is done in rupees — every rate master, and therefore every figure on
+  // this sheet, is ₹. Dollars belong to the Quotation stage, which converts with
+  // the FX rate reported upward; showing them here only invites reconciling two
+  // versions of the same number.
   const money = useMemo(
-    () => createMoney("USD", pricedVariant.commercial.fxRate),
+    () => createMoney("INR", pricedVariant.commercial.fxRate),
     [pricedVariant.commercial.fxRate],
   );
 
@@ -269,6 +353,10 @@ export function ArticleCostingWorkspace({
       name: identity.name,
       image: identity.image,
       rollup,
+      packaging: pricedVariant.packaging,
+      testing: pricedVariant.testing,
+      sections: allSections,
+      actions,
       scenarioName: activeScenario.name,
       variantName: activeVariant.name,
       moq: moqOf(pricedVariant.parameters),
@@ -306,12 +394,12 @@ export function ArticleCostingWorkspace({
     const out: Record<string, number> = {};
     for (const s of scenarios) {
       const scoped = applyScenario(activeVariant, s);
-      const priced = applyParameters(scoped, scoped.parameters, bundle.masters);
+      const priced = applyParameters(scoped, scoped.parameters, bundle.masters, fabricRates);
       const roll = rollupVariant(priced, bundle.masters);
       out[s.id] = commercialOutput(roll.directCost, priced.commercial).sellingUsd;
     }
     return out;
-  }, [scenarios, activeVariant, bundle.masters]);
+  }, [scenarios, activeVariant, bundle.masters, fabricRates]);
 
   const baseScenarioId = scenarios.find((s) => s.isBase)?.id ?? scenarios[0]?.id;
   const deltaFor = (id: string) =>
@@ -323,75 +411,18 @@ export function ArticleCostingWorkspace({
     const v = variants.find((x) => x.id === id);
     if (!v) return 0;
     const scoped = applyScenario(v, activeScenario);
-    return rollupVariant(applyParameters(scoped, scoped.parameters, bundle.masters), bundle.masters)
-      .directCost;
+    return rollupVariant(
+      applyParameters(scoped, scoped.parameters, bundle.masters, fabricRates),
+      bundle.masters,
+    ).directCost;
   };
 
   const priceUnder = (v: Variant, scenario: Scenario) => {
     const scoped = applyScenario(v, scenario);
-    const priced = applyParameters(scoped, scoped.parameters, bundle.masters);
+    const priced = applyParameters(scoped, scoped.parameters, bundle.masters, fabricRates);
     const roll = rollupVariant(priced, bundle.masters);
     return { priced, roll, out: commercialOutput(roll.directCost, priced.commercial) };
   };
-
-  const rowFrom = (
-    id: string,
-    name: string,
-    subtitle: string,
-    isActive: boolean,
-    v: Variant,
-    scenario: Scenario,
-    baseSelling: number,
-  ): CompareRow => {
-    const { priced, roll, out } = priceUnder(v, scenario);
-    return {
-      id,
-      name,
-      subtitle,
-      isActive,
-      size: sizeOf(priced.parameters).join('" × ') + '"',
-      moq: `${moqOf(priced.parameters).toLocaleString()} pcs`,
-      quality: `${gsmOf(priced.parameters)} GSM`,
-      rawMaterialInr: roll.rawMaterial,
-      processInr: roll.process,
-      accessoriesInr: roll.accessories,
-      packagingInr: roll.packaging,
-      testingInr: roll.testing,
-      directCostUsd: roll.directCost,
-      componentCount: roll.components.length,
-      sellingUsd: out.sellingUsd,
-      marginPct: out.marginPct,
-      buyerTargetUsd: out.buyerTargetUsd,
-      onTarget: out.onTarget,
-      deltaPct: isActive ? null : scenarioDelta(out.sellingUsd, baseSelling),
-    };
-  };
-
-  const variantCompareRows: CompareRow[] = useMemo(() => {
-    const baseSelling = priceUnder(activeVariant, activeScenario).out.sellingUsd;
-    return variants.map((v) =>
-      rowFrom(
-        v.id,
-        v.name,
-        v.kind === "option" ? "Option" : "Variant",
-        v.id === activeVariantId,
-        v,
-        activeScenario,
-        baseSelling,
-      ),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [variants, activeVariantId, activeScenario, bundle.masters]);
-
-  const scenarioCompareRows: CompareRow[] = useMemo(() => {
-    const preview = SCENARIO_PRESETS.slice(0, 4);
-    const base = preview.find((s) => s.isBase) ?? preview[0];
-    const baseSelling = priceUnder(bundle.defaultVariant, base).out.sellingUsd;
-    return preview.map((s) =>
-      rowFrom(s.id, s.name, s.subtitle, Boolean(s.isBase), bundle.defaultVariant, s, baseSelling),
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [bundle.defaultVariant, bundle.masters]);
 
   const selected = rollup.components.find((c) => c.component.id === selectedId) ?? null;
   const category: CostCategory = filter ?? "direct";
@@ -411,15 +442,28 @@ export function ArticleCostingWorkspace({
     category === "direct" ? rollup.directCost : visibleSections.reduce((t, s) => t + s.total, 0);
 
   /* ---- mutations: every change is an immutable variant swap ---- */
-  const pulse = () => {
+
+  /**
+   * The live state the exported actions write against. Keeping it in a ref —
+   * refreshed on every render — is what lets those actions be created ONCE and
+   * still hit the current variant, which the kit's report dedupe requires (see
+   * `ArticleActions`).
+   */
+  const stateRef = useRef({ activeVariant, activeScenario, rollup, bundle });
+  stateRef.current = { activeVariant, activeScenario, rollup, bundle };
+
+  const pulse = useCallback(() => {
     setLive(true);
     setTimeout(() => setLive(false), 1000);
-  };
+  }, []);
 
-  const updateActive = (next: Variant) => {
-    setVariants((prev) => prev.map((v) => (v.id === next.id ? next : v)));
-    pulse();
-  };
+  const updateActive = useCallback(
+    (next: Variant) => {
+      setVariants((prev) => prev.map((v) => (v.id === next.id ? next : v)));
+      pulse();
+    },
+    [pulse],
+  );
 
   const setParameter = (id: ParameterId, optionId: string) =>
     updateActive({
@@ -436,110 +480,118 @@ export function ArticleCostingWorkspace({
   const setCommercial = (patch: Partial<CommercialInputs>) =>
     updateActive({ ...activeVariant, commercial: { ...activeVariant.commercial, ...patch } });
 
-  const applyMaterial = (componentId: string, materialMasterId: string) => {
-    const master = bundle.masters.materials[materialMasterId];
-    if (!master) return;
-    // A scenario that declares its own fabric would re-apply it on the next
-    // render and silently undo this choice, so the scenario is updated to
-    // match rather than left to fight the variant.
-    if (activeScenario.fabricMasterId) {
-      setScenarios((prev) =>
-        prev.map((s) =>
-          s.id === activeScenario.id ? { ...s, fabricMasterId: materialMasterId } : s,
-        ),
-      );
-    }
-    updateActive({
-      ...activeVariant,
-      components: activeVariant.components.map((c) =>
-        c.id === componentId && c.material
-          ? {
-              ...c,
-              material: {
-                ...c.material,
-                relationship: "master",
-                sameAsComponentId: undefined,
-                materialMasterId,
-                rate: sourced(master.rate, "Rate Master", master.rateMasterId),
-                rateUnit: master.rateUnit,
-              },
-            }
-          : c,
-      ),
-    });
-  };
-
-  const inheritMaterial = (componentId: string) =>
-    updateActive({
-      ...activeVariant,
-      components: activeVariant.components.map((c) =>
-        c.id === componentId && c.material
-          ? {
-              ...c,
-              material: {
-                ...c.material,
-                relationship: "same-as-component",
-                sameAsComponentId: c.parentId ?? c.material.sameAsComponentId,
-                materialMasterId: undefined,
-                rate: { ...c.material.rate, override: undefined },
-              },
-            }
-          : c,
-      ),
-    });
-
-  const selectLineOption = (
-    kind: CostLine["kind"],
-    componentId: string,
-    itemId: string,
-    optionId: string,
-  ) => {
-    if (kind === "material") {
-      if (optionId === INHERIT_OPTION_ID) inheritMaterial(componentId);
-      else applyMaterial(componentId, optionId);
-      return;
-    }
-    if (kind === "accessory" || kind === "process") {
+  const applyMaterial = useCallback(
+    (componentId: string, materialMasterId: string) => {
+      const { activeVariant, activeScenario, bundle } = stateRef.current;
+      const master = bundle.masters.materials[materialMasterId];
+      if (!master) return;
+      // A scenario that declares its own fabric would re-apply it on the next
+      // render and silently undo this choice, so the scenario is updated to
+      // match rather than left to fight the variant.
+      if (activeScenario.fabricMasterId) {
+        setScenarios((prev) =>
+          prev.map((s) =>
+            s.id === activeScenario.id ? { ...s, fabricMasterId: materialMasterId } : s,
+          ),
+        );
+      }
       updateActive({
         ...activeVariant,
         components: activeVariant.components.map((c) =>
-          c.id !== componentId
-            ? c
-            : kind === "accessory"
-              ? {
-                  ...c,
-                  accessories: c.accessories.map((a) =>
-                    a.id === itemId ? applyAccessoryOption(a, optionId) : a,
-                  ),
-                }
-              : {
-                  ...c,
-                  processes: c.processes.map((p) =>
-                    p.id === itemId ? applyProcessOption(p, optionId) : p,
-                  ),
+          c.id === componentId && c.material
+            ? {
+                ...c,
+                material: {
+                  ...c.material,
+                  relationship: "master",
+                  sameAsComponentId: undefined,
+                  materialMasterId,
+                  rate: sourced(master.rate, "Rate Master", master.rateMasterId),
+                  rateUnit: master.rateUnit,
                 },
+              }
+            : c,
         ),
       });
-      return;
-    }
-    if (kind === "packaging") {
+    },
+    [updateActive],
+  );
+
+  const inheritMaterial = useCallback(
+    (componentId: string) => {
+      const { activeVariant } = stateRef.current;
       updateActive({
         ...activeVariant,
-        packaging: activeVariant.packaging.map((p) =>
-          p.id === itemId ? applyPackagingOption(p, optionId) : p,
+        components: activeVariant.components.map((c) =>
+          c.id === componentId && c.material
+            ? {
+                ...c,
+                material: {
+                  ...c.material,
+                  relationship: "same-as-component",
+                  sameAsComponentId: c.parentId ?? c.material.sameAsComponentId,
+                  materialMasterId: undefined,
+                  rate: { ...c.material.rate, override: undefined },
+                },
+              }
+            : c,
         ),
       });
-      return;
-    }
-    if (kind === "testing") {
-      updateActive({
-        ...activeVariant,
-        testing: activeVariant.testing.map((t) =>
-          t.id === itemId ? applyTestingOption(t, optionId) : t,
-        ),
-      });
-    }
-  };
+    },
+    [updateActive],
+  );
+
+  const selectLineOption = useCallback(
+    (kind: CostLine["kind"], componentId: string, itemId: string, optionId: string) => {
+      const { activeVariant } = stateRef.current;
+      if (kind === "material") {
+        if (optionId === INHERIT_OPTION_ID) inheritMaterial(componentId);
+        else applyMaterial(componentId, optionId);
+        return;
+      }
+      if (kind === "accessory" || kind === "process") {
+        updateActive({
+          ...activeVariant,
+          components: activeVariant.components.map((c) =>
+            c.id !== componentId
+              ? c
+              : kind === "accessory"
+                ? {
+                    ...c,
+                    accessories: c.accessories.map((a) =>
+                      a.id === itemId ? applyAccessoryOption(a, optionId) : a,
+                    ),
+                  }
+                : {
+                    ...c,
+                    processes: c.processes.map((p) =>
+                      p.id === itemId ? applyProcessOption(p, optionId) : p,
+                    ),
+                  },
+          ),
+        });
+        return;
+      }
+      if (kind === "packaging") {
+        updateActive({
+          ...activeVariant,
+          packaging: activeVariant.packaging.map((p) =>
+            p.id === itemId ? applyPackagingOption(p, optionId) : p,
+          ),
+        });
+        return;
+      }
+      if (kind === "testing") {
+        updateActive({
+          ...activeVariant,
+          testing: activeVariant.testing.map((t) =>
+            t.id === itemId ? applyTestingOption(t, optionId) : t,
+          ),
+        });
+      }
+    },
+    [applyMaterial, inheritMaterial, updateActive],
+  );
 
   const attachTargets = rollup.components.map((c) => ({
     id: c.component.id,
@@ -552,69 +604,155 @@ export function ArticleCostingWorkspace({
   };
 
   /** A library entry becomes a real costed object — never a placeholder row. */
-  const addFromLibrary = (item: LibraryItem, targetComponentId: string | null, slot: string) => {
-    const stamp = Date.now();
-
-    if (item.kind === "fabric" || item.kind === "filling") {
-      const id = `CMP-${stamp}`;
-      const base = activeVariant.components.find((c) => c.consumption)?.consumption;
-      updateActive(
-        addComponentTo(
-          activeVariant,
-          componentFromLibrary(item, {
-            id,
-            productId: activeVariant.productId,
-            sequence: activeVariant.components.length + 1,
-            slot,
-            finishedWidth: base?.finishedWidth ?? 20,
-            finishedLength: base?.finishedLength ?? 26,
-          }),
-        ),
-      );
-      setSelectedId(id);
-    } else if (item.kind === "process" && targetComponentId) {
-      const target = rollup.components.find((c) => c.component.id === targetComponentId);
-      const quantity =
-        item.process?.basis === "per m"
-          ? (target?.consumptionPerPiece ?? 1)
-          : item.process?.basis === "per 1000 stitches"
-            ? 12.5
-            : 1;
-      updateActive({
-        ...activeVariant,
-        components: activeVariant.components.map((c) => {
-          if (c.id !== targetComponentId) return c;
-          const step = processFromLibrary(item, c.id, c.processes.length + 1, quantity);
-          return step ? { ...c, processes: [...c.processes, step] } : c;
-        }),
-      });
-    } else if (item.kind === "trim" && targetComponentId) {
-      updateActive({
-        ...activeVariant,
-        components: activeVariant.components.map((c) =>
-          c.id === targetComponentId
-            ? {
-                ...c,
-                accessories: [...c.accessories, accessoryFromLibrary(item, `ACC-${stamp}`, c.id)],
-              }
-            : c,
-        ),
-      });
-    } else if (item.kind === "packaging") {
-      updateActive({
-        ...activeVariant,
-        packaging: [...activeVariant.packaging, packagingFromLibrary(item, `PKG-${stamp}`)],
-      });
-    } else if (item.kind === "testing") {
-      const lotSize = activeVariant.testing[0]?.lotSize ?? 3000;
-      updateActive({
-        ...activeVariant,
-        testing: [...activeVariant.testing, testingFromLibrary(item, `TST-${stamp}`, lotSize)],
-      });
+  /**
+   * A chosen style seeds the sheet's parts in one act — the fabric for each
+   * part is still picked from the library afterwards, which is exactly the
+   * division of labour the style master exists for: the style knows the
+   * geometry, the buyer's order decides the cloth.
+   */
+  const applyStyle = (styleId: string) => {
+    const parts = applyStyleParts(styleId);
+    if (parts.length === 0) return;
+    const have = new Set(activeVariant.components.map((c) => c.name));
+    const fresh = parts.filter((p) => !have.has(p.name));
+    if (fresh.length === 0) {
+      toast(`Every part of this style is already on the sheet`);
+      return;
     }
-
-    setLibraryOpen(false);
+    // Seeded parts start as self-fabric — inherited from the sheet's face
+    // cloth — because a part with no material has no cost line and would be
+    // invisible on the sheet it was just added to. Re-pointing a part at its
+    // own cloth is then one click on its row, which is the style master's
+    // division of labour: the style knows the geometry, the buyer's order
+    // decides the cloth.
+    const face = activeVariant.components.find((c) => c.material?.relationship === "master");
+    updateActive({
+      ...activeVariant,
+      components: [
+        ...activeVariant.components,
+        ...fresh.map((p, i) => ({
+          ...p,
+          productId: activeVariant.productId,
+          sequence: activeVariant.components.length + 1 + i,
+          material: face?.material
+            ? {
+                id: `MAT-${p.id}`,
+                relationship: "same-as-component" as const,
+                sameAsComponentId: face.id,
+                rate: face.material.rate,
+                rateUnit: face.material.rateUnit,
+              }
+            : undefined,
+        })),
+      ],
+    });
+    toast.success(
+      `${fresh.length} part${fresh.length === 1 ? "" : "s"} seeded from the style — pick each part's own fabric on its row`,
+    );
   };
+
+  // A style can be chosen before this workspace ever opens — the New Costing
+  // stepper records the choice at POD creation. Without this, the picker strip
+  // would claim "N parts seeded" over a sheet that has none of them. Seeding
+  // only fires when NO part of the style is on the sheet: once any part
+  // exists the user owns the sheet, and re-adding parts they deleted would
+  // turn their pruning into a fight with the machine.
+  const chosenStyle = useStyleFor(podId, identity.articleId);
+  useEffect(() => {
+    if (!chosenStyle || chosenStyle === MANUAL_STYLE_ID) return;
+    const parts = applyStyleParts(chosenStyle);
+    if (parts.length === 0) return;
+    const have = new Set(activeVariant.components.map((c) => c.name));
+    if (parts.some((p) => have.has(p.name))) return;
+    applyStyle(chosenStyle);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [chosenStyle, identity.articleId]);
+
+  const addFromLibrary = useCallback(
+    (item: LibraryItem, targetComponentId: string | null, slot: string) => {
+      const { activeVariant, rollup } = stateRef.current;
+      const stamp = Date.now();
+
+      if (item.kind === "fabric" || item.kind === "filling") {
+        const id = `CMP-${stamp}`;
+        const base = activeVariant.components.find((c) => c.consumption)?.consumption;
+        updateActive(
+          addComponentTo(
+            activeVariant,
+            componentFromLibrary(item, {
+              id,
+              productId: activeVariant.productId,
+              sequence: activeVariant.components.length + 1,
+              slot,
+              finishedWidth: base?.finishedWidth ?? 20,
+              finishedLength: base?.finishedLength ?? 26,
+            }),
+          ),
+        );
+        setSelectedId(id);
+      } else if (item.kind === "process" && targetComponentId) {
+        const target = rollup.components.find((c) => c.component.id === targetComponentId);
+        const quantity =
+          item.process?.basis === "per m"
+            ? (target?.consumptionPerPiece ?? 1)
+            : item.process?.basis === "per 1000 stitches"
+              ? 12.5
+              : 1;
+        updateActive({
+          ...activeVariant,
+          components: activeVariant.components.map((c) => {
+            if (c.id !== targetComponentId) return c;
+            const step = processFromLibrary(item, c.id, c.processes.length + 1, quantity);
+            return step ? { ...c, processes: [...c.processes, step] } : c;
+          }),
+        });
+      } else if (item.kind === "trim" && targetComponentId) {
+        updateActive({
+          ...activeVariant,
+          components: activeVariant.components.map((c) =>
+            c.id === targetComponentId
+              ? {
+                  ...c,
+                  accessories: [...c.accessories, accessoryFromLibrary(item, `ACC-${stamp}`, c.id)],
+                }
+              : c,
+          ),
+        });
+      } else if (item.kind === "packaging") {
+        updateActive({
+          ...activeVariant,
+          packaging: [...activeVariant.packaging, packagingFromLibrary(item, `PKG-${stamp}`)],
+        });
+      } else if (item.kind === "testing") {
+        const lotSize = activeVariant.testing[0]?.lotSize ?? 3000;
+        updateActive({
+          ...activeVariant,
+          testing: [...activeVariant.testing, testingFromLibrary(item, `TST-${stamp}`, lotSize)],
+        });
+      }
+
+      setLibraryOpen(false);
+    },
+    [updateActive],
+  );
+
+  /**
+   * One object, created once. The kit may hold on to a report whose roll-up did
+   * not change, so what it holds must never be a snapshot of this render.
+   */
+  const actions = useMemo<ArticleActions>(
+    () => ({
+      selectOption: selectLineOption,
+      addFromLibrary,
+      get attachTargets() {
+        return stateRef.current.rollup.components.map((c) => ({
+          id: c.component.id,
+          name: c.component.name,
+        }));
+      },
+    }),
+    [selectLineOption, addFromLibrary],
+  );
 
   /** Removing a line removes the thing it stands for. Nothing is soft-deleted. */
   const removeLine = (line: CostLine) => {
@@ -740,72 +878,41 @@ export function ArticleCostingWorkspace({
       />
 
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-canvas p-4">
-        {productCard && (
-          <div className="shrink-0 rounded-xl border border-hairline bg-surface p-4 shadow-sm">
-            <div className="flex flex-wrap items-start justify-between gap-4">
-              <div className="flex min-w-0 items-start gap-3">
-                {identity.image && (
-                  <img
-                    src={identity.image}
-                    alt=""
-                    className="h-14 w-14 shrink-0 rounded-lg border border-hairline object-cover"
-                  />
-                )}
-                <div className="min-w-0">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h1 className="truncate text-[16px] font-semibold text-ink-900">
-                      {product.name}
-                    </h1>
-                    <span className="rounded-full bg-brand-50 px-2 py-0.5 text-[10.5px] font-medium text-brand-700">
-                      {product.status}
-                    </span>
-                  </div>
-                  <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-ink-500">
-                    <span className="rounded bg-surface-alt px-1.5 py-0.5">
-                      # {product.articleNo}
-                    </span>
-                    <span className="rounded bg-surface-alt px-1.5 py-0.5"># {podId}</span>
-                    <Meta label="Size" value={product.size} />
-                    <Meta label="MOQ" value={product.moq} />
-                    <Meta label="Buyer" value={product.buyer} />
-                  </div>
-                </div>
-              </div>
-              <div className="text-right">
-                <div className="text-[10px] font-medium uppercase tracking-[0.1em] text-ink-500">
-                  Total Direct Cost
-                </div>
-                <div className="text-[22px] font-semibold tabular-nums text-ink-900">
-                  {money(rollup.directCost)}
-                </div>
-                <div className="text-[10.5px] text-ink-400">/ pc</div>
-              </div>
-            </div>
+        {/* Style before parts: the agreed sequence is Template → Style →
+            Costing. A style seeds the part list; without one the sheet is
+            built manually from the library, and the card says which of the
+            two is in play. */}
+        <div className="mb-2 shrink-0">
+          <StylePickerCard podId={podId} articleId={identity.articleId} onApply={applyStyle} />
+        </div>
 
-            {headerSlot && <div className="-mx-4 mt-3 border-t border-hairline">{headerSlot}</div>}
-          </div>
-        )}
-
-        {/* scenarios — whole costing positions */}
-        <div
-          className={cn(
-            "shrink-0 overflow-hidden rounded-xl border border-hairline bg-surface",
-            productCard ? "mt-3" : "",
+        {/* One line of identity, not a second header: on a standalone article
+            it restates the essentials next to the sheet they govern, and for a
+            kit member it is the ONLY place that member's own size, MOQ and
+            reference are stated — the page header above belongs to the kit. */}
+        <div className="mb-2 flex shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1 px-1 text-[11.5px] text-ink-500">
+          {identity.image && (
+            <img
+              src={identity.image}
+              alt=""
+              className="h-6 w-6 rounded border border-hairline object-cover"
+            />
           )}
-        >
-          <ScenarioBar
-            scenarios={scenarios}
-            activeId={activeScenario.id}
-            delta={deltaFor}
-            onSelect={(id) => {
-              setActiveScenarioId(id);
-              setSelectedId(null);
-            }}
-            onClose={closeScenario}
-            available={SCENARIO_PRESETS.filter((p) => !scenarios.some((s) => s.id === p.id))}
-            onAdd={addScenario}
-          />
-
+          <span className="text-[12.5px] font-semibold text-ink-900">{product.name}</span>
+          <IdMeta label="Ref" value={`# ${product.articleNo}`} />
+          <IdMeta label="Size" value={product.size || "—"} />
+          <IdMeta label="MOQ" value={product.moq || "—"} />
+          <IdMeta label="Buyer" value={product.buyer} />
+          {product.colour && <IdMeta label="Colour" value={product.colour} />}
+          <span className="ml-auto tabular-nums text-ink-700">
+            Direct cost{" "}
+            <strong className="font-semibold text-ink-900">{money(rollup.directCost)}</strong> / pc
+          </span>
+        </div>
+        {/* scenarios — whole costing positions */}
+        <div className="shrink-0 overflow-hidden rounded-xl border border-hairline bg-surface">
+          {/* Scenario navigation lives in the variant tabs below — a second
+              scenario strip here was duplicate navigation for the same thing. */}
           {/* variants and options inside the active scenario */}
           <VariantTabs
             variants={tabs}
@@ -884,32 +991,8 @@ export function ArticleCostingWorkspace({
             total={categoryTotal}
             live={live}
             compact={Boolean(selected)}
+            fabricRollups={fabricReqs}
           />
-        </div>
-
-        <div className="mt-2 flex shrink-0 flex-wrap items-center gap-2">
-          <p className="min-w-0 flex-1 text-[10.5px] text-ink-400">
-            * Costs shown are per piece. Values update automatically as the configuration changes.
-          </p>
-          <button
-            type="button"
-            onClick={() => setCompareOpen(true)}
-            className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-2.5 py-1.5 text-[11.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-          >
-            <Scale className="h-3.5 w-3.5 text-ink-400" /> Compare
-          </button>
-          <button
-            type="button"
-            onClick={() => setCopilotOpen((o) => !o)}
-            className={cn(
-              "inline-flex items-center gap-1.5 rounded-md border px-2.5 py-1.5 text-[11.5px] font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-              copilotOpen
-                ? "border-brand-700 bg-brand-50 text-brand-700"
-                : "border-hairline bg-surface text-ink-700 hover:bg-surface-alt",
-            )}
-          >
-            <Sparkles className="h-3.5 w-3.5" /> AI Copilot
-          </button>
         </div>
       </main>
 
@@ -953,25 +1036,6 @@ export function ArticleCostingWorkspace({
         parameters={pricedVariant.parameters}
         onCreate={createOption}
       />
-
-      {compareOpen && (
-        <CompareWorkspace
-          open={compareOpen}
-          onClose={() => setCompareOpen(false)}
-          productName={product.name}
-          articleNo={product.articleNo}
-          variantRows={variantCompareRows}
-          scenarioRows={scenarioCompareRows}
-          money={money}
-          onApplyVariant={(id) => {
-            if (variants.some((v) => v.id === id)) {
-              setActiveVariantId(id);
-              setSelectedId(null);
-            }
-            setCompareOpen(false);
-          }}
-        />
-      )}
     </div>
   );
 }
@@ -995,10 +1059,10 @@ function toBuildRef(v: Variant): BuildRef {
   };
 }
 
-function Meta({ label, value }: { label: string; value: string }) {
+function IdMeta({ label, value }: { label: string; value: string }) {
   return (
     <span>
-      {label}: <span className="font-medium text-ink-900">{value}</span>
+      {label} <span className="font-medium text-ink-900">{value}</span>
     </span>
   );
 }

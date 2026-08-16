@@ -80,6 +80,17 @@ export type SpecField = {
 
 export type MaterialType = "Fabric" | "Trim" | "Thread" | "Packaging" | "Other";
 
+/**
+ * A price break. Fabric is bought by the roll, not by the piece: the mill
+ * quotes a cheaper rate the more metres you commit to, so a master carries a
+ * ladder rather than one number. `minMetres` is the floor of the band — the
+ * rate applies from that many metres upward, until the next tier's floor.
+ */
+export type RateTier = {
+  minMetres: number;
+  rate: number;
+};
+
 export type MaterialMaster = {
   id: string;
   code: string;
@@ -100,8 +111,11 @@ export type MaterialMaster = {
   certification?: string;
   supplier?: string;
   rateMasterId: string;
+  /** the rate at the lowest tier — what a small order pays */
   rate: number;
   rateUnit: string;
+  /** price breaks by committed quantity, cheapest last. Fabrics only. */
+  rateTiers?: RateTier[];
   description?: string;
   status: "Active" | "Inactive";
 };

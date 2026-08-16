@@ -50,7 +50,9 @@ export function ProductHeader({
               aria-label={image ? "Replace product image" : "Upload product image"}
               className={cn(
                 "flex h-12 w-12 items-center justify-center overflow-hidden rounded-md border bg-surface-alt",
-                image ? "border-hairline" : "border-dashed border-ink-300 text-ink-400 hover:text-ink-700",
+                image
+                  ? "border-hairline"
+                  : "border-dashed border-ink-300 text-ink-400 hover:text-ink-700",
               )}
             >
               {image ? (
@@ -69,13 +71,7 @@ export function ProductHeader({
                 <Pencil className="h-2.5 w-2.5" />
               </button>
             )}
-            <input
-              ref={inputRef}
-              type="file"
-              accept="image/*"
-              onChange={pick}
-              className="hidden"
-            />
+            <input ref={inputRef} type="file" accept="image/*" onChange={pick} className="hidden" />
           </div>
 
           <div className="min-w-0">
@@ -89,7 +85,9 @@ export function ProductHeader({
               </span>
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] text-ink-500">
-              <span className="rounded bg-surface-alt px-1.5 py-0.5 text-ink-600"># {article.articleNo ?? article.id}</span>
+              <span className="rounded bg-surface-alt px-1.5 py-0.5 text-ink-600">
+                # {article.articleNo ?? article.id}
+              </span>
               <span className="rounded bg-surface-alt px-1.5 py-0.5 text-ink-600"># {pod.id}</span>
               <Meta label="Size" value={article.size || "—"} />
               <Dot />
@@ -104,7 +102,10 @@ export function ProductHeader({
           </div>
         </div>
 
-        <div className="flex items-center gap-5">
+        {/* ml-auto, not just justify-between: the identity line is long enough
+            to wrap this group onto its own row, and without it the actions
+            land on the LEFT of that row instead of the top right. */}
+        <div className="ml-auto flex items-center gap-5">
           <div className="text-right">
             <div className="text-[11px] text-ink-400">Total Cost</div>
             <div className="text-[17px] font-semibold tabular-nums text-ink-900">{totalCost}</div>

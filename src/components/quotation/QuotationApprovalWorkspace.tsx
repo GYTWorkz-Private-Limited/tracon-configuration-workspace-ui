@@ -13,7 +13,18 @@
  * at two stages of the workflow, not two unrelated ones.
  */
 
-import { Boxes, Check, Clock, MessageSquareWarning, Package, Send, X } from "lucide-react";
+import { useState } from "react";
+import {
+  Boxes,
+  Check,
+  Clock,
+  History,
+  MessageSquareWarning,
+  Package,
+  Send,
+  Sparkles,
+  X,
+} from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { Pod } from "@/lib/podsStore";
 import { WorkflowStepper } from "@/components/layout/WorkflowStepper";
@@ -28,26 +39,95 @@ import {
   useQuotationApproval,
   type ReviewStatus,
 } from "@/lib/quotationApprovalStore";
+import {
+  addQuotationComment,
+  sendVersionForApproval,
+  useQuotationHistory,
+  workingVersionNo,
+  type VersionLine,
+} from "@/lib/quotationHistory";
 import { ConfigChips } from "./ConfigChips";
 import { KitComposition } from "./QuoteItemCard";
+import { QuotationHistoryPanel } from "./QuotationHistoryPanel";
+
+/**
+ * One priced item, flattened into the frozen shape a version stores.
+ *
+ * Deliberately derived from the SAME `views` the report above renders, so the
+ * version can never record a figure the approver did not see.
+ */
+function lineOf(v: ViewedItem): VersionLine {
+  if (v.kind === "kit") {
+    return {
+      name: `Kit — ${v.item.name}`,
+      kind: "kit",
+      quantity: v.priced.sets,
+      quantityLabel: `${v.priced.sets.toLocaleString("en-IN")} sets`,
+      finalCostInr: v.priced.commercial.finalCostInr,
+      sellingUsd: v.priced.commercial.sellingUsd,
+      marginPct: v.priced.commercial.marginPct,
+      orderValueUsd: v.priced.orderValueUsd,
+    };
+  }
+  return {
+    name: v.item.name,
+    kind: "product",
+    quantity: v.priced.moq,
+    quantityLabel: `${v.priced.moq.toLocaleString("en-IN")} pcs`,
+    finalCostInr: v.priced.commercial.finalCostInr,
+    sellingUsd: v.priced.commercial.sellingUsd,
+    marginPct: v.priced.commercial.marginPct,
+    orderValueUsd: v.priced.orderValueUsd,
+  };
+}
 
 export function QuotationApprovalWorkspace({
   pod,
+  quotationId,
   articleId,
   costingRef,
   views,
   onClose,
+  onRequote,
 }: {
   pod: Pod;
+  /** the quotation being approved — one request per quotation, never per article */
+  quotationId: string;
   articleId: string;
   costingRef?: string;
   views: ViewedItem[];
   onClose: () => void;
+  /**
+   * Start a requote from here. Approval is where a buyer's push-back usually
+   * lands, so the way into the next round is offered on this screen too —
+   * the host owns the picker, this just hands over to it.
+   */
+  onRequote?: () => void;
 }) {
-  const approval = useQuotationApproval(pod.id);
+  const approval = useQuotationApproval(quotationId);
+  const history = useQuotationHistory(quotationId);
   const totals = totalsOf(views);
   const people = assignedPeople(approval);
   const approvedCount = people.filter((k) => approval.reviewStatus[k] === "approved").length;
+  const versionNo = workingVersionNo(history);
+  const [note, setNote] = useState("");
+  const [historyOpen, setHistoryOpen] = useState(false);
+
+  /**
+   * Sending is the moment the quotation stops moving: the reviewers are
+   * notified AND the figures are frozen as a version, so "what did we send"
+   * has an answer that cannot drift afterwards.
+   */
+  const send = () => {
+    submitQuotationForApproval(quotationId);
+    const no = sendVersionForApproval(quotationId, {
+      lines: views.map(lineOf),
+      orderValueUsd: totals.orderValueUsd,
+      blendedMarginPct: totals.blendedMarginPct,
+    });
+    if (note.trim()) addQuotationComment(quotationId, no, note);
+    setNote("");
+  };
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-canvas">
@@ -92,6 +172,16 @@ export function QuotationApprovalWorkspace({
               </div>
             </div>
           </div>
+
+          {onRequote && approval.submitted && (
+            <button
+              type="button"
+              onClick={onRequote}
+              className="inline-flex items-center gap-1.5 self-center rounded-md border border-brand-700 bg-brand-50 px-3 py-2 text-[13px] font-medium text-brand-700 hover:bg-brand-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              <Sparkles className="h-4 w-4" /> Requote
+            </button>
+          )}
         </div>
       </header>
 
@@ -165,7 +255,7 @@ export function QuotationApprovalWorkspace({
                               type="checkbox"
                               checked={checked}
                               disabled={approval.submitted}
-                              onChange={() => toggleReviewer(pod.id, team.id, person)}
+                              onChange={() => toggleReviewer(quotationId, team.id, person)}
                               className="h-3.5 w-3.5 accent-[var(--color-brand-700)] disabled:cursor-not-allowed"
                             />
                             <span className="text-[12.5px] text-ink-700">{person}</span>
@@ -182,27 +272,55 @@ export function QuotationApprovalWorkspace({
 
           <div className="shrink-0 border-t border-hairline p-4">
             {!approval.submitted ? (
-              <button
-                type="button"
-                disabled={!allTeamsAssigned(approval) || views.length === 0}
-                onClick={() => submitQuotationForApproval(pod.id)}
-                className="flex w-full items-center justify-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2.5 text-[13px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-ink-200"
-                title={
-                  allTeamsAssigned(approval)
-                    ? "Send this quotation for approval"
-                    : "Assign at least one reviewer per team"
-                }
-              >
-                <Send className="h-4 w-4" /> Send for Approval
-              </button>
+              <>
+                {/* A note travels with the version — the reason a price moved
+                    is worth more to the next reader than the number itself. */}
+                <label htmlFor="approval-note" className="sr-only">
+                  Note for version {versionNo}
+                </label>
+                <textarea
+                  id="approval-note"
+                  rows={2}
+                  value={note}
+                  onChange={(e) => setNote(e.target.value)}
+                  placeholder={`Note for version ${versionNo} — optional`}
+                  className="mb-2 w-full rounded-md border border-hairline bg-surface px-2.5 py-2 text-[12px] text-ink-900 placeholder:text-ink-400 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-700/20"
+                />
+                <button
+                  type="button"
+                  disabled={!allTeamsAssigned(approval) || views.length === 0}
+                  onClick={send}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2.5 text-[13px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:bg-ink-200"
+                  title={
+                    allTeamsAssigned(approval)
+                      ? `Send version ${versionNo} for approval`
+                      : "Assign at least one reviewer per team"
+                  }
+                >
+                  <Send className="h-4 w-4" /> Send version {versionNo} for Approval
+                </button>
+              </>
             ) : (
-              <p className="text-center text-[11.5px] text-ink-500">
-                Sent {new Date(approval.submittedAt ?? Date.now()).toLocaleString("en-GB")}
-              </p>
+              <div className="space-y-2">
+                <p className="text-center text-[11.5px] text-ink-500">
+                  Sent {new Date(approval.submittedAt ?? Date.now()).toLocaleString("en-GB")}
+                </p>
+                <button
+                  type="button"
+                  onClick={() => setHistoryOpen(true)}
+                  className="flex w-full items-center justify-center gap-1.5 rounded-md border border-hairline bg-surface px-3.5 py-2 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                >
+                  <History className="h-4 w-4" /> Versions & comments
+                </button>
+              </div>
             )}
           </div>
         </aside>
       </div>
+
+      {historyOpen && (
+        <QuotationHistoryPanel quotationId={quotationId} onClose={() => setHistoryOpen(false)} />
+      )}
     </div>
   );
 }

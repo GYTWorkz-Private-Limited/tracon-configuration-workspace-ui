@@ -61,3 +61,19 @@ export function estimateKitDirectUsd(items: KitItem[] = []): number {
   }
   return inr / fx;
 }
+
+/**
+ * The same estimate in the working currency. Configuration is costed in ₹ —
+ * the dollar conversion belongs to the quotation stage — so screens in this
+ * stage read this and never divide by an FX rate of their own.
+ */
+export function estimateKitDirectInr(items: KitItem[] = []): number {
+  let inr = 0;
+  for (const item of items) {
+    const bundle = resolveCostingModel(item.srfRef);
+    const seeded = seedVariantFor(bundle.defaultVariant, item);
+    const priced = applyParameters(seeded, seeded.parameters, bundle.masters);
+    inr += rollupVariant(priced, bundle.masters).directCost * (item.qty > 0 ? item.qty : 1);
+  }
+  return inr;
+}

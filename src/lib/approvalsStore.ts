@@ -32,6 +32,15 @@ export type ApprovalConfigGroup = { label: string; items: ApprovalConfigItem[] }
 
 export type ApprovalCostRow = { label: string; cost: number; color: string; pct: number };
 
+/** One article inside a kit approval — its own commercial line. */
+export type ApprovalKitLine = {
+  articleId: string;
+  name: string;
+  sellingPrice: number;
+  margin: number;
+  moq: string;
+};
+
 export type ApprovalSnapshot = {
   productName: string;
   productImage?: string;
@@ -51,6 +60,8 @@ export type ApprovalSnapshot = {
   targetPrice: number;
   confidence: number;
   commercialHealth: "Strong" | "Watch" | "At Risk";
+  /** present when the approval is for a set/kit — one line per member */
+  kitItems?: ApprovalKitLine[];
   configGroups: ApprovalConfigGroup[];
   costRows: ApprovalCostRow[];
   aiSummary: {
@@ -383,6 +394,36 @@ function seed(): Approval[] {
   });
 
   return [
+    {
+      id: "APR-2052",
+      status: "pending",
+      priority: "high",
+      submittedBy: "Gautam Kitclu",
+      submittedAt: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
+      updatedAt: new Date(Date.now() - 1000 * 60 * 60 * 5).toISOString(),
+      dueDate: new Date(Date.now() + 1000 * 60 * 60 * 24).toISOString(),
+      approvers: ["Meera K."],
+      cc: [],
+      notes: "Set of two, quoted as one price — table linen kit for Zara Home.",
+      snapshot: baseSnapshot({
+        productName: "Kit — Placemat + Runner",
+        buyer: "Zara Home",
+        articleId: "art-kit-tabletop",
+        articleCode: "KIT-2201",
+        srfId: "SRF-1042",
+        sellingPrice: 15.9,
+        cost: 11.4,
+        margin: 28.3,
+        targetPrice: 16.0,
+        moq: "1,500 sets",
+        kitItems: [
+          { articleId: "A-PLACEMAT", name: "Placemat", sellingPrice: 5.5, margin: 26.0, moq: "3,000 pcs" },
+          { articleId: "A-RUNNER", name: "Runner", sellingPrice: 10.4, margin: 29.5, moq: "1,500 pcs" },
+        ],
+      }),
+      attachments: [],
+      overrides: [],
+    },
     {
       id: "APR-2048",
       status: "pending",

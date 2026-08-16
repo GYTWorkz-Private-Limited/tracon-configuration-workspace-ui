@@ -11,7 +11,7 @@
  * so the costing team can see what that rate is made of.
  */
 
-import type { MaterialMaster } from "../costingModel";
+import type { MaterialMaster, RateTier } from "../costingModel";
 import type { ConsumptionLogic, FabricPathId, LibraryItem } from "./types";
 
 /** Every cut-and-sew fabric consumes on the same marker formula. */
@@ -81,7 +81,29 @@ const PATH_AVAILABILITY: Record<FabricPathId, string> = {
   ydw: "Yarn Dyed Woven",
 };
 
+/**
+ * The mill's price break ladder, as a discount off the 500 m rate.
+ *
+ * Real quotes come per fabric, but the SHAPE is the same everywhere — the big
+ * saving is in the first jump, and it flattens after that — so one ladder over
+ * each fabric's own base rate gives every master a believable set of breaks
+ * without inventing four numbers per fabric by hand.
+ */
+const TIER_LADDER: { minMetres: number; discount: number }[] = [
+  { minMetres: 500, discount: 0 },
+  { minMetres: 1000, discount: 0.124 },
+  { minMetres: 2000, discount: 0.219 },
+  { minMetres: 5000, discount: 0.324 },
+];
+
+const tiersFor = (baseRate: number): RateTier[] =>
+  TIER_LADDER.map(({ minMetres, discount }) => ({
+    minMetres,
+    rate: Math.round(baseRate * (1 - discount)),
+  }));
+
 function fabric(input: FabricInput): LibraryItem {
+  const rateTiers = tiersFor(input.rate);
   const master: MaterialMaster = {
     id: input.id,
     code: input.code,
@@ -102,6 +124,7 @@ function fabric(input: FabricInput): LibraryItem {
     rateMasterId: input.rateMasterId,
     rate: input.rate,
     rateUnit: "per metre",
+    rateTiers,
     description: input.summary,
     status: "Active",
   };

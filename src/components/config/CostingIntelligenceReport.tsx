@@ -5,6 +5,16 @@
 // benchmarks and AI recommendations.
 
 import { useMemo, useState } from "react";
+import { usePod } from "@/lib/podsStore";
+import {
+  FABRIC_INSIGHT_TITLE,
+  fabricCost,
+  fabricInsightText,
+  fabricRequirementsFor,
+  inrShort,
+  metres,
+  tierLabel,
+} from "@/lib/fabricRequirement";
 import { useNavigate } from "@tanstack/react-router";
 import { toast } from "sonner";
 import { SensitivityAnalysis } from "./SensitivityAnalysis";
@@ -59,15 +69,9 @@ import { RequestedChangesWorkspace } from "./RequestedChangesWorkspace";
 import type { ApprovalSnapshot } from "@/lib/approvalsStore";
 
 import { useChangesGate } from "@/lib/requestedChangesStore";
-import { addProducts, ensureQuoteFor, useQuoteDraft } from "@/lib/quoteDraftStore";
-import { usePod } from "@/lib/podsStore";
-import {
-  markReadyForQuotation,
-  useIsReadyForQuotation,
-  READY_LABEL,
-  NOT_READY_LABEL,
-} from "@/lib/quotationReadiness";
-import { ArticleSelectionModal } from "@/components/quotation/ArticleSelectionModal";
+import { useIsReadyForQuotation, READY_LABEL, NOT_READY_LABEL } from "@/lib/quotationReadiness";
+import { QuotationEntryFlow } from "@/components/quotation/QuotationEntryFlow";
+import { QuotationReadyAction } from "@/components/quotation/QuotationReadyAction";
 type Tab = "overview" | "variants" | "financial" | "buildup" | "trends" | "ai";
 
 type ReportArticle = { id: string; name: string; size?: string; moq?: string };
@@ -142,10 +146,7 @@ export function CostingIntelligenceReport({
    * marked ready, "Continue to Quotation" is not the action on offer — the
    * decision in front of the user is whether the costing is finished at all.
    */
-  const pod = usePod(navPodId ?? "");
   const isReady = useIsReadyForQuotation(navPodId, navArticleId);
-  const draft = useQuoteDraft(navPodId ?? "");
-  const quotedIds = new Set((draft?.items ?? []).map((i) => i.articleId));
 
   const metricsByVariant = useMemo(
     () =>
@@ -240,10 +241,8 @@ export function CostingIntelligenceReport({
           <div className="flex items-start gap-3">
             <button
               onClick={() => {
-                // `onClose` only hides this overlay in place — on the legacy
-                // /costing/$id host that leaves the stale canvas underneath
-                // showing through. Back should land on the actual
-                // Configuration & Costing table, not on that relic.
+                // Back means the costing this report is about — the sheet on
+                // the configuration route.
                 if (navPodId && navArticleId) {
                   navigate({
                     to: "/config/$podId/$articleId",
@@ -325,41 +324,16 @@ export function CostingIntelligenceReport({
             </button>
             {changesGate.submitted && <RequestedChangesAction />}
             {changesGate.submitted && <RevisionHistoryAction />}
-            {/* One primary action at a time: confirm the costing is finished,
-                then carry it into the quotation. */}
-            {isReady ? (
-              <button
-                disabled={!navPodId || !navArticleId}
-                onClick={() => setSelectOpen(true)}
-                title="Choose which ready articles to quote"
-                className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <Send className="h-4 w-4" /> Continue to Quotation
-                <ArrowRight className="h-3.5 w-3.5" />
-              </button>
-            ) : (
-              <>
-                <span
-                  title="Mark this costing ready before it can be quoted"
-                  className="inline-flex cursor-not-allowed items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-300"
-                  aria-disabled="true"
-                >
-                  <Send className="h-4 w-4" /> Continue to Quotation
-                </span>
-                <button
-                  disabled={!navPodId || !navArticleId}
-                  onClick={() => {
-                    if (!navPodId || !navArticleId) return;
-                    markReadyForQuotation(navPodId, navArticleId);
-                    toast.success(`${productName} is ${READY_LABEL}`);
-                  }}
-                  title="Confirm this configuration and costing are ready to be quoted"
-                  className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
-                >
-                  <CheckCircle2 className="h-4 w-4" /> Mark as Ready for Quotation
-                </button>
-              </>
-            )}
+            {/* One decision at a time: mark the costing ready, then quote it.
+                The status shows where it stands once it is set, and stays
+                reversible — a costing that has changed is no longer signed
+                off. */}
+            <QuotationReadyAction
+              podId={navPodId}
+              articleId={navArticleId}
+              articleName={productName}
+              onGenerate={() => setSelectOpen(true)}
+            />
           </ActionGroup>
         </div>
       </header>
@@ -466,6 +440,7 @@ export function CostingIntelligenceReport({
                 bestValue={bestValue}
                 targetPriceUsd={targetPriceUsd}
                 productName={productName}
+                podId={navPodId}
                 onApplySensitivity={onApplySensitivity}
                 promoted={promoted}
                 onPromote={(id) => {
@@ -481,6 +456,11 @@ export function CostingIntelligenceReport({
                   activeId={active.variant.id}
                   productName={productName}
                   targetPriceUsd={targetPriceUsd}
+                  onApplyVariant={(id) => {
+                    setPromoted(id);
+                    onPromote?.(id);
+                    toast.success("Variant applied to this costing");
+                  }}
                 />
               </div>
             )}
@@ -493,6 +473,7 @@ export function CostingIntelligenceReport({
                 entry={active}
                 metricsByVariant={metricsByVariant}
                 targetPriceUsd={targetPriceUsd}
+                podId={navPodId}
               />
             )}
           </div>
@@ -521,26 +502,15 @@ export function CostingIntelligenceReport({
 
       {/*
        * Continuing to Quotation is two decisions, not one: this costing is
-       * ready (settled above), and THESE are the ready items worth quoting.
+       * ready (settled above), and then — one product, or several?
        */}
       {navPodId && (
-        <ArticleSelectionModal
+        <QuotationEntryFlow
           open={selectOpen}
           onClose={() => setSelectOpen(false)}
           podId={navPodId}
-          articles={pod?.articles ?? []}
-          alreadyQuotedIds={quotedIds}
-          preselect={navArticleId ? [navArticleId] : undefined}
-          onConfirm={(ids) => {
-            ensureQuoteFor(navPodId);
-            addProducts(navPodId, ids);
-            setSelectOpen(false);
-            navigate({
-              to: "/quotation/$podId/$articleId",
-              params: { podId: navPodId, articleId: ids[0] },
-              search: { sel: undefined },
-            });
-          }}
+          articleId={navArticleId}
+          articleName={productName}
         />
       )}
     </div>
@@ -833,6 +803,7 @@ function OverviewTab({
   onApplySensitivity,
   promoted,
   onPromote,
+  podId,
 }: {
   active: Entry;
   metricsByVariant: Entry[];
@@ -844,6 +815,8 @@ function OverviewTab({
   onApplySensitivity?: (patch: Partial<CushionInputs>) => void;
   promoted: string;
   onPromote: (id: string) => void;
+  /** the POD whose fabric requirement this article shares */
+  podId?: string;
 }) {
   const gap = active.metrics.suggestedQuoteUsd - targetPriceUsd;
   const onTarget = gap <= 0.02;
@@ -916,6 +889,9 @@ function OverviewTab({
           tone="neutral"
         />
       </div>
+
+      {/* Fabric requirement — the purchase behind the per-piece rate */}
+      <FabricRequirementStrip podId={podId} />
 
       {/* Recommendations */}
       <section className="col-span-8 rounded-2xl border border-hairline bg-white p-4">
@@ -996,6 +972,79 @@ function OverviewTab({
         />
       </section>
     </div>
+  );
+}
+
+/**
+ * What the mill is actually being asked for.
+ *
+ * Every other number on this page is per piece; fabric is not bought that way.
+ * The same cloth cut for several articles is one order, and it is the ORDER's
+ * metre count that decides the rate every one of those pieces pays — so the
+ * count, the band it reached, and the distance to the next one are stated
+ * together, in the same tiles as the rest of the summary.
+ */
+function FabricRequirementStrip({ podId }: { podId?: string }) {
+  const pod = usePod(podId ?? "");
+  const reqs = useMemo(() => fabricRequirementsFor(pod), [pod]);
+  if (reqs.length === 0) return null;
+
+  // The fabric carrying the most money is the one worth a paragraph.
+  const lead = [...reqs].sort((a, b) => b.costInr - a.costInr)[0];
+
+  return (
+    <section className="col-span-12 rounded-2xl border border-hairline bg-white p-4">
+      <div className="flex flex-wrap items-baseline gap-x-2 gap-y-1">
+        <h3 className="text-[11px] font-medium uppercase tracking-[0.14em] text-ink-500">
+          Fabric requirement
+        </h3>
+        <p className="min-w-0 flex-1 text-[12px] text-ink-500">
+          Metres this POD needs of each cloth, and the price break that total buys. Fabric rows are
+          costed at the tier shown.
+        </p>
+      </div>
+
+      <div className="mt-3 grid grid-cols-3 gap-3">
+        {reqs.map((r) => (
+          <div key={r.masterId} className="rounded-2xl border border-hairline bg-white p-3">
+            <div className="truncate text-[10.5px] font-medium uppercase tracking-[0.14em] text-ink-500">
+              {r.name}
+            </div>
+            <div className="mt-1 text-[22px] font-semibold tabular-nums text-ink-900">
+              {metres(r.metres)}
+            </div>
+            <div className="text-[13px] font-semibold tabular-nums text-ink-900">
+              {fabricCost(r.costInr)}{" "}
+              <span className="text-[11.5px] font-normal text-ink-500">at ₹{r.tier.rate}/m</span>
+            </div>
+            <div className="mt-0.5 text-[11.5px] text-ink-500">
+              {tierLabel(r.tier)}
+              {r.savingPct > 0 && (
+                <span className="font-medium text-emerald-700">
+                  {" · "}
+                  {r.savingPct}% below base, saves {fabricCost(r.savingInr)}
+                </span>
+              )}
+            </div>
+            <div className="mt-1 text-[11.5px] text-ink-400">
+              {r.nextTier
+                ? `${metres(r.nextTier.metresAway)} more reaches ₹${r.nextTier.tier.rate}/m`
+                : "Best tier reached"}
+            </div>
+          </div>
+        ))}
+      </div>
+
+      {lead && (
+        <div className="mt-3 rounded-lg bg-brand-50 p-3">
+          <div className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.1em] text-brand-700">
+            <Sparkles className="h-3 w-3" /> AI insight
+          </div>
+          <p className="mt-0.5 text-[12.5px] font-semibold text-ink-900">{FABRIC_INSIGHT_TITLE}</p>
+          <p className="mt-1 text-[12px] leading-relaxed text-ink-600">{fabricInsightText(lead)}</p>
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -3847,14 +3896,57 @@ function AiInsightsTab({
   entry,
   metricsByVariant,
   targetPriceUsd,
+  podId,
 }: {
   entry: Entry;
   metricsByVariant: Entry[];
   targetPriceUsd: number;
+  /** the POD whose fabric order this article is part of */
+  podId?: string;
 }) {
   const { metrics: m, variant: v } = entry;
+  const pod = usePod(podId ?? "");
+  const fabrics = useMemo(() => fabricRequirementsFor(pod), [pod]);
+
+  /**
+   * Fabric leads, because it is the largest line in the sheet AND the only one
+   * whose price is decided by the ORDER rather than by this article — so it is
+   * the lever with the most money on it and the one a costing engineer is most
+   * likely to have missed.
+   */
+  const fabricLever = useMemo(() => {
+    if (fabrics.length === 0) return null;
+    const spend = fabrics.reduce((t, r) => t + r.costInr, 0);
+    const saved = fabrics.reduce((t, r) => t + r.savingInr, 0);
+    const totalMetres = fabrics.reduce((t, r) => t + r.metres, 0);
+    // The best offer still on the table, by what it is actually worth.
+    const reachable = fabrics
+      .filter((r) => r.nextTier)
+      .sort(
+        (a, b) =>
+          (b.nextTier?.savingPerMetre ?? 0) * b.metres -
+          (a.nextTier?.savingPerMetre ?? 0) * a.metres,
+      )[0];
+
+    const lead = [...fabrics].sort((a, b) => b.costInr - a.costInr)[0];
+    const others = fabrics.length - 1;
+
+    return {
+      title: FABRIC_INSIGHT_TITLE,
+      impact: saved > 0 ? `${inrShort(saved)} cost advantage` : `${inrShort(spend)} fabric spend`,
+      // The same paragraph the sheet and the fabric card carry, so the three
+      // surfaces read as one finding rather than three.
+      detail:
+        others > 0
+          ? `${fabricInsightText(lead)} ${others} other cloth${others === 1 ? "" : "s"} on this POD account for the remaining ${inrShort(spend - lead.costInr)} of a ${metres(totalMetres)} fabric order.`
+          : fabricInsightText(lead),
+      applyLabel: reachable ? "Review order quantity" : "Fabric priced at best tier",
+      good: true,
+    };
+  }, [fabrics]);
 
   const recommendations = [
+    ...(fabricLever ? [fabricLever] : []),
     {
       title: "Switch greige to Karur Mills",
       impact: "-3.4% total cost",

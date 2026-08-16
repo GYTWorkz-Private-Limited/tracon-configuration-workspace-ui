@@ -3,24 +3,35 @@ import { useMemo, useState } from "react";
 import { Plus, Search, ArrowUpRight, MoreHorizontal } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { usePods, articleProgress, POD_STATUS_LABEL, type PodStatus } from "@/lib/podsStore";
+import { podHasRecostIn, useRecostRequests } from "@/lib/recostingStore";
 import { cn } from "@/lib/utils";
 
 export const Route = createFileRoute("/pods/")({
   head: () => ({
     meta: [
       { title: "Costing Dashboard · Tracon" },
-      { name: "description", content: "Track costing PODs across buyers, articles, and approval stages." },
+      {
+        name: "description",
+        content: "Track costing PODs across buyers, articles, and approval stages.",
+      },
     ],
   }),
   component: PodsDashboard,
 });
 
+/**
+ * The dashboard's status is the ANSWER to "what is this order waiting on",
+ * so a live recosting ask overrides whatever stage the POD was stored at —
+ * an approved order with an article sent back is waiting on costing, not on
+ * approval.
+ */
 const STATUS_TONE: Record<PodStatus, string> = {
-  draft: "bg-ink-100 text-ink-700",
   in_progress: "bg-brand-50 text-brand-700",
   pending_approval: "bg-amber-50 text-amber-700",
   approved: "bg-emerald-50 text-emerald-700",
-  completed: "bg-emerald-100 text-emerald-800",
+  // Red, deliberately not amber: "waiting on an approver" and "sent back"
+  // must not read the same at a glance.
+  recosting: "bg-red-50 text-red-700",
 };
 
 function PodsDashboard() {
@@ -28,11 +39,14 @@ function PodsDashboard() {
   const navigate = useNavigate();
   const [q, setQ] = useState("");
   const [status, setStatus] = useState<"all" | PodStatus>("all");
+  const recosts = useRecostRequests();
+  const statusOf = (p: { id: string; status: PodStatus }): PodStatus =>
+    podHasRecostIn(recosts, p.id) ? "recosting" : p.status;
 
   const filtered = useMemo(() => {
     const term = q.trim().toLowerCase();
     return pods.filter((p) => {
-      if (status !== "all" && p.status !== status) return false;
+      if (status !== "all" && statusOf(p) !== status) return false;
       if (!term) return true;
       return (
         p.id.toLowerCase().includes(term) ||
@@ -42,16 +56,19 @@ function PodsDashboard() {
         p.articles.some((a) => a.name.toLowerCase().includes(term))
       );
     });
-  }, [pods, q, status]);
+  }, [pods, q, status, recosts]);
 
   return (
     <AppShell>
       <div className="mx-auto max-w-[1400px]">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h1 className="text-[22px] font-semibold tracking-tight text-ink-900">Costing Dashboard</h1>
+            <h1 className="text-[22px] font-semibold tracking-tight text-ink-900">
+              Costing Dashboard
+            </h1>
             <p className="mt-1 text-[13px] text-ink-500">
-              PODs bundle buyer articles into a single costing brief. Open one to add articles and start costing.
+              PODs bundle buyer articles into a single costing brief. Open one to add articles and
+              start costing.
             </p>
           </div>
           <button
@@ -73,18 +90,20 @@ function PodsDashboard() {
             />
           </div>
           <div className="flex items-center gap-1 rounded-md border border-hairline bg-surface p-1">
-            {(["all", "draft", "in_progress", "pending_approval", "approved", "completed"] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => setStatus(s)}
-                className={cn(
-                  "rounded px-2.5 py-1 text-[12px] transition-colors",
-                  status === s ? "bg-ink-900 text-white" : "text-ink-500 hover:text-ink-900",
-                )}
-              >
-                {s === "all" ? "All" : POD_STATUS_LABEL[s]}
-              </button>
-            ))}
+            {(["all", "in_progress", "pending_approval", "approved", "recosting"] as const).map(
+              (s) => (
+                <button
+                  key={s}
+                  onClick={() => setStatus(s)}
+                  className={cn(
+                    "rounded px-2.5 py-1 text-[12px] transition-colors",
+                    status === s ? "bg-ink-900 text-white" : "text-ink-500 hover:text-ink-900",
+                  )}
+                >
+                  {s === "all" ? "All" : POD_STATUS_LABEL[s]}
+                </button>
+              ),
+            )}
           </div>
         </div>
 
@@ -108,9 +127,16 @@ function PodsDashboard() {
                 const { costed, total } = articleProgress(p);
                 const pct = total ? (costed / total) * 100 : 0;
                 return (
-                  <tr key={p.id} className="border-b border-hairline last:border-0 hover:bg-surface-alt/50">
+                  <tr
+                    key={p.id}
+                    className="border-b border-hairline last:border-0 hover:bg-surface-alt/50"
+                  >
                     <td className="px-4 py-3">
-                      <Link to="/pods/$id" params={{ id: p.id }} className="font-medium text-ink-900 hover:text-brand-700">
+                      <Link
+                        to="/pods/$id"
+                        params={{ id: p.id }}
+                        className="font-medium text-ink-900 hover:text-brand-700"
+                      >
                         {p.id}
                       </Link>
                     </td>
@@ -122,7 +148,10 @@ function PodsDashboard() {
                     <td className="px-4 py-3">
                       <div className="flex items-center gap-2">
                         <div className="h-1.5 w-24 overflow-hidden rounded-full bg-ink-100">
-                          <div className="h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
+                          <div
+                            className="h-full rounded-full bg-emerald-500"
+                            style={{ width: `${pct}%` }}
+                          />
                         </div>
                         <span className="tabular-nums text-ink-500">
                           {costed}/{total} Costed
@@ -130,8 +159,13 @@ function PodsDashboard() {
                       </div>
                     </td>
                     <td className="px-4 py-3">
-                      <span className={cn("rounded-full px-2 py-0.5 text-[11px] font-medium", STATUS_TONE[p.status])}>
-                        {POD_STATUS_LABEL[p.status]}
+                      <span
+                        className={cn(
+                          "rounded-full px-2 py-0.5 text-[11px] font-medium",
+                          STATUS_TONE[statusOf(p)],
+                        )}
+                      >
+                        {POD_STATUS_LABEL[statusOf(p)]}
                       </span>
                     </td>
                     <td className="px-4 py-3 text-ink-700">{p.owner}</td>

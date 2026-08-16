@@ -18,6 +18,14 @@ import {
 } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { ArticleLibraryDrawer } from "@/components/articles/ArticleLibraryDrawer";
+import {
+  RECOSTING_LABEL,
+  podHasRecostIn,
+  useRecostRequest,
+  useRecostRequests,
+} from "@/lib/recostingStore";
+import { TemplateMappingCard } from "@/components/templates/TemplateMappingCard";
+import { PodComparisonTable } from "@/components/pods/PodComparisonTable";
 import { AddKitDrawer } from "@/components/articles/AddKitDrawer";
 import {
   usePod,
@@ -35,7 +43,6 @@ import {
 } from "@/lib/podsStore";
 import { cn } from "@/lib/utils";
 
-
 export const Route = createFileRoute("/pods/$id")({
   loader: ({ params }) => ({ id: params.id }),
   head: () => ({ meta: [{ title: "POD · Tracon" }] }),
@@ -48,7 +55,9 @@ const STATUS_TONE: Record<ArticleStatus, string> = {
   in_progress: "bg-brand-50 text-brand-700",
   pending_approval: "bg-amber-50 text-amber-700",
   approved: "bg-emerald-50 text-emerald-700",
-  completed: "bg-emerald-100 text-emerald-800",
+  // Red, deliberately not amber: "waiting on an approver" and "sent back"
+  // must not read the same at a glance.
+  recosting: "bg-red-50 text-red-700",
 };
 
 /** Preset catalogue used by the Product combobox + Style helper. */
@@ -88,6 +97,7 @@ const STYLE_PRESETS = Array.from(new Set(PRODUCT_PRESETS.map((p) => p.style)));
 function PodDetail() {
   const { id } = Route.useParams();
   const pod = usePod(id);
+  const recosts = useRecostRequests();
   const navigate = useNavigate();
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -119,7 +129,9 @@ function PodDetail() {
     );
   }
 
-  const selectable = pod.articles.filter((a) => a.status === "not_started" || a.status === "in_progress");
+  const selectable = pod.articles.filter(
+    (a) => a.status === "not_started" || a.status === "in_progress",
+  );
   const canStart = selected.size > 0;
 
   const toggle = (aid: string) =>
@@ -156,11 +168,13 @@ function PodDetail() {
 
   const hasRows = pod.articles.length > 0;
 
-
   return (
     <AppShell>
       <div className="w-full">
-        <Link to="/pods" className="inline-flex items-center gap-1 text-[12px] text-ink-500 hover:text-ink-900">
+        <Link
+          to="/pods"
+          className="inline-flex items-center gap-1 text-[12px] text-ink-500 hover:text-ink-900"
+        >
           <ArrowLeft className="h-3 w-3" /> Dashboard
         </Link>
 
@@ -171,12 +185,27 @@ function PodDetail() {
               <span className="rounded-full bg-ink-100 px-2 py-0.5 text-[11px] font-medium text-ink-700">
                 {POD_STATUS_LABEL[pod.status]}
               </span>
+              {/* An article sent back from a quotation puts the whole order in
+                  a recosting round — said here, where the order is managed. */}
+              {podHasRecostIn(recosts, pod.id) && (
+                <span className="rounded-full bg-amber-100 px-2 py-0.5 text-[11px] font-semibold text-amber-900">
+                  Recost / Requote
+                </span>
+              )}
             </div>
             <div className="mt-1 flex flex-wrap items-center gap-x-4 gap-y-1 text-[12px] text-ink-500">
-              <span>Buyer <span className="text-ink-900">{pod.buyer}</span></span>
-              <span>Buyer Ref <span className="text-ink-900">{pod.buyerRef}</span></span>
-              <span>Prepared by <span className="text-ink-900">{pod.preparedBy}</span></span>
-              <span>Updated <span className="text-ink-900">{pod.updatedAt}</span></span>
+              <span>
+                Buyer <span className="text-ink-900">{pod.buyer}</span>
+              </span>
+              <span>
+                Buyer Ref <span className="text-ink-900">{pod.buyerRef}</span>
+              </span>
+              <span>
+                Prepared by <span className="text-ink-900">{pod.preparedBy}</span>
+              </span>
+              <span>
+                Updated <span className="text-ink-900">{pod.updatedAt}</span>
+              </span>
             </div>
           </div>
 
@@ -187,28 +216,45 @@ function PodDetail() {
                 className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] text-ink-900 hover:bg-surface-alt"
               >
                 <Plus className="h-4 w-4" /> Add
-                <ChevronDown className={cn("h-3.5 w-3.5 text-ink-400 transition-transform", addMenu && "rotate-180")} />
+                <ChevronDown
+                  className={cn(
+                    "h-3.5 w-3.5 text-ink-400 transition-transform",
+                    addMenu && "rotate-180",
+                  )}
+                />
               </button>
               {addMenu && (
                 <div className="absolute right-0 z-30 mt-1 w-[260px] overflow-hidden rounded-md border border-hairline bg-surface shadow-lg">
                   <button
-                    onClick={() => { setAddMenu(false); setLibOpen(true); }}
+                    onClick={() => {
+                      setAddMenu(false);
+                      setLibOpen(true);
+                    }}
                     className="flex w-full items-start gap-2.5 px-3 py-2.5 text-left hover:bg-surface-alt"
                   >
                     <Package className="mt-0.5 h-4 w-4 text-ink-400" />
                     <span>
-                      <span className="block text-[13px] font-medium text-ink-900">Add Article</span>
-                      <span className="block text-[11px] text-ink-500">Browse the Article Library or create new</span>
+                      <span className="block text-[13px] font-medium text-ink-900">
+                        Add Article
+                      </span>
+                      <span className="block text-[11px] text-ink-500">
+                        Browse the Article Library or create new
+                      </span>
                     </span>
                   </button>
                   <button
-                    onClick={() => { setAddMenu(false); setKitOpen(true); }}
+                    onClick={() => {
+                      setAddMenu(false);
+                      setKitOpen(true);
+                    }}
                     className="flex w-full items-start gap-2.5 border-t border-hairline px-3 py-2.5 text-left hover:bg-surface-alt"
                   >
                     <Boxes className="mt-0.5 h-4 w-4 text-ink-400" />
                     <span>
                       <span className="block text-[13px] font-medium text-ink-900">Add Kit</span>
-                      <span className="block text-[11px] text-ink-500">Bedding set, dining set, gift set…</span>
+                      <span className="block text-[11px] text-ink-500">
+                        Bedding set, dining set, gift set…
+                      </span>
                     </span>
                   </button>
                 </div>
@@ -221,11 +267,20 @@ function PodDetail() {
             >
               <Sparkles className="h-4 w-4" /> Start Costing
               {canStart && (
-                <span className="ml-1 rounded-full bg-white/20 px-1.5 text-[11px] tabular-nums">{selected.size}</span>
+                <span className="ml-1 rounded-full bg-white/20 px-1.5 text-[11px] tabular-nums">
+                  {selected.size}
+                </span>
               )}
             </button>
           </div>
+        </div>
 
+        {/* Template before costing: the agreed sequence is POD → Template →
+            Style → Costing, because the template carries the cost structure
+            (overheads, testing %, special packs) that stops components being
+            missed downstream. */}
+        <div className="mt-5">
+          <TemplateMappingCard podId={pod.id} buyer={pod.buyer} />
         </div>
 
         <div className="mt-6 rounded-lg border border-hairline bg-surface">
@@ -235,7 +290,8 @@ function PodDetail() {
               <span className="font-medium text-ink-900">Articles</span>
               <span className="text-ink-400">·</span>
               <span className="text-ink-500">
-                {pod.articles.length} total{selectable.length > 0 ? ", select articles below to send for costing" : ""}
+                {pod.articles.length} total
+                {selectable.length > 0 ? ", select articles below to send for costing" : ""}
               </span>
             </div>
             {selectable.length > 0 && (
@@ -250,7 +306,9 @@ function PodDetail() {
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-surface-alt">
                 <Package className="h-5 w-5 text-ink-400" />
               </div>
-              <p className="mt-3 text-[13px] text-ink-500">No articles yet — start from the library or build a kit.</p>
+              <p className="mt-3 text-[13px] text-ink-500">
+                No articles yet — start from the library or build a kit.
+              </p>
               <div className="mt-3 flex items-center gap-2">
                 <button
                   onClick={() => setLibOpen(true)}
@@ -267,7 +325,6 @@ function PodDetail() {
               </div>
             </div>
           ) : (
-
             <table className="w-full text-[13px]">
               <thead className="border-b border-hairline text-[11px] uppercase tracking-wide text-ink-500">
                 <tr>
@@ -285,10 +342,16 @@ function PodDetail() {
               <tbody>
                 {pod.articles.map((a) =>
                   editingId === a.id ? (
-                    <ArticleEditRow key={a.id} podId={pod.id} article={a} onClose={() => setEditingId(null)} />
+                    <ArticleEditRow
+                      key={a.id}
+                      podId={pod.id}
+                      article={a}
+                      onClose={() => setEditingId(null)}
+                    />
                   ) : (
                     <ArticleRow
                       key={a.id}
+                      podId={pod.id}
                       article={a}
                       selected={selected.has(a.id)}
                       expanded={expanded.has(a.id)}
@@ -309,7 +372,10 @@ function PodDetail() {
                 )}
                 {hasRows && (
                   <tr>
-                    <td colSpan={9} className="border-t border-hairline bg-surface-alt/40 px-4 py-2">
+                    <td
+                      colSpan={9}
+                      className="border-t border-hairline bg-surface-alt/40 px-4 py-2"
+                    >
                       <div className="flex items-center gap-4">
                         <button
                           onClick={() => setLibOpen(true)}
@@ -328,17 +394,24 @@ function PodDetail() {
                   </tr>
                 )}
               </tbody>
-
             </table>
           )}
         </div>
 
         <div className="mt-4 flex items-center gap-2 rounded-lg border border-hairline bg-surface-alt/50 p-3 text-[12px] text-ink-500">
           <ClipboardCheck className="h-4 w-4 text-ink-400" />
-          Selected articles will move to <span className="mx-1 font-medium text-ink-900">In Progress</span> and open in
-          the AI Cost Intelligence Workspace. Unselected articles remain <span className="mx-1 font-medium text-ink-900">Not Started</span>{" "}
-          and can be costed later.
+          Selected articles will move to{" "}
+          <span className="mx-1 font-medium text-ink-900">In Progress</span> and open in the AI Cost
+          Intelligence Workspace. Unselected articles remain{" "}
+          <span className="mx-1 font-medium text-ink-900">Not Started</span> and can be costed
+          later.
         </div>
+      </div>
+
+      {/* The pre-release sanity check: every article and set of this POD in
+            one grid, margin building up SKU by SKU. */}
+      <div className="mt-6">
+        <PodComparisonTable podId={pod.id} />
       </div>
 
       <ArticleLibraryDrawer
@@ -378,11 +451,11 @@ function PodDetail() {
         onCreate={(kit) => addKit(pod.id, kit)}
       />
     </AppShell>
-
   );
 }
 
 function ArticleRow({
+  podId,
   article,
   selected,
   expanded,
@@ -392,6 +465,7 @@ function ArticleRow({
   onDelete,
   onClone,
 }: {
+  podId: string;
   article: Article;
   selected: boolean;
   expanded: boolean;
@@ -404,9 +478,18 @@ function ArticleRow({
   const costable = article.status === "not_started" || article.status === "in_progress";
   const isKit = article.type === "kit";
   const prog = kitProgress(article);
+  // A quotation may be waiting on this article being re-costed. That belongs
+  // on the costing team's own list, not only inside the quotation.
+  const recost = useRecostRequest(podId, article.id);
   return (
     <>
-      <tr className={cn("border-b border-hairline hover:bg-surface-alt/40", selected && "bg-brand-50/40", expanded && "bg-surface-alt/30")}>
+      <tr
+        className={cn(
+          "border-b border-hairline hover:bg-surface-alt/40",
+          selected && "bg-brand-50/40",
+          expanded && "bg-surface-alt/30",
+        )}
+      >
         <td className="px-4 py-3">
           <input
             type="checkbox"
@@ -424,7 +507,9 @@ function ArticleRow({
                 className="rounded p-1 text-ink-500 hover:bg-surface-alt hover:text-ink-900"
                 aria-label={expanded ? "Collapse kit" : "Expand kit"}
               >
-                <ChevronRight className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-90")} />
+                <ChevronRight
+                  className={cn("h-3.5 w-3.5 transition-transform", expanded && "rotate-90")}
+                />
               </button>
             ) : (
               <span className="w-[22px]" />
@@ -440,7 +525,9 @@ function ArticleRow({
               <div className="flex items-center gap-1.5 font-medium text-ink-900">
                 {article.name}
                 {article.techPackRef && (
-                  <span className="rounded bg-brand-50 px-1 py-px text-[10px] text-brand-700">Tech pack</span>
+                  <span className="rounded bg-brand-50 px-1 py-px text-[10px] text-brand-700">
+                    Tech pack
+                  </span>
                 )}
               </div>
               {isKit ? (
@@ -448,7 +535,9 @@ function ArticleRow({
                   {prog.costed} of {prog.total} Articles Costed
                 </div>
               ) : (
-                article.description && <div className="text-[11px] text-ink-400">{article.description}</div>
+                article.description && (
+                  <div className="text-[11px] text-ink-400">{article.description}</div>
+                )
               )}
             </div>
           </div>
@@ -479,13 +568,25 @@ function ArticleRow({
             {ARTICLE_STATUS_LABEL[article.status]}
           </span>
         </td>
-        <td className="whitespace-nowrap px-4 py-3 text-ink-500">{article.updatedAt}</td>
+        <td className="whitespace-nowrap px-4 py-3 text-ink-500">
+          {recost ? (
+            <span
+              title={`${recost.reason} — asked by ${recost.quotationId}`}
+              className="inline-flex items-center gap-1 rounded-full bg-amber-50 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-amber-900"
+            >
+              {RECOSTING_LABEL}
+            </span>
+          ) : (
+            article.updatedAt
+          )}
+        </td>
         <td className="px-4 py-3">
           <div className="flex items-center justify-end gap-1">
             {article.status !== "not_started" && (
               <Link
-                to="/costing/$id"
-                params={{ id: article.srfRef }}
+                to="/config/$podId/$articleId"
+                params={{ podId, articleId: article.id }}
+                search={{ sel: undefined }}
                 className="inline-flex items-center gap-1 rounded px-2 py-1 text-[12px] text-brand-700 hover:bg-brand-50"
               >
                 Open <ArrowUpRight className="h-3 w-3" />
@@ -520,7 +621,10 @@ function ArticleRow({
       {isKit &&
         expanded &&
         (article.kitItems ?? []).map((it, i, arr) => (
-          <tr key={it.id} className={cn("bg-surface-alt/25", i === arr.length - 1 && "border-b border-hairline")}>
+          <tr
+            key={it.id}
+            className={cn("bg-surface-alt/25", i === arr.length - 1 && "border-b border-hairline")}
+          >
             <td className="px-4" />
             <td className="py-2 pl-4 pr-4">
               <div className="flex items-stretch gap-3 pl-[10px]">
@@ -549,8 +653,12 @@ function ArticleRow({
               </div>
             </td>
             <td className="whitespace-nowrap px-4 py-2 text-[11px] text-ink-400">Kit item</td>
-            <td className="whitespace-nowrap px-4 py-2 text-[12px] text-ink-600">{it.size ?? "—"}</td>
-            <td className="whitespace-nowrap px-4 py-2 text-[12px] text-ink-600">{it.moq ?? "—"}</td>
+            <td className="whitespace-nowrap px-4 py-2 text-[12px] text-ink-600">
+              {it.size ?? "—"}
+            </td>
+            <td className="whitespace-nowrap px-4 py-2 text-[12px] text-ink-600">
+              {it.moq ?? "—"}
+            </td>
             <td className="px-4 py-2 text-[12px] text-ink-400">—</td>
             <td className="px-4 py-2">
               <span
@@ -570,9 +678,7 @@ function ArticleRow({
   );
 }
 
-
 /* Inline draft rows were replaced by the Article Library / Add Kit drawers. */
-
 
 function ArticleEditRow({
   podId,
@@ -641,10 +747,18 @@ function ArticleEditRow({
 
       <td className="px-4 py-2">
         <div className="flex items-center justify-end gap-1">
-          <button onClick={save} className="rounded p-1.5 text-emerald-700 hover:bg-emerald-50" aria-label="Save">
+          <button
+            onClick={save}
+            className="rounded p-1.5 text-emerald-700 hover:bg-emerald-50"
+            aria-label="Save"
+          >
             <Check className="h-4 w-4" />
           </button>
-          <button onClick={onClose} className="rounded p-1.5 text-ink-500 hover:bg-surface-alt" aria-label="Cancel">
+          <button
+            onClick={onClose}
+            className="rounded p-1.5 text-ink-500 hover:bg-surface-alt"
+            aria-label="Cancel"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
