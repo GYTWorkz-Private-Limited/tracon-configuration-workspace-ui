@@ -75,6 +75,12 @@ export type StyleDef = {
   custom?: boolean;
   savedAt?: string;
   savedBy?: string;
+  /**
+   * Built by hand for ONE costing and not promoted to the master. It still has
+   * to exist — it is what seeds the sheet's parts — but it is not a shared
+   * asset, so it never appears in the picker for the next order.
+   */
+  oneTime?: boolean;
 };
 
 /** The recorded choice when the user opts OUT of the master. */
@@ -350,7 +356,7 @@ export function styleById(styleId: string | undefined): StyleDef | undefined {
 
 /** Every style the picker can offer — the shipped master plus saved ones. */
 export function allStyles(): StyleDef[] {
-  return [...customStyles, ...STYLE_MASTER];
+  return [...customStyles.filter((s) => !s.oneTime), ...STYLE_MASTER];
 }
 
 /* ------------------------------------------------------------------ *
@@ -493,15 +499,17 @@ export function useCustomStyles(): StyleDef[] {
 /** Every style the picker can offer, subscribed. */
 export function useAllStyles(): StyleDef[] {
   const custom = useCustomStyles();
-  return [...custom, ...STYLE_MASTER];
+  return [...custom.filter((s) => !s.oneTime), ...STYLE_MASTER];
 }
 
 export function saveCustomStyle(
   style: Omit<StyleDef, "id" | "custom" | "savedAt">,
   savedBy = "You",
+  oneTime = false,
 ): StyleDef {
   const saved: StyleDef = {
     ...style,
+    oneTime,
     id: `sty-custom-${Math.random().toString(36).slice(2, 8)}`,
     custom: true,
     savedAt: new Date().toLocaleDateString("en-IN", {
