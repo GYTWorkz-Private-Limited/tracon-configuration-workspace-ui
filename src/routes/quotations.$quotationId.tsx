@@ -8,6 +8,7 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { MultiQuotationWorkspace } from "@/components/quotation/MultiQuotationWorkspace";
+import { GlobalNavFrame } from "@/components/layout/GlobalNav";
 
 export const Route = createFileRoute("/quotations/$quotationId")({
   head: () => ({
@@ -25,5 +26,9 @@ export const Route = createFileRoute("/quotations/$quotationId")({
 
 function MultiQuotationStep() {
   const { quotationId } = Route.useParams();
-  return <MultiQuotationWorkspace quotationId={quotationId} />;
+  return (
+    <GlobalNavFrame>
+      <MultiQuotationWorkspace quotationId={quotationId} />
+    </GlobalNavFrame>
+  );
 }

@@ -9,6 +9,7 @@
 
 import { createFileRoute } from "@tanstack/react-router";
 import { QuoteWorkspace } from "@/components/quotation/QuoteWorkspace";
+import { GlobalNavFrame } from "@/components/layout/GlobalNav";
 
 export const Route = createFileRoute("/quotation/$podId/$articleId")({
   validateSearch: (s: Record<string, unknown>) => ({
@@ -30,5 +31,9 @@ export const Route = createFileRoute("/quotation/$podId/$articleId")({
 function QuotationStep() {
   const { podId, articleId } = Route.useParams();
   const { sel } = Route.useSearch();
-  return <QuoteWorkspace podId={podId} articleId={articleId} sel={sel} />;
+  return (
+    <GlobalNavFrame>
+      <QuoteWorkspace podId={podId} articleId={articleId} sel={sel} />
+    </GlobalNavFrame>
+  );
 }
