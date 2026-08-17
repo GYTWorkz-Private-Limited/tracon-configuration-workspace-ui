@@ -163,3 +163,30 @@ export function submitQuotationForApproval(podId: string, by = "Gautam Kitclu") 
 export function setReviewStatus(podId: string, personKey: string, status: ReviewStatus) {
   write(podId, (a) => ({ ...a, reviewStatus: { ...a.reviewStatus, [personKey]: status } }));
 }
+
+/**
+ * The approval is granted.
+ *
+ * Records every assigned reviewer as approved rather than flipping a separate
+ * "approved" flag, so the reviewer list and the quotation's stage are always
+ * telling the same story — a quotation cannot read Approved while the panel
+ * beside it still shows people pending.
+ */
+export function approveQuotation(quotationId: string) {
+  write(quotationId, (a) => ({
+    ...a,
+    reviewStatus: Object.fromEntries(
+      assignedPeople(a).map((key) => [key, "approved" as ReviewStatus]),
+    ),
+  }));
+}
+
+/** Send the quotation back: every reviewer's position becomes "changes". */
+export function rejectQuotation(quotationId: string) {
+  write(quotationId, (a) => ({
+    ...a,
+    reviewStatus: Object.fromEntries(
+      assignedPeople(a).map((key) => [key, "changes" as ReviewStatus]),
+    ),
+  }));
+}

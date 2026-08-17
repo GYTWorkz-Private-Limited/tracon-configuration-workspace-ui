@@ -25,6 +25,7 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeft,
+  ArrowRight,
   Download,
   FileText,
   History,
@@ -66,12 +67,15 @@ import {
 } from "@/lib/quotationHistory";
 import { totalsOf, viewQuote, type ViewedItem } from "@/lib/quotationView";
 import { commercialHealth } from "@/lib/quotationReview";
+import { useQuotationState, type QuotationState } from "@/lib/quotationLifecycle";
+import { QuotationLifecycleBar } from "./QuotationLifecycleBar";
 import { inrShort } from "@/lib/fabricRequirement";
 import { requestRecost } from "@/lib/recostingStore";
+import { approveQuotation, rejectQuotation } from "@/lib/quotationApprovalStore";
 import { toast } from "sonner";
 import { WorkingSheet } from "./WorkingSheet";
 import { CommercialAssumptions } from "./CommercialAssumptions";
-import { DecisionBar } from "./DecisionBar";
+import { PreparationBar } from "./DecisionBar";
 import { QuotationRiskBanner } from "./QuotationRiskBanner";
 import { VersionInputCompare } from "./VersionInputCompare";
 import { recordSnapshot, snapshotFromViews } from "@/lib/masterSnapshot";
@@ -81,7 +85,7 @@ import { QuotationHistoryPanel, VersionStatusPill } from "./QuotationHistoryPane
 import { RequotePicker } from "./RequotePicker";
 import { OverrideDialog, type RowOverride } from "./OverrideDialog";
 import { RejectDialog } from "./RejectDialog";
-import { rowsForItem } from "./quoteRows";
+import { applyRowOverrides, rowsForItem } from "./quoteRows";
 import type { PaymentTermsDays } from "@/lib/quotationAssumptions";
 
 export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }) {
@@ -90,6 +94,8 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
   const pod = usePod(quotation?.podId ?? "");
   const history = useQuotationHistory(quotationId);
   const selections = useCostingSelections();
+  /** which stage this quotation is at — decides what the page may offer */
+  const qState = useQuotationState(quotationId);
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [approvalOpen, setApprovalOpen] = useState(false);
@@ -132,7 +138,9 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
   }
 
   const sent = latestVersion(history);
-  const locked = history.locked;
+  // A submitted quotation is frozen for the same reason a sent version is:
+  // what a reviewer is looking at must not move under them.
+  const locked = history.locked || !qState.editable;
   const blocked = items.filter((i) => i.rejected);
   const termsDays = quotation.paymentTermsDays ?? 60;
 
@@ -171,6 +179,10 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
         podId={pod.id}
         sent={sent}
         locked={locked}
+        qState={qState}
+        blockedNames={blocked.map((i) => i.name)}
+        itemCount={items.length}
+        onSendForApproval={() => setApprovalOpen(true)}
         termsDays={termsDays}
         overflowOpen={overflowOpen}
         onOverflow={setOverflowOpen}
@@ -202,6 +214,10 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
 
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1320px] px-6 py-4 lg:px-8">
+          {/* Reached from the Quotations module the user has walked no
+              workflow to get here, so the page says where it stands first. */}
+          <QuotationLifecycleBar state={qState} className="mb-4" />
+
           <CommercialAssumptions
             rates={liveRates}
             fxRate={fxRate}
@@ -249,18 +265,11 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
         </div>
       </main>
 
-      {items.length > 0 && (
-        <DecisionBar
-          health={health}
-          locked={locked}
-          blockedNames={blocked.map((i) => i.name)}
-          onApprove={() => setApprovalOpen(true)}
-          onOverride={() => setOverrideFor(items[0]?.id)}
-          // `null` means the objection is to the quotation as a whole; the
-          // dialog is where it gets narrowed to an article or a configuration.
-          onReject={() => setRejectFor(null)}
-        />
-      )}
+      {/* Approve / Reject / Override are the APPROVER's actions and belong to
+          the Approval stage — offering them here would let the person
+          preparing a quotation approve their own work before anybody had seen
+          it. What this stage has is a summary of what is being prepared. */}
+      {items.length > 0 && <PreparationBar health={health} submitted={qState.submitted} />}
 
       {/* ------------------------------ dialogs ------------------------------ */}
 
@@ -285,7 +294,7 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
           isKit={overrideItem.kind === "kit"}
           onClose={() => setOverrideFor(undefined)}
           onSave={(overrides, reason) => {
-            applyOverrides(quotation.id, overrideItem, overrides, reason);
+            applyRowOverrides(quotation.id, overrideItem, overrides, reason);
             setOverrideFor(undefined);
             toast.success(`${overrideItem.name} — override applied`);
           }}
@@ -301,6 +310,10 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
           onClose={() => setRejectFor(undefined)}
           onConfirm={(selection, reason) => {
             rejectSelection(quotation.id, selection, reason);
+            // A rejection taken by an approver is also a verdict on the
+            // approval itself, so the reviewer panel reflects it rather than
+            // sitting at "pending" over a quotation that has been sent back.
+            if (qState.submitted) rejectQuotation(quotation.id);
             setRejectFor(undefined);
             toast.success("Sent back, with your reason recorded against the line");
           }}
@@ -402,41 +415,19 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
             setApprovalOpen(false);
             setRequoteOpen(true);
           }}
+          // The approver's three calls reuse the dialogs this page already
+          // hosts, so an override taken at approval is written by the same
+          // code — and lands in the same audit — as one taken while drafting.
+          onApprove={() => {
+            approveQuotation(quotation.id);
+            toast.success(`${quotation.id} approved`);
+          }}
+          onOverride={() => setOverrideFor(items[0]?.id)}
+          onReject={() => setRejectFor(null)}
         />
       )}
     </div>
   );
-}
-
-/* ------------------------------------------------------------------ *
- * Overrides
- * ------------------------------------------------------------------ */
-
-/**
- * Apply the dialog's changes through the same store actions the rest of the
- * app uses, with the reason logged first so the audit trail reads as a
- * decision followed by its consequences rather than a run of bare figures.
- */
-function applyOverrides(
-  quotationId: string,
-  item: QuoteItem,
-  overrides: RowOverride[],
-  reason: string,
-) {
-  logQuotationEvent(quotationId, "option_changed", `${item.name} — override applied: ${reason}`);
-
-  for (const o of overrides) {
-    if (o.moq !== undefined) updateLine(quotationId, item.id, o.lineId, { moqOverride: o.moq });
-    if (o.marginPct !== undefined) {
-      updateLine(quotationId, item.id, o.lineId, { targetMarginPct: o.marginPct });
-    }
-
-    const price = o.clearSelling ? undefined : o.sellingUsd;
-    if (o.clearSelling || o.sellingUsd !== undefined) {
-      if (item.kind === "kit") setItemSellingPrice(quotationId, item.id, price);
-      else setLineSellingPrice(quotationId, item.id, o.lineId, price);
-    }
-  }
 }
 
 /* ------------------------------------------------------------------ *
@@ -451,6 +442,10 @@ function Header({
   podId,
   sent,
   locked,
+  qState,
+  blockedNames,
+  itemCount,
+  onSendForApproval,
   termsDays,
   overflowOpen,
   onOverflow,
@@ -469,6 +464,10 @@ function Header({
   podId: string;
   sent: QuotationVersion | undefined;
   locked: boolean;
+  qState: QuotationState;
+  blockedNames: string[];
+  itemCount: number;
+  onSendForApproval: () => void;
   termsDays: PaymentTermsDays;
   overflowOpen: boolean;
   onOverflow: (open: boolean) => void;
@@ -507,11 +506,14 @@ function Header({
                 V{revisionNo(quotationId)} · Revised
               </span>
             )}
+            {/* A quotation nobody has submitted is a DRAFT. Calling it
+                "Pending Approval" before it has been sent claims a stage it
+                has not reached and makes the Send action look redundant. */}
             {sent ? (
               <VersionStatusPill status={sent.status} />
             ) : (
-              <span className="rounded-full border border-gold-500/40 bg-gold-50 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-gold-700">
-                Pending Approval
+              <span className="rounded-full border border-hairline bg-surface px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ink-600">
+                {qState.label}
               </span>
             )}
             {locked && (
@@ -589,6 +591,36 @@ function Header({
           >
             Export
           </HeaderButton>
+
+          {/* The stage's one primary action, in the header where every other
+              screen in the app carries its forward step. Once submitted the
+              way on is the Approval screen itself, not a second send. */}
+          {qState.submitted ? (
+            <button
+              type="button"
+              onClick={onSendForApproval}
+              className="inline-flex items-center gap-1.5 rounded-md border border-brand-700 bg-brand-50 px-3.5 py-2 text-[13px] font-semibold text-brand-700 hover:bg-brand-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              <Send className="h-4 w-4" /> Open Approval
+            </button>
+          ) : (
+            <button
+              type="button"
+              disabled={itemCount === 0 || blockedNames.length > 0}
+              title={
+                blockedNames.length > 0
+                  ? `${blockedNames.join(", ")} ${blockedNames.length === 1 ? "is" : "are"} out for recosting — the quotation cannot be sent until ${blockedNames.length === 1 ? "it comes" : "they come"} back.`
+                  : itemCount === 0
+                    ? "There is nothing on this quotation to send"
+                    : "Choose approvers and send this quotation for approval"
+              }
+              onClick={onSendForApproval}
+              className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              <Send className="h-4 w-4" /> Send for Approval
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          )}
 
           <div
             className="relative"

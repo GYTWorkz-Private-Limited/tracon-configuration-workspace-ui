@@ -32,7 +32,13 @@ import { cn } from "@/lib/utils";
 import { usePod, type Article, type Pod } from "@/lib/podsStore";
 import { usd } from "@/lib/commercialProvisions";
 import { useCostingSelections } from "@/lib/costingSelectionStore";
-import { useQuotationForArticle, type QuoteDraft } from "@/lib/quoteDraftStore";
+import { rejectSelection, useQuotationForArticle, type QuoteDraft } from "@/lib/quoteDraftStore";
+import { approveQuotation, rejectQuotation } from "@/lib/quotationApprovalStore";
+import { useQuotationState, type QuotationStage } from "@/lib/quotationLifecycle";
+import { toast } from "sonner";
+import { OverrideDialog } from "./OverrideDialog";
+import { RejectDialog } from "./RejectDialog";
+import { applyRowOverrides, rowsForItem } from "./quoteRows";
 import {
   latestVersion,
   startNewVersion,
@@ -63,11 +69,17 @@ export function QuoteWorkspace({
   const quotation = useQuotationForArticle(podId, articleId);
   const history = useQuotationHistory(quotation?.id ?? "");
   const selections = useCostingSelections();
+  /** the stage of the quotation this article sits on, if any */
+  const qState = useQuotationState(quotation?.id ?? "");
   const [mounted, setMounted] = useState(false);
   const [entryOpen, setEntryOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
+  /** the item whose override dialog is open; undefined means closed */
+  const [overrideFor, setOverrideFor] = useState<string | undefined>(undefined);
+  /** the item a rejection was started from; null means the whole quotation */
+  const [rejectFor, setRejectFor] = useState<string | null | undefined>(undefined);
 
   useEffect(() => setMounted(true), []);
 
@@ -106,10 +118,15 @@ export function QuoteWorkspace({
   }
 
   const sent = latestVersion(history);
-  const locked = history.locked;
+  const locked = history.locked || !qState.editable;
   const companions = (quotation?.items ?? []).filter((i) => i.articleId !== article.id);
   const blocked = items.filter((i) => i.rejected);
   const isMulti = quotation?.mode === "multiple";
+
+  const overrideItem = items.find((i) => i.id === overrideFor);
+  const overrideKitView = overrideItem
+    ? views.find((v) => v.item.id === overrideItem.id)
+    : undefined;
 
   return (
     <div className="flex h-screen w-full flex-col bg-canvas">
@@ -248,6 +265,9 @@ export function QuoteWorkspace({
             <QuotedWithBanner
               quotationId={quotation.id}
               companions={companions.map((c) => c.name)}
+              articleName={article.name}
+              stage={qState.stage}
+              submitted={qState.submitted}
             />
           )}
 
@@ -329,6 +349,52 @@ export function QuoteWorkspace({
         <QuotationHistoryPanel quotationId={quotation.id} onClose={() => setHistoryOpen(false)} />
       )}
 
+      {/* The same two dialogs the consolidated workspace hosts — an approver
+          deciding on a single-article quotation uses the same code path. */}
+      {quotation && overrideItem && (
+        <OverrideDialog
+          articleName={overrideItem.name}
+          rows={rowsForItem(
+            quotation,
+            overrideItem,
+            selections,
+            overrideKitView?.kind === "kit"
+              ? {
+                  priced: {
+                    ...overrideKitView.priced.members[0],
+                    commercial: overrideKitView.priced.commercial,
+                  },
+                  sets: overrideKitView.priced.sets,
+                }
+              : undefined,
+          )}
+          initialLineId={overrideItem.quotedLineId ?? overrideItem.lines[0]?.id ?? overrideItem.id}
+          isKit={overrideItem.kind === "kit"}
+          onClose={() => setOverrideFor(undefined)}
+          onSave={(overrides, reason) => {
+            applyRowOverrides(quotation.id, overrideItem, overrides, reason);
+            setOverrideFor(undefined);
+            toast.success(`${overrideItem.name} — override applied`);
+          }}
+        />
+      )}
+
+      {quotation && rejectFor !== undefined && (
+        <RejectDialog
+          quotationId={quotation.id}
+          podId={pod.id}
+          items={quotation.items}
+          preselect={rejectFor ? [rejectFor] : quotation.items.map((i) => i.id)}
+          onClose={() => setRejectFor(undefined)}
+          onConfirm={(selection, reason) => {
+            rejectSelection(quotation.id, selection, reason);
+            if (qState.submitted) rejectQuotation(quotation.id);
+            setRejectFor(undefined);
+            toast.success("Sent back, with your reason recorded against the line");
+          }}
+        />
+      )}
+
       {approvalOpen && quotation && (
         <QuotationApprovalWorkspace
           pod={pod}
@@ -337,6 +403,15 @@ export function QuoteWorkspace({
           costingRef={article.srfRef}
           views={views}
           onClose={() => setApprovalOpen(false)}
+          // A single-article quotation is decided on the full document, which
+          // is this one — so the decisions act on it directly rather than
+          // handing off to a consolidated workspace that does not exist here.
+          onApprove={() => {
+            approveQuotation(quotation.id);
+            toast.success(`${quotation.id} approved`);
+          }}
+          onOverride={() => setOverrideFor(items[0]?.id)}
+          onReject={() => setRejectFor(null)}
         />
       )}
     </div>
@@ -404,32 +479,69 @@ function ArticleQuoteStrip({
   );
 }
 
-/** This article is part of a bigger quotation, and here is the way into it. */
+/**
+ * This article is part of a bigger quotation, and here is the way into it.
+ *
+ * The wording follows the quotation's stage, because the fact the reader needs
+ * changes with it: before submission the point is that the article will not be
+ * sent on its own; afterwards the point is that it is already out, with
+ * others, and this page is no longer where anything happens to it.
+ */
 function QuotedWithBanner({
   quotationId,
   companions,
+  articleName,
+  stage,
+  submitted,
 }: {
   quotationId: string;
   companions: string[];
+  articleName: string;
+  stage: QuotationStage;
+  submitted: boolean;
 }) {
+  const others = `${companions.length} other article${companions.length === 1 ? "" : "s"}`;
+
+  const { title, detail, tone } = submitted
+    ? stage === "approval" || stage === "changes"
+      ? {
+          title: "In approval",
+          detail: `${articleName} is part of quotation ${quotationId} with ${companions.join(" and ")}. The quotation is read-only while it is being reviewed.`,
+          tone: "amber" as const,
+        }
+      : {
+          title: stage === "approved" ? "Approved" : "Submitted",
+          detail: `Included in ${quotationId} with ${others} — ${companions.join(" and ")}.`,
+          tone: "brand" as const,
+        }
+    : {
+        title: "Quoted with other articles",
+        detail: `${articleName} is part of a consolidated quotation with ${companions.join(" and ")}. It is sent for approval as one document.`,
+        tone: "neutral" as const,
+      };
+
   return (
-    <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-hairline bg-surface px-4 py-3">
+    <div
+      className={cn(
+        "mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border px-4 py-3",
+        tone === "amber"
+          ? "border-gold-500/40 bg-gold-50"
+          : tone === "brand"
+            ? "border-brand-600/30 bg-brand-50"
+            : "border-hairline bg-surface",
+      )}
+    >
       <Layers className="h-4 w-4 shrink-0 text-ink-500" aria-hidden />
       <div className="min-w-0">
-        <p className="text-[13px] font-semibold text-ink-900">
-          Quoted with {companions.length} other article{companions.length === 1 ? "" : "s"} on{" "}
-          {quotationId}
-        </p>
-        <p className="mt-0.5 text-[11.5px] text-ink-500">
-          {companions.join(" + ")} — the full quotation is sent for approval as one document.
-        </p>
+        <p className="text-[13px] font-semibold text-ink-900">{title}</p>
+        <p className="mt-0.5 text-[11.5px] text-ink-600">{detail}</p>
       </div>
       <Link
         to="/quotations/$quotationId"
         params={{ quotationId }}
-        className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-brand-700 bg-brand-50 px-3.5 py-1.5 text-[12.5px] font-semibold text-brand-700 hover:bg-brand-100"
+        className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-brand-700 bg-surface px-3.5 py-1.5 text-[12.5px] font-semibold text-brand-700 hover:bg-brand-100"
       >
-        View Full Quotation <ArrowRight className="h-3.5 w-3.5" />
+        View Quotation <ArrowRight className="h-3.5 w-3.5" />
       </Link>
     </div>
   );

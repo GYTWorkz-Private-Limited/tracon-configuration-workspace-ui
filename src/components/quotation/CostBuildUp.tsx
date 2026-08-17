@@ -103,7 +103,7 @@ export function CostBuildUp({
     : [{ label: view.item.name, rollup: view.priced.rollup }];
 
   return (
-    <div className="border-t border-hairline bg-surface-alt/40 px-4 py-4">
+    <div className="bg-surface px-4 py-4">
       <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_minmax(0,1.05fr)_minmax(0,0.9fr)]">
         <FabricBand rollups={rollups} isKit={isKit} />
         <CostLadder

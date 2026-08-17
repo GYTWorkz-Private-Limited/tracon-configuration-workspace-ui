@@ -508,8 +508,13 @@ function SheetRow({
         aria-expanded={open}
         title={open ? "Hide the cost build-up" : "Show the cost build-up"}
         className={cn(
-          "cursor-pointer border-b border-hairline transition-colors focus-visible:outline-none",
-          open ? "bg-brand-50/50" : "hover:bg-surface-alt/60 focus-visible:bg-surface-alt/60",
+          "cursor-pointer border-b transition-colors focus-visible:outline-none",
+          open
+            ? // An open row is the HEAD of its detail block, not another row in
+              // the list: it keeps the accent bar and loses the bottom rule, so
+              // the row and the panel below read as one object.
+              "border-transparent bg-brand-50 shadow-[inset_3px_0_0_0_var(--color-brand-700)]"
+            : "border-hairline hover:bg-surface-alt/60 focus-visible:bg-surface-alt/60",
         )}
       >
         <td className="px-2 py-2.5">
@@ -584,14 +589,39 @@ function SheetRow({
       </tr>
 
       {open && (
-        <tr>
-          <td colSpan={colCount} className="p-0">
-            <CostBuildUp
-              view={row.view}
-              article={article}
-              callouts={row.callouts}
-              onOpenContext={onOpenContext}
-            />
+        // Inset and framed so the detail reads as a panel belonging to the row
+        // above it, rather than as more table. Without the inset the build-up
+        // ran edge to edge and the sheet became one undifferentiated block.
+        <tr className="border-b border-hairline">
+          <td
+            colSpan={colCount}
+            className="bg-brand-50 p-0 shadow-[inset_3px_0_0_0_var(--color-brand-700)]"
+          >
+            <div className="px-3 pb-3">
+              <div className="overflow-hidden rounded-lg border border-hairline bg-surface">
+                <header className="flex flex-wrap items-center gap-x-2 gap-y-1 border-b border-hairline bg-surface-alt px-4 py-2">
+                  <h4 className="text-[10.5px] font-semibold uppercase tracking-[0.12em] text-ink-700">
+                    {row.product}
+                  </h4>
+                  <span className="text-[11px] text-ink-500">
+                    {row.ref} · {row.size} · {row.qtyLabel}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={onToggle}
+                    className="ml-auto rounded px-2 py-0.5 text-[11px] font-medium text-ink-500 hover:bg-surface hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                  >
+                    Collapse
+                  </button>
+                </header>
+                <CostBuildUp
+                  view={row.view}
+                  article={article}
+                  callouts={row.callouts}
+                  onOpenContext={onOpenContext}
+                />
+              </div>
+            </div>
           </td>
         </tr>
       )}

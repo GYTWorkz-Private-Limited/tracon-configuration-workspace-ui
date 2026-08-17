@@ -20,8 +20,17 @@ import {
 } from "@/lib/quotationPricing";
 import { buildsIn, scenariosIn, type State as SelectionState } from "@/lib/costingSelectionStore";
 import { podFabricRates } from "@/lib/fabricRequirement";
-import { ratesFor, type QuoteDraft, type QuoteItem } from "@/lib/quoteDraftStore";
+import {
+  ratesFor,
+  setItemSellingPrice,
+  setLineSellingPrice,
+  updateLine,
+  type QuoteDraft,
+  type QuoteItem,
+} from "@/lib/quoteDraftStore";
+import { logQuotationEvent } from "@/lib/quotationHistory";
 import type { QuoteRow } from "./QuoteLinesTable";
+import type { RowOverride } from "./OverrideDialog";
 
 /**
  * A kit is one commercial position: its members are costed individually but
@@ -70,4 +79,37 @@ export function rowsForItem(
     moqOverridden: l.moqOverride !== undefined,
     rejected: Boolean(l.rejected),
   }));
+}
+
+/**
+ * Apply the override dialog's changes.
+ *
+ * Lives here rather than on either workspace because BOTH reach it: the
+ * consolidated quotation and a single article's own page host the same dialog,
+ * and an override must be written the same way — and land in the same audit —
+ * whichever screen the approver happened to be on.
+ *
+ * The reason is logged first, so the trail reads as a decision followed by its
+ * consequences rather than a run of bare figures.
+ */
+export function applyRowOverrides(
+  quotationId: string,
+  item: QuoteItem,
+  overrides: RowOverride[],
+  reason: string,
+) {
+  logQuotationEvent(quotationId, "option_changed", `${item.name} — override applied: ${reason}`);
+
+  for (const o of overrides) {
+    if (o.moq !== undefined) updateLine(quotationId, item.id, o.lineId, { moqOverride: o.moq });
+    if (o.marginPct !== undefined) {
+      updateLine(quotationId, item.id, o.lineId, { targetMarginPct: o.marginPct });
+    }
+
+    const price = o.clearSelling ? undefined : o.sellingUsd;
+    if (o.clearSelling || o.sellingUsd !== undefined) {
+      if (item.kind === "kit") setItemSellingPrice(quotationId, item.id, price);
+      else setLineSellingPrice(quotationId, item.id, o.lineId, price);
+    }
+  }
 }

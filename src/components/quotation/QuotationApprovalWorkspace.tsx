@@ -1,16 +1,19 @@
 /**
  * Approval — the step after Quotation.
  *
- * Left (70%): the SAME quotation the Quotation Workspace built, rendered
- * read-only — every product and kit, its scenario/variant/option, MOQ, direct
- * cost, commercial costs, final cost, selling price, margin and quoted value.
- * Nothing here is re-priced or re-typed; it comes from `quotationView`, the
- * same read every other quotation surface uses.
+ * Left: the SAME quotation the Quotation Workspace built, rendered by the SAME
+ * `WorkingSheet` component, read-only. Not a second rendering of the same
+ * figures: an approver who is shown a different-looking document from the one
+ * that was prepared has to work out for themselves whether it is the same
+ * quotation, and a bespoke approval view is exactly where the two drift apart.
  *
- * Right (30%): reviewer assignment — who approves, submit, status. The
- * mechanics mirror the existing costing sign-off flow (same team shape, same
- * submit-then-track pattern) so approval reads as one consistent idea used
- * at two stages of the workflow, not two unrelated ones.
+ * Right: the workflow — who it went to, who has acted, what they said, and the
+ * history. The mechanics mirror the existing costing sign-off flow (same team
+ * shape, same submit-then-track pattern) so approval reads as one consistent
+ * idea used at two stages of the workflow, not two unrelated ones.
+ *
+ * The split is deliberate: LEFT is the thing being decided, RIGHT is the
+ * decision process around it.
  */
 
 import { useState } from "react";
@@ -21,6 +24,7 @@ import {
   History,
   MessageSquareWarning,
   Package,
+  PencilLine,
   Send,
   Sparkles,
   X,
@@ -46,6 +50,7 @@ import {
   workingVersionNo,
   type VersionLine,
 } from "@/lib/quotationHistory";
+import { WorkingSheet } from "./WorkingSheet";
 import { ConfigChips } from "./ConfigChips";
 import { KitComposition } from "./QuoteItemCard";
 import { QuotationHistoryPanel } from "./QuotationHistoryPanel";
@@ -89,6 +94,9 @@ export function QuotationApprovalWorkspace({
   views,
   onClose,
   onRequote,
+  onApprove,
+  onOverride,
+  onReject,
 }: {
   pod: Pod;
   /** the quotation being approved — one request per quotation, never per article */
@@ -103,6 +111,15 @@ export function QuotationApprovalWorkspace({
    * the host owns the picker, this just hands over to it.
    */
   onRequote?: () => void;
+  /**
+   * The approver's decisions. The host owns them because Override and Reject
+   * open the dialogs it already hosts for the quotation — the same dialogs,
+   * writing to the same store, rather than a second set that only approvers
+   * can reach.
+   */
+  onApprove: () => void;
+  onOverride: () => void;
+  onReject: () => void;
 }) {
   const approval = useQuotationApproval(quotationId);
   const history = useQuotationHistory(quotationId);
@@ -204,10 +221,10 @@ export function QuotationApprovalWorkspace({
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* LEFT — the quotation, read-only */}
+        {/* LEFT — the quotation, in the very sheet it was prepared in */}
         <div className="min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[1000px] space-y-4 px-6 py-6 lg:px-8">
-            <div className="flex items-center gap-2">
+          <div className="mx-auto max-w-[1100px] px-6 py-5 lg:px-8">
+            <div className="mb-3 flex items-center gap-2">
               <h2 className="text-[13px] font-semibold text-ink-900">Quotation under review</h2>
               <span className="rounded-full bg-ink-100 px-2 py-0.5 text-[11px] text-ink-600">
                 read only
@@ -219,7 +236,17 @@ export function QuotationApprovalWorkspace({
                 This quotation has no items.
               </p>
             ) : (
-              views.map((v) => <ApprovalItem key={v.item.id} view={v} />)
+              <WorkingSheet
+                views={views}
+                pod={pod}
+                quotationId={quotationId}
+                // The approver reads and decides; they do not edit the sheet.
+                // A change to the quotation is an Override, which is a
+                // recorded decision rather than a quiet correction.
+                readOnly
+                onOverride={() => undefined}
+                onReject={() => undefined}
+              />
             )}
           </div>
         </div>
@@ -305,6 +332,34 @@ export function QuotationApprovalWorkspace({
                 <p className="text-center text-[11.5px] text-ink-500">
                   Sent {new Date(approval.submittedAt ?? Date.now()).toLocaleString("en-GB")}
                 </p>
+
+                {/* The approver's three calls. They exist only once the
+                    quotation has actually been submitted — before that there
+                    is nothing to approve and nobody has been asked. */}
+                <div className="grid grid-cols-3 gap-1.5">
+                  <button
+                    type="button"
+                    onClick={onApprove}
+                    className="inline-flex items-center justify-center gap-1 rounded-md bg-brand-700 px-2 py-2 text-[12px] font-semibold text-white hover:bg-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                  >
+                    <Check className="h-3.5 w-3.5" aria-hidden /> Approve
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onOverride}
+                    className="inline-flex items-center justify-center gap-1 rounded-md border border-hairline bg-surface px-2 py-2 text-[12px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                  >
+                    <PencilLine className="h-3.5 w-3.5" aria-hidden /> Override
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onReject}
+                    className="inline-flex items-center justify-center gap-1 rounded-md border border-[var(--color-risk)]/40 bg-surface px-2 py-2 text-[12px] font-medium text-[var(--color-risk)] hover:bg-[var(--color-risk-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-risk)]"
+                  >
+                    <X className="h-3.5 w-3.5" aria-hidden /> Reject
+                  </button>
+                </div>
+
                 <button
                   type="button"
                   onClick={() => setHistoryOpen(true)}
