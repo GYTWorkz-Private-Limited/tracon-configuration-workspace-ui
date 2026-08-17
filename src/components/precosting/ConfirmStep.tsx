@@ -22,6 +22,7 @@ export function ConfirmStep({
   template,
   style,
   styleProvenance,
+  styleModified = false,
   builtManually,
   /** a set: its members carry the styles, so there is none to summarise here */
   omitStyle = false,
@@ -34,6 +35,9 @@ export function ConfirmStep({
   /** the chosen master style, or the manual draft rendered as one */
   style: StyleDef | null;
   styleProvenance: Provenance;
+  /** inherited from a master and then edited — not manual-from-scratch */
+  styleModified?: boolean;
+  /** the customise path, whichever it started from */
   builtManually: boolean;
   omitStyle?: boolean;
   saveToMaster: boolean;
@@ -68,6 +72,11 @@ export function ConfirmStep({
           <div className="flex flex-wrap items-center gap-1.5">
             <h3 className="text-[12.5px] font-semibold text-ink-900">Style summary</h3>
             <ProvenanceChip kind={styleProvenance} />
+            {styleModified && (
+              <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.06em] text-amber-900 ring-1 ring-amber-200">
+                Modified
+              </span>
+            )}
             <div className="ml-auto flex items-center gap-1.5">
               <SecondaryAction
                 onClick={onEditStyle}
@@ -85,7 +94,11 @@ export function ConfirmStep({
           </div>
 
           {style ? (
-            <InheritancePreview style={style} />
+            <InheritancePreview
+              style={style}
+              provenance={styleProvenance === "customer" ? "master" : styleProvenance}
+              modified={styleModified}
+            />
           ) : (
             <p className="rounded-lg border border-hairline bg-surface-alt/40 px-3 py-4 text-[12px] text-ink-500">
               No style chosen yet.{" "}

@@ -9,8 +9,9 @@
 // the same way the roll-up is computed.
 
 import { Fragment, useState } from "react";
-import { BookOpen, Check, ChevronDown, Layers, Plus, Settings2, Trash2 } from "lucide-react";
+import { BookOpen, Layers, Plus, Settings2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { OptionPicker, type PickerOption } from "@/components/ui/pickers";
 import type { MoneyFormatter } from "@/lib/money";
 import type { CostLine, LineSection, OptionGroup } from "@/lib/costLines";
 import { fabricLine, inrShort, type FabricRequirement } from "@/lib/fabricRequirement";
@@ -127,6 +128,27 @@ function FabricRollupRow({
 
 const HEAD =
   "px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-400 whitespace-nowrap";
+
+/**
+ * A cost line's option group in the shared picker's terms: the rate is the one
+ * thing the sheet formats itself, and it has always been "₹" + two decimals.
+ */
+function pickerOptions(group: OptionGroup): PickerOption[] {
+  return group.options.map((o) => ({
+    id: o.id,
+    label: o.label,
+    detail: o.detail,
+    trailing: `₹${o.rate.toFixed(2)}`,
+  }));
+}
+
+/**
+ * Rate lists are short and already grouped by the row they hang off, so the
+ * sheet keeps the search box out of them entirely — including the eleven-entry
+ * fabric master list, which is the one group that would otherwise cross the
+ * shared default and change how a row that exists today looks.
+ */
+const NO_PICKER_SEARCH = 999;
 
 export function CostLineTable({
   sections,
@@ -434,7 +456,10 @@ function LineRow({
       <td className={cn(cell, "max-w-[240px]")}>
         {line.optionGroup && line.target && !readOnly ? (
           <OptionPicker
-            group={line.optionGroup}
+            label={line.optionGroup.label}
+            options={pickerOptions(line.optionGroup)}
+            selectedId={line.optionGroup.selectedId}
+            searchThreshold={NO_PICKER_SEARCH}
             onPick={(optionId) =>
               onSelectOption(line.kind, line.target!.componentId, line.target!.itemId, optionId)
             }
@@ -494,96 +519,5 @@ function LineRow({
         )}
       </td>
     </tr>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * Option picker
- * ------------------------------------------------------------------ */
-
-function OptionPicker({ group, onPick }: { group: OptionGroup; onPick: (id: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const selected = group.options.find((o) => o.id === group.selectedId);
-
-  return (
-    <span className="relative inline-block max-w-full">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        aria-expanded={open}
-        aria-label={`${group.label}: ${selected?.label ?? "not set"}. Change.`}
-        className="inline-flex max-w-full items-center gap-1 rounded-md border border-hairline bg-surface px-2 py-1 text-[12px] text-ink-800 transition-colors hover:border-brand-700 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-      >
-        <span className="truncate">{selected?.label ?? "Select…"}</span>
-        <ChevronDown className="h-3 w-3 shrink-0 text-ink-400" aria-hidden />
-      </button>
-
-      {open && (
-        <>
-          <span
-            className="fixed inset-0 z-30"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-            }}
-          />
-          <span className="absolute left-0 top-full z-40 mt-1 block w-[280px] overflow-hidden rounded-lg border border-hairline bg-surface shadow-2xl">
-            <span className="block border-b border-hairline px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-500">
-              {group.label}
-            </span>
-            <span className="block max-h-[260px] overflow-y-auto p-1">
-              {group.options.map((o) => {
-                const active = o.id === group.selectedId;
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOpen(false);
-                      onPick(o.id);
-                    }}
-                    className={cn(
-                      "flex w-full items-start gap-1.5 rounded px-2 py-1.5 text-left transition-colors",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-                      active ? "bg-brand-50" : "hover:bg-surface-alt",
-                    )}
-                  >
-                    <Check
-                      className={cn(
-                        "mt-0.5 h-3 w-3 shrink-0 text-brand-700",
-                        !active && "opacity-0",
-                      )}
-                      aria-hidden
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span
-                        className={cn(
-                          "block truncate text-[12px]",
-                          active ? "font-medium text-brand-800" : "text-ink-800",
-                        )}
-                      >
-                        {o.label}
-                      </span>
-                      {o.detail && (
-                        <span className="block truncate text-[10.5px] text-ink-400">
-                          {o.detail}
-                        </span>
-                      )}
-                    </span>
-                    <span className="shrink-0 text-[11px] tabular-nums text-ink-500">
-                      ₹{o.rate.toFixed(2)}
-                    </span>
-                  </button>
-                );
-              })}
-            </span>
-          </span>
-        </>
-      )}
-    </span>
   );
 }

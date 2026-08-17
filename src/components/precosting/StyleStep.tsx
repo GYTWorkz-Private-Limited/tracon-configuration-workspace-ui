@@ -1,10 +1,15 @@
 /**
  * Step 2 — what is being made?
  *
- * Two paths, given equal standing. Most orders repeat a style the mill has
- * made before, so the master comes first; but a genuinely new style must not
- * force the user to leave the flow, so it can be built here and (on the next
- * step) promoted into the master for the order after this one.
+ * EXACTLY two paths, given equal standing:
+ *
+ *   1. Use existing style — the master, chosen through the costing sheet's own
+ *      searchable dropdown so this screen behaves like every other picker in
+ *      the product.
+ *   2. Customize — start from an existing style or from scratch, then edit the
+ *      attributes and parts. Starting from a master is inherited-then-modified,
+ *      which is a different (and more trustworthy) provenance than typing a
+ *      style out of nothing, so the chips say so.
  *
  * The selection preview is deliberately about INHERITANCE: it shows exactly
  * the attributes the costing sheet is about to receive, because a style is
@@ -12,9 +17,10 @@
  */
 
 import { useMemo, useState } from "react";
-import { Layers, PencilRuler, Plus, Search, Trash2 } from "lucide-react";
+import { Layers, PencilRuler, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { cutSizeLabel, type StyleDef } from "@/lib/styleMaster";
+import { FilterChip, FilterSelect, OptionPicker, type PickerOption } from "@/components/ui/pickers";
 import { ProvenanceChip } from "./Provenance";
 import {
   PART_TYPES,
@@ -25,9 +31,26 @@ import {
   type StyleDraft,
 } from "./styleDraft";
 
-export type StylePath = "select" | "build";
+/** Only two paths exist. There is no third tab. */
+export type StylePath = "select" | "customize";
 
-const ALL = "__all__";
+const ALL = "all";
+const SCRATCH = "__scratch__";
+
+/**
+ * The seeded master is only four styles deep today, but this dropdown is the
+ * way into the WHOLE style master (custom saves included), so its search is
+ * part of the control rather than a reward for the list growing. The threshold
+ * is named here instead of relying on the generic default.
+ */
+const STYLE_SEARCH_THRESHOLD = 3;
+
+const styleOption = (s: StyleDef): PickerOption => ({
+  id: s.id,
+  label: s.name,
+  detail: [s.code, s.product, s.category].filter(Boolean).join(" · "),
+  trailing: `${s.parts.length} parts`,
+});
 
 export function StyleStep({
   styles,
@@ -35,6 +58,8 @@ export function StyleStep({
   onPathChange,
   selectedId,
   onSelect,
+  baseStyleId,
+  onStartFrom,
   draft,
   onDraftChange,
   errors,
@@ -45,6 +70,9 @@ export function StyleStep({
   onPathChange: (p: StylePath) => void;
   selectedId: string | null;
   onSelect: (id: string) => void;
+  /** the master the customisation started from — null means from scratch */
+  baseStyleId: string | null;
+  onStartFrom: (id: string | null) => void;
   draft: StyleDraft;
   onDraftChange: (d: StyleDraft) => void;
   errors: DraftErrors;
@@ -57,22 +85,25 @@ export function StyleStep({
           active={path === "select"}
           onClick={() => onPathChange("select")}
           icon={<Layers className="h-3.5 w-3.5" aria-hidden />}
-          label="Select from Style Master"
+          label="Use existing style"
           hint="Parts, cut sizes and consumption arrive pre-filled"
         />
         <PathTab
-          active={path === "build"}
-          onClick={() => onPathChange("build")}
+          active={path === "customize"}
+          onClick={() => onPathChange("customize")}
           icon={<PencilRuler className="h-3.5 w-3.5" aria-hidden />}
-          label="Build manually"
-          hint="A style the master does not carry yet"
+          label="Customize"
+          hint="Start from a style or from scratch, then edit it"
         />
       </div>
 
       {path === "select" ? (
         <StylePicker styles={styles} selectedId={selectedId} onSelect={onSelect} />
       ) : (
-        <StyleBuilder
+        <StyleCustomizer
+          styles={styles}
+          baseStyleId={baseStyleId}
+          onStartFrom={onStartFrom}
           draft={draft}
           onChange={onDraftChange}
           errors={errors}
@@ -123,19 +154,11 @@ function PathTab({
 }
 
 /* ------------------------------------------------------------------ *
- * Path A — select an existing style
+ * Shared filter state — the same Product/Category narrowing serves the
+ * "use existing" dropdown and the "start from" dropdown.
  * ------------------------------------------------------------------ */
 
-function StylePicker({
-  styles,
-  selectedId,
-  onSelect,
-}: {
-  styles: StyleDef[];
-  selectedId: string | null;
-  onSelect: (id: string) => void;
-}) {
-  const [query, setQuery] = useState("");
+function useStyleFilters(styles: StyleDef[]) {
   const [product, setProduct] = useState(ALL);
   const [category, setCategory] = useState(ALL);
 
@@ -151,129 +174,150 @@ function StylePicker({
     [styles],
   );
 
-  const shown = useMemo(() => {
-    const q = query.trim().toLowerCase();
-    return styles.filter(
-      (s) =>
-        (product === ALL || s.product === product) &&
-        (category === ALL || s.category === category) &&
-        (!q ||
-          [s.name, s.code, s.product, s.category, s.construction, s.description]
-            .filter(Boolean)
-            .some((v) => (v as string).toLowerCase().includes(q))),
-    );
-  }, [styles, query, product, category]);
+  const shown = useMemo(
+    () =>
+      styles.filter(
+        (s) =>
+          (product === ALL || s.product === product) &&
+          (category === ALL || s.category === category),
+      ),
+    [styles, product, category],
+  );
 
-  const selected = styles.find((s) => s.id === selectedId) ?? null;
+  const active = product !== ALL || category !== ALL;
+  const clear = () => {
+    setProduct(ALL);
+    setCategory(ALL);
+  };
 
+  return { product, setProduct, category, setCategory, products, categories, shown, active, clear };
+}
+
+function StyleFilterRow({
+  filters,
+  count,
+}: {
+  filters: ReturnType<typeof useStyleFilters>;
+  count: number;
+}) {
   return (
-    <div className="space-y-2.5">
-      <div className="flex flex-wrap items-center gap-2">
-        <div className="relative min-w-[180px] flex-1">
-          <Search
-            className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-400"
-            aria-hidden
-          />
-          <input
-            type="search"
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            placeholder="Search styles by name, code or construction"
-            aria-label="Search styles"
-            className="w-full rounded-md border border-hairline bg-surface py-1.5 pl-8 pr-2.5 text-[12.5px] text-ink-900 placeholder:text-ink-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-          />
-        </div>
-        <Select label="Product" value={product} onChange={setProduct} options={products} />
-        <Select label="Category" value={category} onChange={setCategory} options={categories} />
-      </div>
-
-      <ul className="max-h-[230px] divide-y divide-hairline overflow-y-auto rounded-lg border border-hairline">
-        {shown.length === 0 && (
-          <li className="px-3 py-6 text-center text-[12px] text-ink-500">
-            No style matches that. Clear the filters, or build the style manually.
-          </li>
-        )}
-        {shown.map((s) => {
-          const active = s.id === selectedId;
-          return (
-            <li key={s.id}>
-              <button
-                type="button"
-                onClick={() => onSelect(s.id)}
-                aria-pressed={active}
-                className={cn(
-                  "w-full px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700",
-                  active ? "bg-brand-700/5" : "bg-surface hover:bg-surface-alt",
-                )}
-              >
-                <span className="flex flex-wrap items-center gap-1.5">
-                  <span
-                    aria-hidden
-                    className={cn(
-                      "h-3 w-3 shrink-0 rounded-full border",
-                      active ? "border-brand-700 bg-brand-700" : "border-ink-300",
-                    )}
-                  />
-                  <span className="text-[12.5px] font-semibold text-ink-900">{s.name}</span>
-                  <span className="text-[11px] text-ink-500 tabular-nums">{s.code}</span>
-                  {s.product && (
-                    <span className="rounded-full border border-hairline bg-surface-alt/60 px-2 py-0.5 text-[10.5px] text-ink-600">
-                      {s.product}
-                    </span>
-                  )}
-                  <span className="ml-auto text-[11px] text-ink-500 tabular-nums">
-                    {s.parts.length} parts
-                  </span>
-                </span>
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-
-      {selected && <InheritancePreview style={selected} />}
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-500">
+        Product
+      </span>
+      <FilterChip active={filters.product === ALL} onClick={() => filters.setProduct(ALL)}>
+        All
+      </FilterChip>
+      {filters.products.map((p) => (
+        <FilterChip key={p} active={filters.product === p} onClick={() => filters.setProduct(p)}>
+          {p}
+        </FilterChip>
+      ))}
+      <FilterSelect
+        value={filters.category}
+        onChange={filters.setCategory}
+        label="Category"
+        options={filters.categories}
+      />
+      <span className="ml-auto text-[11px] text-ink-500 tabular-nums">
+        {count} {count === 1 ? "style" : "styles"}
+      </span>
     </div>
   );
 }
 
-function Select({
-  label,
-  value,
-  onChange,
-  options,
-}: {
-  label: string;
-  value: string;
-  onChange: (v: string) => void;
-  options: string[];
-}) {
+function NoStyles({ onClear }: { onClear: () => void }) {
   return (
-    <label className="flex items-center gap-1.5 text-[11.5px] text-ink-500">
-      {label}
-      <select
-        value={value}
-        onChange={(e) => onChange(e.target.value)}
-        className="rounded-md border border-hairline bg-surface px-2 py-1.5 text-[12px] text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+    <div className="rounded-lg border border-hairline bg-surface-alt/40 px-4 py-8 text-center">
+      <p className="text-[12.5px] text-ink-500">Nothing matches those filters.</p>
+      <button
+        type="button"
+        onClick={onClear}
+        className="mt-2 rounded-md border border-hairline bg-surface px-2.5 py-1 text-[11.5px] font-medium text-brand-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
       >
-        <option value={ALL}>All</option>
-        {options.map((o) => (
-          <option key={o} value={o}>
-            {o}
-          </option>
-        ))}
-      </select>
-    </label>
+        Clear filters
+      </button>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * Path A — use an existing style
+ * ------------------------------------------------------------------ */
+
+function StylePicker({
+  styles,
+  selectedId,
+  onSelect,
+}: {
+  styles: StyleDef[];
+  selectedId: string | null;
+  onSelect: (id: string) => void;
+}) {
+  const filters = useStyleFilters(styles);
+  const selected = styles.find((s) => s.id === selectedId) ?? null;
+
+  // A style already chosen stays reachable even when the filters would hide
+  // it — a picker that silently forgets its own answer is a bug, not a filter.
+  const options = useMemo(() => {
+    const list = [...filters.shown];
+    if (selected && !list.some((s) => s.id === selected.id)) list.unshift(selected);
+    return list.map(styleOption);
+  }, [filters.shown, selected]);
+
+  return (
+    <div className="space-y-2.5">
+      <StyleFilterRow filters={filters} count={filters.shown.length} />
+
+      <div className="flex flex-wrap items-center gap-2 rounded-lg border border-hairline bg-surface-alt/40 px-3 py-2.5">
+        <span className="text-[12px] text-ink-600">Style</span>
+        <OptionPicker
+          label="Style master"
+          options={options}
+          selectedId={selectedId ?? undefined}
+          onPick={onSelect}
+          placeholder="Select a style…"
+          searchThreshold={STYLE_SEARCH_THRESHOLD}
+          searchPlaceholder="Search by name, code or product…"
+          width="w-[380px]"
+        />
+        {selected && <ProvenanceChip kind="master" />}
+      </div>
+
+      {filters.shown.length === 0 && !selected ? (
+        <NoStyles onClear={filters.clear} />
+      ) : selected ? (
+        <InheritancePreview style={selected} />
+      ) : (
+        <p className="rounded-lg border border-hairline bg-surface-alt/40 px-3 py-6 text-center text-[12px] text-ink-500">
+          Pick a style to see exactly what it brings into the costing sheet.
+        </p>
+      )}
+    </div>
   );
 }
 
 /** Exactly what the costing sheet will receive if this style is confirmed. */
-export function InheritancePreview({ style }: { style: StyleDef }) {
+export function InheritancePreview({
+  style,
+  provenance = "master",
+  modified = false,
+}: {
+  style: StyleDef;
+  provenance?: "master" | "manual";
+  modified?: boolean;
+}) {
   return (
     <div className="rounded-lg border border-hairline bg-surface-alt/40 p-3">
       <div className="flex flex-wrap items-center gap-1.5">
         <span className="text-[12.5px] font-semibold text-ink-900">{style.name}</span>
         <span className="text-[11px] text-ink-500 tabular-nums">{style.code}</span>
-        <ProvenanceChip kind="master" />
+        <ProvenanceChip kind={provenance} />
+        {modified && (
+          <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.06em] text-amber-900 ring-1 ring-amber-200">
+            Modified
+          </span>
+        )}
         <span className="ml-auto text-[11px] text-ink-500">Inherited into costing</span>
       </div>
 
@@ -343,36 +387,101 @@ function Field({ label, value }: { label: string; value: string }) {
 }
 
 /* ------------------------------------------------------------------ *
- * Path B — build the style by hand
+ * Path B — customize a style
  * ------------------------------------------------------------------ */
 
-function StyleBuilder({
+function StyleCustomizer({
+  styles,
+  baseStyleId,
+  onStartFrom,
   draft,
   onChange,
   errors,
   showErrors,
 }: {
+  styles: StyleDef[];
+  baseStyleId: string | null;
+  onStartFrom: (id: string | null) => void;
   draft: StyleDraft;
   onChange: (d: StyleDraft) => void;
   errors: DraftErrors;
   showErrors: boolean;
 }) {
+  const filters = useStyleFilters(styles);
+  const base = styles.find((s) => s.id === baseStyleId) ?? null;
+
   const set = <K extends keyof StyleDraft>(key: K, value: StyleDraft[K]) =>
     onChange({ ...draft, [key]: value });
 
   const setPart = (i: number, part: PartDraft) =>
     onChange({ ...draft, parts: draft.parts.map((p, j) => (j === i ? part : p)) });
 
+  const options = useMemo<PickerOption[]>(() => {
+    const list = [...filters.shown];
+    if (base && !list.some((s) => s.id === base.id)) list.unshift(base);
+    return [
+      { id: SCRATCH, label: "Start from scratch", detail: "An empty style — nothing inherited" },
+      ...list.map(styleOption),
+    ];
+  }, [filters.shown, base]);
+
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-1.5">
-        <ProvenanceChip kind="manual" />
+      {/* ---- start from ---- */}
+      <div className="space-y-2 rounded-lg border border-hairline bg-surface-alt/40 p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-[12px] text-ink-600">Start from</span>
+          <OptionPicker
+            label="Start from"
+            options={options}
+            selectedId={base ? base.id : SCRATCH}
+            onPick={(id) => onStartFrom(id === SCRATCH ? null : id)}
+            placeholder="Start from scratch"
+            searchThreshold={STYLE_SEARCH_THRESHOLD}
+            searchPlaceholder="Search by name, code or product…"
+            width="w-[380px]"
+          />
+          {base ? (
+            <>
+              <ProvenanceChip kind="master" />
+              <span className="rounded-full bg-amber-50 px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.06em] text-amber-900 ring-1 ring-amber-200">
+                Modified
+              </span>
+            </>
+          ) : (
+            <ProvenanceChip kind="manual" />
+          )}
+        </div>
+
+        <StyleFilterRow filters={filters} count={filters.shown.length} />
+
         <p className="text-[11.5px] text-ink-500">
-          Nothing here comes from a master — every value below is yours, and is labelled that way
-          wherever it appears downstream.
+          {base ? (
+            <>
+              Pre-filled from{" "}
+              <span className="font-medium text-ink-700">
+                {base.name} ({base.code})
+              </span>
+              . Every edit below departs from that master, and is labelled inherited-then-modified
+              wherever it appears downstream.
+            </>
+          ) : (
+            "Nothing here comes from a master — every value below is yours, and is labelled that way wherever it appears downstream."
+          )}
         </p>
+
+        {filters.shown.length === 0 && (
+          <button
+            type="button"
+            onClick={filters.clear}
+            className="rounded-md border border-hairline bg-surface px-2.5 py-1 text-[11.5px] font-medium text-brand-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          >
+            No style matches those filters — clear them
+          </button>
+        )}
       </div>
 
+      {/* ---- the style itself ---- */}
       <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
         <Text
           label="Style name"
@@ -426,7 +535,8 @@ function StyleBuilder({
         <div className="flex items-center gap-2">
           <h3 className="text-[12.5px] font-semibold text-ink-900">Parts</h3>
           <span className="text-[11px] text-ink-500">
-            {draft.parts.length} added — each becomes a row on the costing sheet
+            {draft.parts.length} {draft.parts.length === 1 ? "part" : "parts"} — each becomes a row
+            on the costing sheet
           </span>
         </div>
         {showErrors && errors.parts && <FieldError message={errors.parts} />}

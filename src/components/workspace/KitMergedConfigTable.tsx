@@ -25,7 +25,7 @@
  */
 
 import { Fragment, useMemo, useState } from "react";
-import { Check, ChevronDown, Package, Plus } from "lucide-react";
+import { Package, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { KitItem, Pod } from "@/lib/podsStore";
@@ -38,6 +38,7 @@ import {
 import type { ArticleCosting } from "@/components/workspace/ArticleCostingWorkspace";
 import { ComponentLibraryModal } from "@/components/workspace/ComponentLibraryModal";
 import { FabricDetailModal } from "@/components/workspace/FabricDetailModal";
+import { OptionPicker, type PickerOption } from "@/components/ui/pickers";
 import type { CostLine, LineKind, LineSection, OptionGroup } from "@/lib/costLines";
 import type { LibraryItem } from "@/lib/library";
 
@@ -223,6 +224,22 @@ const inr2 = (n: number) =>
  * and dollars only appear once a quotation is being written.
  */
 const inrWhole = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
+
+/**
+ * A cost line's option group in the shared picker's terms — the same mapping the
+ * costing sheet makes, because these cells ARE that sheet's lines.
+ */
+function pickerOptions(group: OptionGroup): PickerOption[] {
+  return group.options.map((o) => ({
+    id: o.id,
+    label: o.label,
+    detail: o.detail,
+    trailing: `₹${o.rate.toFixed(2)}`,
+  }));
+}
+
+/** Rate lists are short; the sheet keeps the search box out of them. */
+const NO_PICKER_SEARCH = 999;
 
 const HEAD = "px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-400";
 const CELL = "px-3 py-2 align-top text-[12px]";
@@ -744,7 +761,10 @@ function MemberCell({
   return (
     <div className="px-3 py-2">
       <OptionPicker
-        group={line.optionGroup as OptionGroup}
+        label={(line.optionGroup as OptionGroup).label}
+        options={pickerOptions(line.optionGroup as OptionGroup)}
+        selectedId={(line.optionGroup as OptionGroup).selectedId}
+        searchThreshold={NO_PICKER_SEARCH}
         onPick={(optionId) =>
           actions?.selectOption(line.kind, line.target!.componentId, line.target!.itemId, optionId)
         }
@@ -753,102 +773,5 @@ function MemberCell({
         {cell.rate} · <span className="font-medium text-ink-700">{inr2(cell.cost)} / pc</span>
       </span>
     </div>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * Option picker — the sheet's control, rebuilt here
- *
- * It is a copy of `CostLineTable`'s picker because that one is private to the
- * sheet's row markup (spans inside a <td>, no popover portal). Sharing it would
- * mean exporting the sheet's internals to serve a different table; the honest
- * cost is a small duplicated control, and the behaviour it must match — label,
- * chevron, check marks, click-away — is entirely visible here.
- * ------------------------------------------------------------------ */
-
-function OptionPicker({ group, onPick }: { group: OptionGroup; onPick: (id: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const selected = group.options.find((o) => o.id === group.selectedId);
-
-  return (
-    <span className="relative inline-block min-w-0 flex-1">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        aria-expanded={open}
-        aria-label={`${group.label}: ${selected?.label ?? "not set"}. Change.`}
-        className="inline-flex max-w-full items-center gap-1 rounded-md border border-hairline bg-surface px-2 py-1 text-[12px] text-ink-800 transition-colors hover:border-brand-700 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-      >
-        <span className="truncate">{selected?.label ?? "Select…"}</span>
-        <ChevronDown className="h-3 w-3 shrink-0 text-ink-400" aria-hidden />
-      </button>
-
-      {open && (
-        <>
-          <span
-            className="fixed inset-0 z-30"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-            }}
-          />
-          <span className="absolute left-0 top-full z-40 mt-1 block w-[280px] overflow-hidden rounded-lg border border-hairline bg-surface shadow-2xl">
-            <span className="block border-b border-hairline px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-500">
-              {group.label}
-            </span>
-            <span className="block max-h-[260px] overflow-y-auto p-1">
-              {group.options.map((o) => {
-                const active = o.id === group.selectedId;
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOpen(false);
-                      onPick(o.id);
-                    }}
-                    className={cn(
-                      "flex w-full items-start gap-1.5 rounded px-2 py-1.5 text-left transition-colors",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-                      active ? "bg-brand-50" : "hover:bg-surface-alt",
-                    )}
-                  >
-                    <Check
-                      className={cn(
-                        "mt-0.5 h-3 w-3 shrink-0 text-brand-700",
-                        !active && "opacity-0",
-                      )}
-                      aria-hidden
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span
-                        className={cn(
-                          "block truncate text-[12px]",
-                          active ? "font-medium text-brand-800" : "text-ink-800",
-                        )}
-                      >
-                        {o.label}
-                      </span>
-                      {o.detail && (
-                        <span className="block truncate text-[10.5px] text-ink-400">
-                          {o.detail}
-                        </span>
-                      )}
-                    </span>
-                    <span className="shrink-0 text-[11px] tabular-nums text-ink-500">
-                      ₹{o.rate.toFixed(2)}
-                    </span>
-                  </button>
-                );
-              })}
-            </span>
-          </span>
-        </>
-      )}
-    </span>
   );
 }

@@ -2,7 +2,7 @@
  * Pre-costing setup — the three decisions that must exist BEFORE a costing
  * sheet does.
  *
- *   POD  →  Buyer Template  →  Style (select or build)  →  Confirm  →  Costing
+ *   POD  →  Buyer Template  →  Style (use existing or customize)  →  Confirm  →  Costing
  *
  * These used to be two cards bolted onto screens the user had already landed
  * on, which let a sheet be opened — and filled in — before anybody said what
@@ -92,6 +92,8 @@ export function PreCostingSetup({
   const [templateId, setTemplateId] = useState<string | null>(null);
   const [path, setPath] = useState<StylePath>("select");
   const [selectedStyleId, setSelectedStyleId] = useState<string | null>(null);
+  /** the master a customisation departed from — null means from scratch */
+  const [baseStyleId, setBaseStyleId] = useState<string | null>(null);
   const [draft, setDraft] = useState<StyleDraft>(() => emptyDraft());
   const [saveToMaster, setSaveToMaster] = useState(true);
   const [showErrors, setShowErrors] = useState(false);
@@ -115,6 +117,7 @@ export function PreCostingSetup({
     const prior = styleById(existingStyle);
     setPath("select");
     setSelectedStyleId(prior && !isOneTimeStyle(prior) ? prior.id : null);
+    setBaseStyleId(null);
     setDraft(prior ? draftFromStyle(prior) : emptyDraft({ product: articleName ?? "" }));
     setSaveToMaster(true);
     closeRef.current?.focus({ preventScroll: true });
@@ -139,20 +142,25 @@ export function PreCostingSetup({
     step === 0 ? "template" : skipStyle || step === 2 ? "confirm" : "style";
 
   const errors = useMemo(() => validateDraft(draft), [draft]);
-  const builtManually = path === "build";
+  /** the customise path — whether it started from a master or from nothing */
+  const customised = path === "customize";
 
   /** The draft rendered as a real style, so preview and save share one shape. */
   const draftStyle: StyleDef | null = useMemo(() => {
-    if (!builtManually) return null;
+    if (!customised) return null;
     const def = toStyleDef(draft);
     if (!def.name || def.parts.length === 0) return null;
     return { ...def, id: "draft", custom: true };
-  }, [builtManually, draft]);
+  }, [customised, draft]);
 
-  const confirmedStyle = builtManually
+  const confirmedStyle = customised
     ? draftStyle
     : (styles.find((s) => s.id === selectedStyleId) ?? null);
-  const styleProvenance: Provenance = builtManually ? "manual" : "master";
+  // A customised MASTER style is inherited-then-modified, not manual: the
+  // parts, allowances and workmanship still came from the master, and saying
+  // otherwise throws away the only reason to trust them.
+  const styleProvenance: Provenance = !customised || baseStyleId ? "master" : "manual";
+  const styleModified = customised && Boolean(baseStyleId);
 
   const template: CostTemplate | undefined = templateId ? templateById(templateId) : undefined;
 
@@ -160,13 +168,13 @@ export function PreCostingSetup({
     stage === "template"
       ? Boolean(templateId)
       : stage === "style"
-        ? builtManually
+        ? customised
           ? draftIsValid(errors)
           : Boolean(selectedStyleId)
         : skipStyle || Boolean(confirmedStyle);
 
   const goNext = () => {
-    if (stage === "style" && builtManually && !draftIsValid(errors)) {
+    if (stage === "style" && customised && !draftIsValid(errors)) {
       // Errors stay hidden until the user actually tries to move on — a form
       // that turns red while it is still being filled in reads as broken.
       setShowErrors(true);
@@ -186,7 +194,7 @@ export function PreCostingSetup({
 
     if (skipStyle) {
       // nothing else to record — the kit's members carry their own styles
-    } else if (builtManually) {
+    } else if (customised) {
       if (!draftStyle) return;
       const saved = saveCustomStyle(
         toStyleDef(draft),
@@ -269,6 +277,16 @@ export function PreCostingSetup({
               }}
               selectedId={selectedStyleId}
               onSelect={setSelectedStyleId}
+              baseStyleId={baseStyleId}
+              /* Choosing what to start from REPLACES the draft — that is the
+                 whole point of the affordance — so it is the one moment the
+                 typed values are allowed to be overwritten. */
+              onStartFrom={(id) => {
+                const base = id ? styles.find((s) => s.id === id) : undefined;
+                setBaseStyleId(base?.id ?? null);
+                setDraft(base ? draftFromStyle(base) : emptyDraft({ product: articleName ?? "" }));
+                setShowErrors(false);
+              }}
               draft={draft}
               onDraftChange={setDraft}
               errors={errors}
@@ -280,16 +298,20 @@ export function PreCostingSetup({
               template={template}
               style={confirmedStyle}
               styleProvenance={styleProvenance}
-              builtManually={builtManually}
+              styleModified={styleModified}
+              builtManually={customised}
               omitStyle={skipStyle}
               saveToMaster={saveToMaster}
               onSaveToMasterChange={setSaveToMaster}
               /* Edit keeps the values; Change throws them away and returns to
                  the picker — two genuinely different intentions. */
               onEditStyle={() => {
-                if (!builtManually && confirmedStyle) {
+                if (!customised && confirmedStyle) {
+                  // Editing a master is customising it — and it is inherited
+                  // from that master, so the base is recorded, not discarded.
                   setDraft(draftFromStyle(confirmedStyle));
-                  setPath("build");
+                  setBaseStyleId(confirmedStyle.id);
+                  setPath("customize");
                 }
                 setStep(1);
               }}
@@ -315,7 +337,7 @@ export function PreCostingSetup({
             onClick={goNext}
             /* On the build path Continue stays live even when incomplete: the
                click is what reveals which fields are missing. */
-            disabled={stage === "style" ? !builtManually && !selectedStyleId : !canContinue}
+            disabled={stage === "style" ? !customised && !selectedStyleId : !canContinue}
             className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
           >
             {stage === "confirm" ? (
