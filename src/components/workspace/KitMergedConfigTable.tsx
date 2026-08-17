@@ -12,10 +12,10 @@
  * It is not a read-only mirror. A table you can only look at sends the user
  * back to the tabs to change anything, which is the very trip this screen
  * exists to remove — so a cell carries the SAME dropdown its own sheet has,
- * and a section can take a new component from the library on one member or on
- * every member at once. Adding to the whole set in one act is the only place in
- * the product where "all three placemats get this label" is a single decision
- * rather than three.
+ * opens that member's sheet on that line when clicked anywhere else, and each
+ * member's column can take a new component from the library on its own. Adding
+ * belongs to one article because a component is an article's decision; the
+ * column the user reaches for is the article they mean.
  *
  * Nothing here is a second copy of any number, and nothing here is a second
  * copy of any behaviour: rows are cut from the lines each member's own sheet
@@ -244,8 +244,8 @@ const NO_PICKER_SEARCH = 999;
 const HEAD = "px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-400";
 const CELL = "px-3 py-2 align-top text-[12px]";
 
-/** Which members a library add is destined for, and from which section. */
-type AddFlow = { section: LineKind; memberIds: string[] };
+/** Which member a library add is destined for, and from which section. */
+type AddFlow = { section: LineKind; memberId: string };
 
 export function KitMergedConfigTable({
   pod,
@@ -267,13 +267,13 @@ export function KitMergedConfigTable({
   const fabrics = useMemo(() => kitFabrics(pod, members), [pod, members]);
 
   /**
-   * The add flow is two decisions — WHICH articles, then WHICH master — and it
-   * is deliberately in that order: the member choice is about the set, and
-   * asking it first means the library browser stays the same screen the sheet
-   * opens, with no extra step bolted onto its footer.
+   * The add flow carries no member question of its own: the affordance lives in
+   * the member's OWN COLUMN of the section header, so the column that was
+   * clicked already says which article is being added to. That leaves exactly
+   * one decision — which master — and the library browser is the whole flow,
+   * the same single screen the article sheet opens.
    */
   const [flow, setFlow] = useState<AddFlow | null>(null);
-  const [libraryOpen, setLibraryOpen] = useState(false);
   /** which cloth's full breakdown is open, if any */
   const [fabricDetail, setFabricDetail] = useState<FabricRequirement | null>(null);
 
@@ -284,48 +284,29 @@ export function KitMergedConfigTable({
     0,
   );
 
-  const chosen = flow ? members.filter((m) => flow.memberIds.includes(m.id)) : [];
+  const target = flow ? members.find((m) => m.id === flow.memberId) : undefined;
 
   /**
-   * Attach targets are offered by NAME, not by id: "Body Fabric" on the
-   * placemat and "Body Fabric" on the runner are different component ids for
-   * what the costing team reads as one part, and a set-wide add has to mean
-   * the part, not one article's row of the database.
+   * The attach targets are that member's own components, by id — one article is
+   * being configured, so there is nothing to reconcile across the set and a
+   * process or trim lands on exactly the part the user picked.
    */
-  const unionTargets = (() => {
-    const byName = new Map<string, string>();
-    for (const m of chosen) {
-      for (const t of costed[m.id]?.actions.attachTargets ?? []) {
-        if (!byName.has(t.name)) byName.set(t.name, t.name);
-      }
-    }
-    return [...byName.keys()].map((name) => ({ id: name, name }));
-  })();
+  const addTargets = flow ? (costed[flow.memberId]?.actions.attachTargets ?? []) : [];
 
-  const addToChosen = (item: LibraryItem, targetName: string | null, slot: string) => {
-    if (!flow) return;
-    const landed: string[] = [];
-    for (const m of chosen) {
-      const actions = costed[m.id]?.actions;
-      if (!actions) continue;
-      // A member without that part still gets product-level items; a process or
-      // trim with nowhere to attach is skipped rather than guessed at.
-      const target = targetName
-        ? (actions.attachTargets.find((t) => t.name === targetName)?.id ?? null)
-        : null;
-      actions.addFromLibrary(item, target, slot);
-      landed.push(m.name);
-    }
-    setLibraryOpen(false);
+  const addToMember = (item: LibraryItem, targetId: string | null, slot: string) => {
+    const actions = flow ? costed[flow.memberId]?.actions : undefined;
     setFlow(null);
-    if (landed.length) toast.success(`${item.name} added to ${landed.join(", ")}`);
+    if (!actions || !target) return;
+    actions.addFromLibrary(item, targetId, slot);
+    toast.success(`${item.name} added to ${target.name}`);
   };
 
   return (
     <div className="overflow-hidden rounded-xl border border-hairline bg-surface">
       <p className="border-b border-hairline px-4 py-2.5 text-[11.5px] text-ink-500">
         One sheet for the whole set — work down the variables once and read every article side by
-        side. Change any cell here, or add a component to one article or all of them.
+        side. Change any cell here, click one to open that article on that line, or add a component
+        to a single article from its own column.
       </p>
 
       <div className="overflow-x-auto">
@@ -407,24 +388,7 @@ export function KitMergedConfigTable({
                 fabrics={section.id === "material" ? fabrics : []}
                 onFabricDetail={setFabricDetail}
                 onFocusLine={onFocusLine}
-                flow={flow?.section === section.id ? flow : null}
-                onStartAdd={() =>
-                  setFlow({ section: section.id, memberIds: members.map((m) => m.id) })
-                }
-                onCancelAdd={() => setFlow(null)}
-                onToggleMember={(id) =>
-                  setFlow((f) =>
-                    !f
-                      ? f
-                      : {
-                          ...f,
-                          memberIds: f.memberIds.includes(id)
-                            ? f.memberIds.filter((x) => x !== id)
-                            : [...f.memberIds, id],
-                        },
-                  )
-                }
-                onOpenLibrary={() => setLibraryOpen(true)}
+                onStartAdd={(memberId) => setFlow({ section: section.id, memberId })}
               />
             ))}
           </tbody>
@@ -468,11 +432,11 @@ export function KitMergedConfigTable({
       )}
 
       <ComponentLibraryModal
-        open={libraryOpen && Boolean(flow)}
-        onClose={() => setLibraryOpen(false)}
+        open={Boolean(flow)}
+        onClose={() => setFlow(null)}
         section={flow?.section ?? null}
-        targets={unionTargets}
-        onAdd={addToChosen}
+        targets={addTargets}
+        onAdd={addToMember}
       />
     </div>
   );
@@ -485,11 +449,7 @@ function SectionRows({
   fabrics,
   onFabricDetail,
   onFocusLine,
-  flow,
   onStartAdd,
-  onCancelAdd,
-  onToggleMember,
-  onOpenLibrary,
 }: {
   section: MergedSection;
   members: KitItem[];
@@ -498,63 +458,36 @@ function SectionRows({
   fabrics: KitFabric[];
   onFabricDetail: (req: FabricRequirement) => void;
   onFocusLine: (memberId: string, componentId: string) => void;
-  /** the in-progress add, when it belongs to THIS section */
-  flow: AddFlow | null;
-  onStartAdd: () => void;
-  onCancelAdd: () => void;
-  onToggleMember: (memberId: string) => void;
-  onOpenLibrary: () => void;
+  /** open the library for ONE member, scoped to this section */
+  onStartAdd: (memberId: string) => void;
 }) {
   return (
     <>
       {/* The add sits on the SECTION header because the section is what decides
           which slice of the library is on offer — the same rule the sheet's own
-          per-section add follows. */}
+          per-section add follows. But it sits once PER COLUMN, because adding a
+          component is an article's decision: the column the user reaches for is
+          the article they mean, so no separate "which articles" question has to
+          be asked and then read back. */}
       <tr className="border-b border-hairline bg-surface-alt/60">
         <td className="sticky left-0 z-10 bg-surface-alt px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-ink-500">
           {section.label}
         </td>
-        <td colSpan={members.length} className="px-3 py-1.5">
-          {flow ? (
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-ink-700">
-              <span className="font-medium text-ink-900">Add to</span>
-              {members.map((m) => (
-                <label key={m.id} className="flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
-                    checked={flow.memberIds.includes(m.id)}
-                    onChange={() => onToggleMember(m.id)}
-                    className="h-3.5 w-3.5 accent-brand-700"
-                  />
-                  {m.name}
-                </label>
-              ))}
-              <button
-                type="button"
-                disabled={flow.memberIds.length === 0}
-                onClick={onOpenLibrary}
-                className="rounded-md border border-brand-700 bg-brand-50 px-2 py-0.5 font-medium text-brand-800 transition-colors hover:bg-brand-100 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-              >
-                Choose from library
-              </button>
-              <button
-                type="button"
-                onClick={onCancelAdd}
-                className="rounded px-1.5 py-0.5 text-ink-500 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-              >
-                Cancel
-              </button>
-            </span>
-          ) : (
+        {members.map((m) => (
+          <td key={m.id} className="px-3 py-1.5">
             <button
               type="button"
-              onClick={onStartAdd}
+              onClick={() => onStartAdd(m.id)}
+              title={`Add ${section.label} to ${m.name}`}
+              // Ten "Add" buttons read alike to a screen reader; the column is
+              // the whole point of this control, so it belongs in the name.
+              aria-label={`Add ${section.label} to ${m.name}`}
               className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-ink-500 transition-colors hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
             >
-              <Plus className="h-3 w-3" aria-hidden /> Add component
+              <Plus className="h-3 w-3" aria-hidden /> Add
             </button>
-          )}
-        </td>
+          </td>
+        ))}
       </tr>
       {section.rows.map((row) => {
         // The row label steers to the FIRST member that has this variable —
@@ -720,9 +653,12 @@ function sectionTotalFor(section: MergedSection, memberId: string) {
 
 /**
  * A configurable line becomes a picker; a line with nothing to choose stays the
- * plain reading it always was. Both keep the door to the full sheet, but the
- * door moved to its own small control — a dropdown inside a navigation button
- * would make every attempt to change a value a navigation instead.
+ * plain reading it always was. Either way the WHOLE cell is the door to that
+ * member's sheet on that line, exactly as a row on the single-article sheet
+ * opens its component in the inspector — the kit table should not be the one
+ * place where a costing line is not clickable. The dropdown keeps its own
+ * clicks (it already stops them propagating), so changing a value never turns
+ * into a navigation.
  */
 function MemberCell({
   cell,
@@ -754,12 +690,27 @@ function MemberCell({
     );
   }
 
-  // No second control beside the dropdown: this table IS where a kit is
-  // configured, so the cell's only job is to change the value. The full sheet
-  // stays one click away on the row label, which is the same door for every
-  // member and never competes with the picker for the same pixels.
+  // No second control beside the dropdown: the cell itself is the door, so the
+  // picker never has to share its pixels with a "go to sheet" button, and the
+  // space around it — the rate, the cost, the padding — is what carries the
+  // click.
   return (
-    <div className="px-3 py-2">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onOpenSheet}
+      onKeyDown={(e) => {
+        // Only the cell's own keystrokes: Enter inside the open picker belongs
+        // to the picker, not to navigation.
+        if (e.target !== e.currentTarget) return;
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onOpenSheet();
+        }
+      }}
+      aria-label={`${cell.detail} on ${memberName}. Open ${memberName} on this line.`}
+      className="cursor-pointer px-3 py-2 transition-colors hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
+    >
       <OptionPicker
         label={(line.optionGroup as OptionGroup).label}
         options={pickerOptions(line.optionGroup as OptionGroup)}
