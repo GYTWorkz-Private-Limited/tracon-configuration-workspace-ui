@@ -674,6 +674,60 @@ export function cloneArticle(podId: string, articleId: string) {
   return copy;
 }
 
+/**
+ * A kit that already exists somewhere in the store, flattened for reuse.
+ *
+ * Kits live inside individual PODs, so "the kits we have" is not a list anyone
+ * can read off a single record — it has to be gathered across every POD, and
+ * the POD it came from travels with it because a kit name alone ("Gift Set")
+ * says nothing about which buyer it was built for.
+ */
+export type ExistingKit = {
+  kitId: string;
+  name: string;
+  podId: string;
+  buyer: string;
+  collection?: string;
+  moq: string;
+  currency?: string;
+  image?: string;
+  updatedAt: string;
+  items: KitItem[];
+};
+
+function collectKits(list: Pod[]): ExistingKit[] {
+  const out: ExistingKit[] = [];
+  const seen = new Set<string>();
+  for (const pod of list) {
+    for (const a of pod.articles) {
+      if (a.type !== "kit" || !a.kitItems?.length) continue;
+      // The same kit gets rebuilt on a second POD often enough that showing it
+      // twice would read as two different kits — first one found wins.
+      const key = `${a.name.trim().toLowerCase()}|${a.kitItems.length}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push({
+        kitId: a.id,
+        name: a.name,
+        podId: pod.id,
+        buyer: pod.buyer,
+        collection: a.collection ?? a.style,
+        moq: a.moq,
+        currency: a.currency,
+        image: a.image ?? a.kitItems[0]?.image,
+        updatedAt: a.updatedAt,
+        items: a.kitItems,
+      });
+    }
+  }
+  return out;
+}
+
+/** Every kit already created across all PODs, for "reuse an existing kit". */
+export function useExistingKits(): ExistingKit[] {
+  return collectKits(usePods());
+}
+
 /** Costed count for a kit, based on its underlying article lines. */
 export function kitProgress(a: Article): { costed: number; total: number } {
   const items = a.kitItems ?? [];
