@@ -2,7 +2,13 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { Plus, Search, ArrowUpRight, MoreHorizontal } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
-import { usePods, articleProgress, POD_STATUS_LABEL, type PodStatus } from "@/lib/podsStore";
+import {
+  usePods,
+  articleProgress,
+  POD_STATUS_LABEL,
+  type Pod,
+  type PodStatus,
+} from "@/lib/podsStore";
 import { podHasRecostIn, useRecostRequests } from "@/lib/recostingStore";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +24,30 @@ export const Route = createFileRoute("/pods/")({
   }),
   component: PodsDashboard,
 });
+
+/**
+ * Where "Open" on a POD actually lands.
+ *
+ * A POD that already has an article being costed has somewhere real to go —
+ * straight into that article's Configuration & Costing sheet, every article
+ * on the POD reachable from its tabs. Routing through the setup page first
+ * would make the user re-pick a template and re-select articles they already
+ * chose the last time they opened this POD.
+ *
+ * Only a POD where nothing has been started yet — no article past
+ * "not_started" — has no config screen to jump into, so that one still opens
+ * on the setup page, where a template gets chosen and articles get picked for
+ * the first time.
+ */
+function openTargetFor(pod: Pod) {
+  const started = pod.articles.find((a) => a.status !== "not_started");
+  if (!started) return { to: "/pods/$id" as const, params: { id: pod.id } };
+  return {
+    to: "/config/$podId/$articleId" as const,
+    params: { podId: pod.id, articleId: started.id },
+    search: { sel: pod.articles.map((a) => a.id).join(",") },
+  };
+}
 
 /**
  * The dashboard's status is the ANSWER to "what is this order waiting on",
@@ -133,8 +163,7 @@ function PodsDashboard() {
                   >
                     <td className="px-4 py-3">
                       <Link
-                        to="/pods/$id"
-                        params={{ id: p.id }}
+                        {...openTargetFor(p)}
                         className="font-medium text-ink-900 hover:text-brand-700"
                       >
                         {p.id}
@@ -172,8 +201,7 @@ function PodsDashboard() {
                     <td className="px-4 py-3 text-ink-500">{p.updatedAt}</td>
                     <td className="px-4 py-3 text-right">
                       <Link
-                        to="/pods/$id"
-                        params={{ id: p.id }}
+                        {...openTargetFor(p)}
                         className="inline-flex items-center gap-1 text-brand-700 hover:underline"
                       >
                         Open <ArrowUpRight className="h-3 w-3" />

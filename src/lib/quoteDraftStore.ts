@@ -26,7 +26,8 @@ import { useSyncExternalStore } from "react";
 import { getPod, type Article } from "./podsStore";
 import { SCENARIO_PRESETS } from "./scenarios";
 import { BASE_BUILD, buildsFor } from "./costingSelectionStore";
-import type { ProvisionRates } from "./commercialProvisions";
+import { PROVISIONS, type ProvisionId, type ProvisionRates } from "./commercialProvisions";
+import { PAYMENT_TERMS_RATE, type PaymentTermsDays } from "./quotationAssumptions";
 import { isReadyForQuotation } from "./quotationReadiness";
 import { logQuotationEvent } from "./quotationHistory";
 import { clearRecost, requestRecost } from "./recostingStore";
@@ -156,6 +157,13 @@ export type QuoteDraft = {
   items: QuoteItem[];
   /** quote-wide commercial defaults, inherited by every item that has none */
   rates: Partial<ProvisionRates>;
+  /**
+   * The credit window being offered.
+   *
+   * Priced as the `paymentTerms` provision rather than added to the finished
+   * price, so a reviewer can see the cost of the window inside the build-up.
+   */
+  paymentTermsDays?: PaymentTermsDays;
   createdAt: string;
   updatedAt: string;
 };
@@ -765,6 +773,74 @@ export function setItemSellingPrice(
  * variant, so it moves the row it belongs to. Passing the variant's own id is
  * how the row is cleared back to "no option".
  */
+/* ------------------------------------------------------------------ *
+ * Commercial assumptions — quotation-wide
+ * ------------------------------------------------------------------ */
+
+/**
+ * The rates one item is actually priced under.
+ *
+ * Quotation-level assumptions are the default and an item may override any of
+ * them, which is the order a commercial review works in: agree the terms for
+ * the document, then argue the exceptions. Payment terms sit between the two —
+ * the credit window is offered on the quotation, so the toggle owns that rate
+ * and the provision panel shows it read-only rather than offering a second
+ * control for the same number.
+ */
+export function ratesFor(draft: QuoteDraft, item: QuoteItem): Partial<ProvisionRates> {
+  return {
+    ...draft.rates,
+    paymentTerms: PAYMENT_TERMS_RATE[draft.paymentTermsDays ?? 60],
+    ...item.rates,
+  };
+}
+
+const PROVISION_LABEL: Record<string, string> = Object.fromEntries(
+  PROVISIONS.map((p) => [p.id, p.label]),
+);
+
+/**
+ * Change a provision rate for the whole quotation.
+ *
+ * Written at quotation level and left there — item-level rates are not cleared,
+ * because an exception somebody argued for is a decision, and a later change to
+ * the house rate is not a reason to silently undo it.
+ */
+export function setQuotationRate(quotationId: string, provision: ProvisionId, pct: number) {
+  const value = Number.isFinite(pct) ? Math.round(pct * 100) / 100 : 0;
+  const current = state[quotationId]?.rates?.[provision];
+  if (current === value) return;
+
+  logQuotationEvent(
+    quotationId,
+    "option_changed",
+    `${PROVISION_LABEL[provision] ?? provision} set to ${value}% for the whole quotation`,
+  );
+  write(quotationId, (d) => ({ ...d, rates: { ...d.rates, [provision]: value } }));
+}
+
+/** Change the exchange rate applied across the quotation. */
+export function setQuotationTerms(quotationId: string, days: PaymentTermsDays) {
+  if (state[quotationId]?.paymentTermsDays === days) return;
+  logQuotationEvent(
+    quotationId,
+    "option_changed",
+    `Payment terms set to ${days} days — ${PAYMENT_TERMS_RATE[days]}% carried in the provision`,
+  );
+  write(quotationId, (d) => ({ ...d, paymentTermsDays: days }));
+}
+
+/** Hand every provision back to the house default. */
+export function resetQuotationRates(quotationId: string) {
+  if (Object.keys(state[quotationId]?.rates ?? {}).length === 0) return;
+  logQuotationEvent(
+    quotationId,
+    "option_changed",
+    "Commercial assumptions reset to house defaults",
+  );
+  write(quotationId, (d) => ({ ...d, rates: {} }));
+}
+
 export function setLineBuild(quotationId: string, itemId: string, lineId: string, buildId: string) {
   updateLine(quotationId, itemId, lineId, { buildId });
 }

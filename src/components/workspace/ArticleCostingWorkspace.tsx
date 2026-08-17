@@ -34,7 +34,6 @@ import { CostLineTable } from "@/components/workspace/CostLineTable";
 import { toast } from "sonner";
 import { usePod } from "@/lib/podsStore";
 import { MANUAL_STYLE_ID, applyStyleParts, useStyleFor } from "@/lib/styleMaster";
-import { StylePickerCard } from "@/components/workspace/StylePickerCard";
 import {
   fabricRateOverrides,
   fabricRequirementsFor,
@@ -878,14 +877,6 @@ export function ArticleCostingWorkspace({
       />
 
       <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-canvas p-4">
-        {/* Style before parts: the agreed sequence is Template → Style →
-            Costing. A style seeds the part list; without one the sheet is
-            built manually from the library, and the card says which of the
-            two is in play. */}
-        <div className="mb-2 shrink-0">
-          <StylePickerCard podId={podId} articleId={identity.articleId} onApply={applyStyle} />
-        </div>
-
         {/* One line of identity, not a second header: on a standalone article
             it restates the essentials next to the sheet they govern, and for a
             kit member it is the ONLY place that member's own size, MOQ and

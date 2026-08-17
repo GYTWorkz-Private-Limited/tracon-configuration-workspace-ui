@@ -55,7 +55,7 @@ function QuotationsList() {
   const rows = drafts
     .map((draft) => {
       const pod = pods.find((p) => p.id === draft.podId);
-      const views = viewQuote(draft.podId, draft.items, selections);
+      const views = viewQuote(draft, selections);
       const history = histories[draft.id];
       return {
         draft,

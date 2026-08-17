@@ -17,14 +17,7 @@
 
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
-import {
-  ArrowLeft,
-  ArrowRight,
-  Boxes,
-  PackagePlus,
-  SlidersHorizontal,
-  Sparkles,
-} from "lucide-react";
+import { ArrowLeft, ArrowRight, Boxes, PackagePlus, Sparkles } from "lucide-react";
 
 import { GlobalNav } from "@/components/layout/GlobalNav";
 import { ProductHeader } from "@/components/layout/ProductHeader";
@@ -40,11 +33,7 @@ import {
 } from "@/components/workspace/ArticleCostingWorkspace";
 import { KitCostingWorkspace } from "@/components/workspace/KitCostingWorkspace";
 
-import { PreCostingSetup } from "@/components/precosting/PreCostingSetup";
-
 import { cn } from "@/lib/utils";
-import { useTemplateFor } from "@/lib/costTemplates";
-import { styleById, useStyleFor } from "@/lib/styleMaster";
 import { addKit, addLibraryArticles, usePod } from "@/lib/podsStore";
 import { rollupVariant } from "@/lib/costingModel";
 import { applyParameters, commercialOutput } from "@/lib/pricingVariants";
@@ -97,27 +86,6 @@ function ConfigurationWorkspacePage() {
   const selectedIds = sel ? sel.split(",").filter(Boolean) : (pod?.articles ?? []).map((a) => a.id);
   const sheets = (pod?.articles ?? []).filter((a) => selectedIds.includes(a.id));
   const article = sheets.find((a) => a.id === articleId) ?? sheets[0] ?? pod?.articles[0];
-
-  /**
-   * The gate: costing cannot begin before the order has a commercial baseline
-   * and the article has a style. Both are read once, for the article THIS
-   * route is showing — a kit is asked as a whole, never once per member tab.
-   *
-   * A kit is asked for the template only: a set has no style of its own, and
-   * its members pick theirs inside the kit workspace. Demanding one here would
-   * be a question with no true answer.
-   *
-   * `mounted` matters: the choices live in localStorage, so the first render
-   * always sees "nothing recorded" and would flash the setup over a POD that
-   * was fully configured in the New Costing stepper.
-   */
-  const template = useTemplateFor(podId);
-  const styleChoice = useStyleFor(podId, article?.id);
-  const styleNeeded = Boolean(article) && article?.type !== "kit";
-  const setupRequired = mounted && Boolean(article) && (!template || (styleNeeded && !styleChoice));
-  /** the same flow, re-opened deliberately — a wrong choice must not be final */
-  const [setupReopened, setSetupReopened] = useState(false);
-  const chosenStyle = styleById(styleChoice);
 
   /**
    * Every article priced on its own default build, so the bundle builder can
@@ -198,11 +166,14 @@ function ConfigurationWorkspacePage() {
               ? `${inr2(costing.rollup.directCost)} / pc`
               : "₹ —"
         }
+        /* Back goes to the dashboard, not to the POD's setup page: opening a
+           POD lands here, so that page is not a step the user came through
+           and sending them "back" to it would be showing them template and
+           article pickers for work that is already configured. */
         backTo={
           <Link
-            to="/pods/$id"
-            params={{ id: pod.id }}
-            aria-label="Back to articles"
+            to="/pods"
+            aria-label="Back to the costing dashboard"
             className="rounded-md p-1 text-ink-500 hover:bg-surface-alt hover:text-ink-900"
           >
             <ArrowLeft className="h-4 w-4" />
@@ -210,25 +181,6 @@ function ConfigurationWorkspacePage() {
         }
       >
         <ActionGroup>
-          {/* The two decisions the sheet was built on, restated where they can
-              be reopened — a wrong template or style must never be a dead end. */}
-          <button
-            type="button"
-            onClick={() => setSetupReopened(true)}
-            title="Review the cost template and style this costing inherits"
-            className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-          >
-            <SlidersHorizontal className="h-3.5 w-3.5 text-ink-400" aria-hidden />
-            <span className="max-w-[220px] truncate">
-              {mounted ? (template?.name ?? "No template") : "Template"}
-              <span className="mx-1 text-ink-300" aria-hidden>
-                ·
-              </span>
-              {mounted
-                ? (chosenStyle?.name ?? (styleChoice ? "Manual build" : "No style"))
-                : "Style"}
-            </span>
-          </button>
           <ModuleRevisionAction />
           <CompareVariantsAction productName={article.name} />
           <button
@@ -384,27 +336,6 @@ function ConfigurationWorkspacePage() {
           });
           openInWorkspace([kit.id], kit.id);
         }}
-      />
-
-      {/* POD → Template → Style → Confirm, before the configurator is usable.
-          When the answers are missing the dialog is not dismissible into an
-          empty sheet: closing it returns to the POD's article list. */}
-      <PreCostingSetup
-        open={setupRequired || setupReopened}
-        required={setupRequired}
-        skipStyle={!styleNeeded}
-        podId={pod.id}
-        articleId={article.id}
-        articleName={article.name}
-        buyer={pod.buyer}
-        onClose={() => {
-          if (setupRequired) {
-            navigate({ to: "/pods/$id", params: { id: pod.id } });
-            return;
-          }
-          setSetupReopened(false);
-        }}
-        onComplete={() => setSetupReopened(false)}
       />
     </div>
   );

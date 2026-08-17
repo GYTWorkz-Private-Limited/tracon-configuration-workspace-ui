@@ -22,7 +22,7 @@ import {
 } from "./quotationPricing";
 import { buildsIn, scenariosIn, type State as SelectionState } from "./costingSelectionStore";
 import { podFabricRates } from "./fabricRequirement";
-import type { QuoteItem } from "./quoteDraftStore";
+import { ratesFor, type QuoteDraft, type QuoteItem } from "./quoteDraftStore";
 
 export type ViewedProduct = {
   kind: "product";
@@ -38,17 +38,32 @@ export type ViewedKit = {
 
 export type ViewedItem = ViewedProduct | ViewedKit;
 
-/** Price every item on the quote, exactly as the workspace cards do. */
+/**
+ * Price every item on the quote, exactly as the workspace cards do.
+ *
+ * Takes the whole draft rather than its items so the quotation-wide commercial
+ * assumptions — provision rates and the credit window — travel with the lines
+ * they price. A caller cannot accidentally read the numbers under different
+ * assumptions to the ones the reviewer agreed.
+ */
 export function viewQuote(
-  podId: string,
-  items: QuoteItem[],
+  draft: QuoteDraft,
   selections: SelectionState,
+  /**
+   * Price only these items. The single-article workspace shows one article of
+   * a quotation that may hold several, and pricing the rest would put figures
+   * on screen for lines that screen is not about.
+   */
+  only?: QuoteItem[],
 ): ViewedItem[] {
+  const { podId } = draft;
+  const items = only ?? draft.items;
   // The price break belongs to the POD's fabric order, not to any one line, so
   // it is resolved once and every item is priced against the same rates.
   const fabricRates = podFabricRates(podId);
 
   return items.map((item): ViewedItem => {
+    const rates = ratesFor(draft, item);
     if (item.kind === "kit") {
       const priced = priceKit(
         item.members.map((m) => ({
@@ -56,7 +71,7 @@ export function viewQuote(
           scenario: scenarioById(scenariosIn(selections, podId, m.articleId), m.line.scenarioId),
           build: buildById(buildsIn(selections, podId, m.articleId), m.line.buildId),
           defaults: { size: parseSize(m.size), moq: parseMoq(m.moq) },
-          rates: item.rates,
+          rates,
           targetMarginPct: m.line.targetMarginPct,
           moqOverride: m.line.moqOverride,
           finalCostOverrideInr: m.line.finalCostOverrideInr,
@@ -68,7 +83,7 @@ export function viewQuote(
           image: m.image,
         })),
         {
-          rates: item.rates,
+          rates,
           targetMarginPct: item.targetMarginPct,
           sets: item.sets,
           finalCostOverrideInr: item.finalCostOverrideInr,
@@ -84,7 +99,7 @@ export function viewQuote(
       scenario: scenarioById(scenariosIn(selections, podId, item.articleId), line.scenarioId),
       build: buildById(buildsIn(selections, podId, item.articleId), line.buildId),
       defaults: { size: parseSize(item.size), moq: parseMoq(item.moq) },
-      rates: item.rates,
+      rates,
       targetMarginPct: line.targetMarginPct ?? item.targetMarginPct,
       moqOverride: line.moqOverride,
       finalCostOverrideInr: line.finalCostOverrideInr,

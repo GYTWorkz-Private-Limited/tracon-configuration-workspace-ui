@@ -79,7 +79,7 @@ export function QuoteWorkspace({
     [quotation, article?.id],
   );
   const views: ViewedItem[] = useMemo(
-    () => (quotation ? viewQuote(quotation.podId, items, selections) : []),
+    () => (quotation ? viewQuote(quotation, selections, items) : []),
     [quotation, items, selections],
   );
   const totals = totalsOf(views);
