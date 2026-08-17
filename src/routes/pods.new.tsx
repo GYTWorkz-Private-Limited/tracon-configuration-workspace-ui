@@ -20,11 +20,9 @@ import {
   ArrowRight,
   Boxes,
   Check,
+  ChevronDown,
   ChevronRight,
-  Layers,
-  LayoutTemplate,
   Package,
-  PencilRuler,
   Plus,
   Sparkles,
   Trash2,
@@ -34,8 +32,19 @@ import { ArticleLibraryDrawer } from "@/components/articles/ArticleLibraryDrawer
 import { AddKitDrawer } from "@/components/articles/AddKitDrawer";
 import { cn } from "@/lib/utils";
 import { addKit, addLibraryArticles, createPod, type KitItem } from "@/lib/podsStore";
-import { TEMPLATES, setTemplateFor, type CostTemplate } from "@/lib/costTemplates";
-import { MANUAL_STYLE_ID, STYLE_MASTER, setStyleFor } from "@/lib/styleMaster";
+import { TEMPLATES, setTemplateFor } from "@/lib/costTemplates";
+import { saveCustomStyle, setStyleFor, useAllStyles, type StyleDef } from "@/lib/styleMaster";
+import { TemplateStep } from "@/components/precosting/TemplateStep";
+import { StyleStep, type StylePath } from "@/components/precosting/StyleStep";
+import {
+  ONE_TIME_PREFIX,
+  draftFromStyle,
+  draftIsValid,
+  emptyDraft,
+  toStyleDef,
+  validateDraft,
+  type StyleDraft,
+} from "@/components/precosting/styleDraft";
 import type { LibraryArticle } from "@/lib/articleLibrary";
 
 export const Route = createFileRoute("/pods/new")({
@@ -65,11 +74,33 @@ type PendingKit = {
 };
 
 /**
- * "existing" alone is not a finished answer — it needs a styleId; "manual" is
- * complete by itself. Kept separate from the styleMaster store because these
- * are wizard drafts: nothing is persisted until the final commit.
+ * One article's answer to "how does this build start?", held in exactly the
+ * shape `StyleStep` drives — the wizard owns the state so Back never loses a
+ * half-typed style, and nothing reaches the style master until the commit.
+ *
+ * `saveToMaster` defaults OFF: a style typed for one order is one-time until
+ * the user says otherwise, so the shared master does not silently accumulate
+ * every wizard run.
  */
-type StyleChoice = { mode: "existing" | "manual"; styleId?: string };
+type ArticleStyleState = {
+  path: StylePath;
+  selectedId: string | null;
+  /** the master a customisation departed from — null means from scratch */
+  baseStyleId: string | null;
+  draft: StyleDraft;
+  saveToMaster: boolean;
+};
+
+const emptyArticleStyle = (articleName: string): ArticleStyleState => ({
+  path: "select",
+  selectedId: null,
+  baseStyleId: null,
+  draft: emptyDraft({ product: articleName }),
+  saveToMaster: false,
+});
+
+const articleStyleValid = (s: ArticleStyleState) =>
+  s.path === "select" ? Boolean(s.selectedId) : draftIsValid(validateDraft(s.draft));
 
 function NewPod() {
   const navigate = useNavigate();
@@ -81,7 +112,6 @@ function NewPod() {
   const [preparedBy, setPreparedBy] = useState("Gautam Kitclu");
 
   /* ---- step 2 — captured on the POD now so quotation never re-asks ---- */
-  const [templateMode, setTemplateMode] = useState<"default" | "buyer" | null>(null);
   const [templateId, setTemplateId] = useState<string | null>(null);
 
   /* ---- step 3 ---- */
@@ -91,7 +121,13 @@ function NewPod() {
   const [kitOpen, setKitOpen] = useState(false);
 
   /* ---- step 4 — keyed by the library row id, stable while the wizard lives ---- */
-  const [styles, setStyles] = useState<Record<string, StyleChoice>>({});
+  const [styles, setStyles] = useState<Record<string, ArticleStyleState>>({});
+  const [openArticle, setOpenArticle] = useState<string | null>(null);
+  const [showStyleErrors, setShowStyleErrors] = useState(false);
+
+  // `useAllStyles` already withholds one-time builds, so the picker offers the
+  // shared master only — the same list the pre-costing dialog offers.
+  const styleMaster = useAllStyles();
 
   const buyerMatch = useMemo(
     () =>
@@ -103,13 +139,21 @@ function NewPod() {
 
   const stepOk = [
     buyer.trim().length > 0 && preparedBy.trim().length > 0,
-    templateMode === "default" || (templateMode === "buyer" && Boolean(templateId)),
+    Boolean(templateId),
     articles.length + kits.length > 0,
     articles.every((a) => {
-      const c = styles[a.id];
-      return Boolean(c && (c.mode === "manual" || c.styleId));
+      const s = styles[a.id];
+      return Boolean(s && articleStyleValid(s));
     }),
   ];
+
+  const styleFor = (a: LibraryArticle) => styles[a.id] ?? emptyArticleStyle(a.name);
+
+  const setStyleState = (id: string, patch: Partial<ArticleStyleState>, name: string) =>
+    setStyles((prev) => ({
+      ...prev,
+      [id]: { ...(prev[id] ?? emptyArticleStyle(name)), ...patch },
+    }));
 
   const addArticles = (arts: LibraryArticle[]) =>
     setArticles((prev) => [...prev, ...arts.filter((a) => !prev.some((p) => p.id === a.id))]);
@@ -125,15 +169,6 @@ function NewPod() {
       return next;
     });
   };
-
-  const chooseStyleMode = (id: string, mode: StyleChoice["mode"]) =>
-    setStyles((prev) => ({
-      ...prev,
-      [id]: mode === "manual" ? { mode } : { mode, styleId: prev[id]?.styleId },
-    }));
-
-  const pickStyle = (id: string, styleId: string) =>
-    setStyles((prev) => ({ ...prev, [id]: { mode: "existing", styleId } }));
 
   /**
    * The one write of the whole wizard. Order matters: the POD must exist
@@ -152,10 +187,7 @@ function NewPod() {
       },
       { seedDefaultArticles: false },
     );
-    setTemplateFor(
-      pod.id,
-      templateMode === "buyer" && templateId ? templateId : DEFAULT_TEMPLATE_ID,
-    );
+    setTemplateFor(pod.id, templateId ?? DEFAULT_TEMPLATE_ID);
     const created = addLibraryArticles(
       pod.id,
       articles.map((a) => ({
@@ -181,11 +213,19 @@ function NewPod() {
     created.forEach((art, i) => {
       const choice = styles[articles[i].id];
       if (!choice) return;
-      setStyleFor(
-        pod.id,
-        art.id,
-        choice.mode === "manual" ? MANUAL_STYLE_ID : (choice.styleId ?? MANUAL_STYLE_ID),
+      if (choice.path === "select") {
+        if (choice.selectedId) setStyleFor(pod.id, art.id, choice.selectedId);
+        return;
+      }
+      // A build the user did not promote still has to exist — it is the only
+      // thing that can seed the sheet's parts — so it is saved one-time and
+      // stays out of the next order's picker.
+      const saved = saveCustomStyle(
+        toStyleDef(choice.draft),
+        choice.saveToMaster ? "You" : `${ONE_TIME_PREFIX} · ${pod.id}`,
+        !choice.saveToMaster,
       );
+      setStyleFor(pod.id, art.id, saved.id);
     });
     const createdKits = kits.map((k) => addKit(pod.id, k));
     // Land in Configuration for the first thing added — the styles chosen
@@ -204,9 +244,24 @@ function NewPod() {
   };
 
   const next = () => {
+    if (step === 3 && !stepOk[3]) {
+      // A form that turns red while it is still being filled in reads as
+      // broken — the click to continue is what asks for the verdict.
+      setShowStyleErrors(true);
+      const firstBad = articles.find((a) => !articleStyleValid(styleFor(a)));
+      if (firstBad) setOpenArticle(firstBad.id);
+      return;
+    }
     if (!stepOk[step]) return;
     if (step === STEPS.length - 1) finish();
-    else setStep(step + 1);
+    else {
+      // TemplateStep is a controlled list with no default of its own; entering
+      // the step with nothing selected would leave Next dead for a decision
+      // the buyer has already made.
+      if (step === 0 && !templateId) setTemplateId(buyerMatch?.id ?? DEFAULT_TEMPLATE_ID);
+      if (step === 2) setOpenArticle((cur) => cur ?? articles[0]?.id ?? null);
+      setStep(step + 1);
+    }
   };
 
   return (
@@ -246,20 +301,20 @@ function NewPod() {
             />
           )}
           {step === 1 && (
-            <StepTemplate
-              buyer={buyer}
-              buyerMatch={buyerMatch}
-              mode={templateMode}
-              templateId={templateId}
-              onDefault={() => setTemplateMode("default")}
-              onBuyer={() => {
-                setTemplateMode("buyer");
-                // The buyer already told us which structure applies — offering
-                // a blank list anyway would just be a chance to pick wrong.
-                if (buyerMatch) setTemplateId((cur) => cur ?? buyerMatch.id);
-              }}
-              onPick={setTemplateId}
-            />
+            <div>
+              <h2 className="text-[14px] font-semibold text-ink-900">
+                Which cost structure prices this order?
+              </h2>
+              <p className="mb-3 mt-0.5 text-[12px] text-ink-500">
+                The template pins overheads, freight, finance, testing and special packing for every
+                costing under this POD — and the Quotation stage uses it without asking again.
+              </p>
+              <TemplateStep
+                buyer={buyer.trim() || undefined}
+                selectedId={templateId}
+                onSelect={setTemplateId}
+              />
+            </div>
           )}
           {step === 2 && (
             <StepArticles
@@ -275,9 +330,12 @@ function NewPod() {
             <StepStyles
               articles={articles}
               kits={kits}
-              choices={styles}
-              onMode={chooseStyleMode}
-              onPick={pickStyle}
+              styleMaster={styleMaster}
+              stateFor={styleFor}
+              onPatch={setStyleState}
+              openId={openArticle}
+              onToggle={(id) => setOpenArticle((cur) => (cur === id ? null : id))}
+              showErrors={showStyleErrors}
             />
           )}
 
@@ -299,7 +357,9 @@ function NewPod() {
             )}
             <button
               onClick={next}
-              disabled={!stepOk[step]}
+              /* On the style step Continue stays live even when incomplete:
+                 the click is what reveals which article is unfinished. */
+              disabled={step !== 3 && !stepOk[step]}
               className="inline-flex items-center gap-1.5 rounded-md bg-ink-900 px-4 py-2 text-[13px] font-medium text-white hover:bg-ink-700 disabled:cursor-not-allowed disabled:opacity-40"
             >
               {step === STEPS.length - 1 ? "Create POD & start costing" : "Next"}
@@ -442,150 +502,6 @@ function StepBasics({
 }
 
 /* ================================================================== */
-/* Step 2 — Buyer Template                                             */
-/* ================================================================== */
-
-function StepTemplate({
-  buyer,
-  buyerMatch,
-  mode,
-  templateId,
-  onDefault,
-  onBuyer,
-  onPick,
-}: {
-  buyer: string;
-  buyerMatch: CostTemplate | undefined;
-  mode: "default" | "buyer" | null;
-  templateId: string | null;
-  onDefault: () => void;
-  onBuyer: () => void;
-  onPick: (id: string) => void;
-}) {
-  const std = TEMPLATES.find((t) => t.id === DEFAULT_TEMPLATE_ID);
-  const buyerTemplates = TEMPLATES.filter((t) => t.kind === "buyer");
-  return (
-    <div>
-      <h2 className="text-[14px] font-semibold text-ink-900">
-        Which cost structure prices this order?
-      </h2>
-      <p className="mt-0.5 text-[12px] text-ink-500">
-        The template pins overheads, freight, finance, testing and special packing for every costing
-        under this POD — and the Quotation stage uses it without asking again.
-      </p>
-
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <TemplateModeCard
-          selected={mode === "default"}
-          icon={<LayoutTemplate className="h-4 w-4" />}
-          title="Use Default Template"
-          desc={
-            std
-              ? `${std.name} — OH ${std.overheadPct}% · testing ${std.testingPct}% · house structure for buyers without agreed terms.`
-              : "House default structure."
-          }
-          onClick={onDefault}
-        />
-        <TemplateModeCard
-          selected={mode === "buyer"}
-          icon={<Layers className="h-4 w-4" />}
-          title="Select Buyer Template"
-          desc={
-            buyerMatch
-              ? `${buyerMatch.name} has an agreed structure on file — pre-selected below.`
-              : buyer.trim()
-                ? `No structure on file for ${buyer.trim()} — pick from the buyer template list.`
-                : "Pick the buyer's agreed structure from the template list."
-          }
-          onClick={onBuyer}
-        />
-      </div>
-
-      {mode === "buyer" && (
-        <ul className="mt-4 divide-y divide-hairline overflow-hidden rounded-lg border border-hairline">
-          {buyerTemplates.map((t) => {
-            const on = templateId === t.id;
-            return (
-              <li key={t.id}>
-                <label
-                  className={cn(
-                    "flex cursor-pointer items-start gap-3 px-3.5 py-3 transition-colors",
-                    on ? "bg-brand-50/40" : "bg-surface hover:bg-surface-alt",
-                  )}
-                >
-                  <input
-                    type="radio"
-                    name="buyer-template"
-                    checked={on}
-                    onChange={() => onPick(t.id)}
-                    className="mt-1 h-4 w-4 shrink-0 accent-[var(--color-brand-700)]"
-                  />
-                  <span className="min-w-0 flex-1">
-                    <span className="flex flex-wrap items-center gap-2 text-[13px] font-semibold text-ink-900">
-                      {t.name}
-                      {buyerMatch?.id === t.id && (
-                        <span className="rounded-full bg-brand-700 px-1.5 py-0.5 text-[10px] font-medium text-white">
-                          Matches buyer
-                        </span>
-                      )}
-                    </span>
-                    <span className="mt-0.5 block text-[12px] text-ink-500">{t.description}</span>
-                    <span className="mt-1 block text-[11.5px] tabular-nums text-ink-600">
-                      OH {t.overheadPct}% · freight {t.freightPct}% · finance {t.financePct}% ·
-                      testing {t.testingPct}%
-                      {t.specialPackInr > 0 && ` · pack ₹${t.specialPackInr}/pc`}
-                    </span>
-                  </span>
-                </label>
-              </li>
-            );
-          })}
-        </ul>
-      )}
-    </div>
-  );
-}
-
-function TemplateModeCard({
-  selected,
-  icon,
-  title,
-  desc,
-  onClick,
-}: {
-  selected: boolean;
-  icon: React.ReactNode;
-  title: string;
-  desc: string;
-  onClick: () => void;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={selected}
-      className={cn(
-        "flex h-full flex-col items-start gap-2 rounded-lg border p-4 text-left transition-colors",
-        selected
-          ? "border-brand-600 bg-brand-50/40 ring-1 ring-brand-600"
-          : "border-hairline bg-surface hover:bg-surface-alt",
-      )}
-    >
-      <span
-        className={cn(
-          "flex h-8 w-8 items-center justify-center rounded-md",
-          selected ? "bg-brand-700 text-white" : "bg-ink-100 text-ink-700",
-        )}
-      >
-        {icon}
-      </span>
-      <span className="text-[13px] font-semibold text-ink-900">{title}</span>
-      <span className="text-[12px] leading-relaxed text-ink-500">{desc}</span>
-    </button>
-  );
-}
-
-/* ================================================================== */
 /* Step 3 — Articles / Products / Kit                                  */
 /* ================================================================== */
 
@@ -690,21 +606,27 @@ function StepArticles({
 function StepStyles({
   articles,
   kits,
-  choices,
-  onMode,
-  onPick,
+  styleMaster,
+  stateFor,
+  onPatch,
+  openId,
+  onToggle,
+  showErrors,
 }: {
   articles: LibraryArticle[];
   kits: PendingKit[];
-  choices: Record<string, StyleChoice>;
-  onMode: (id: string, mode: StyleChoice["mode"]) => void;
-  onPick: (id: string, styleId: string) => void;
+  styleMaster: StyleDef[];
+  stateFor: (a: LibraryArticle) => ArticleStyleState;
+  onPatch: (id: string, patch: Partial<ArticleStyleState>, name: string) => void;
+  openId: string | null;
+  onToggle: (id: string) => void;
+  showErrors: boolean;
 }) {
   return (
     <div>
       <h2 className="text-[14px] font-semibold text-ink-900">How does each build start?</h2>
       <p className="mt-0.5 text-[12px] text-ink-500">
-        Pull parts and cut sizes from the Style Master, or define them manually — this seeds each
+        Pull parts and cut sizes from the Style Master, or customise them — this seeds each
         article&rsquo;s Configuration table.
       </p>
 
@@ -715,89 +637,107 @@ function StepStyles({
         </p>
       )}
 
-      <ul className="mt-4 space-y-3">
+      {/* One article open at a time: each style is a full screen of decisions,
+          and four of them side by side is a form nobody finishes. */}
+      <ul className="mt-4 space-y-2">
         {articles.map((a) => {
-          const c = choices[a.id];
-          const chosenStyle = c?.styleId ? STYLE_MASTER.find((s) => s.id === c.styleId) : undefined;
-          return (
-            <li key={a.id} className="rounded-lg border border-hairline bg-surface p-3.5">
-              <div className="flex items-center gap-3">
-                <img src={a.image} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-medium text-ink-900">{a.name}</div>
-                  <div className="text-[11.5px] text-ink-500">
-                    {a.articleNo} · {a.size}
-                  </div>
-                </div>
-                <div className="inline-flex shrink-0 rounded-lg border border-hairline bg-surface p-0.5">
-                  <button
-                    type="button"
-                    onClick={() => onMode(a.id, "existing")}
-                    aria-pressed={c?.mode === "existing"}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors",
-                      c?.mode === "existing"
-                        ? "bg-ink-900 text-white"
-                        : "text-ink-600 hover:text-ink-900",
-                    )}
-                  >
-                    <Layers className="h-3.5 w-3.5" /> Use Existing Style
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onMode(a.id, "manual")}
-                    aria-pressed={c?.mode === "manual"}
-                    className={cn(
-                      "inline-flex items-center gap-1.5 rounded-md px-2.5 py-1 text-[12px] font-medium transition-colors",
-                      c?.mode === "manual"
-                        ? "bg-ink-900 text-white"
-                        : "text-ink-600 hover:text-ink-900",
-                    )}
-                  >
-                    <PencilRuler className="h-3.5 w-3.5" /> Create New Style
-                  </button>
-                </div>
-              </div>
+          const s = stateFor(a);
+          const errors = validateDraft(s.draft);
+          const ok = articleStyleValid(s);
+          const open = openId === a.id;
+          const chosen = styleMaster.find((m) => m.id === s.selectedId);
+          const status =
+            s.path === "select"
+              ? (chosen?.name ?? "Not set")
+              : ok
+                ? `Custom style${s.draft.name.trim() ? ` — ${s.draft.name.trim()}` : ""}`
+                : "Not set";
 
-              {c?.mode === "existing" && (
-                <div className="mt-3 border-t border-hairline pt-3">
-                  <select
-                    value={c.styleId ?? ""}
-                    onChange={(e) => e.target.value && onPick(a.id, e.target.value)}
-                    aria-label={`Style for ${a.name}`}
-                    className={cn(
-                      "w-full rounded-md border px-2.5 py-2 text-[13px] focus:outline-none",
-                      c.styleId
-                        ? "border-hairline bg-surface text-ink-900"
-                        : "border-amber-300 bg-amber-50/40 text-amber-800",
-                    )}
-                  >
-                    <option value="">Select a style from the Style Master…</option>
-                    {STYLE_MASTER.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name} — {s.category} · {s.parts.length} parts
-                      </option>
-                    ))}
-                  </select>
-                  {chosenStyle && (
-                    <p className="mt-2 flex flex-wrap gap-1">
-                      {chosenStyle.parts.map((part) => (
-                        <span
-                          key={part.name}
-                          className="rounded-full border border-hairline bg-surface-alt/60 px-2 py-0.5 text-[10.5px] text-ink-600"
-                        >
-                          {part.name} · {part.consumption}m
+          return (
+            <li key={a.id} className="overflow-hidden rounded-lg border border-hairline bg-surface">
+              <button
+                type="button"
+                onClick={() => onToggle(a.id)}
+                aria-expanded={open}
+                className="flex w-full items-center gap-3 px-3.5 py-2.5 text-left hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                <img src={a.image} alt="" className="h-10 w-10 shrink-0 rounded object-cover" />
+                <span className="min-w-0 flex-1">
+                  <span className="block text-[13px] font-medium text-ink-900">{a.name}</span>
+                  <span className="block text-[11.5px] text-ink-500">
+                    {a.articleNo} · {a.size}
+                  </span>
+                </span>
+                <span
+                  className={cn(
+                    "shrink-0 rounded-full px-2 py-0.5 text-[11px] font-medium",
+                    ok
+                      ? "bg-brand-50 text-brand-700"
+                      : showErrors
+                        ? "bg-danger-50 text-danger-600"
+                        : "bg-ink-100 text-ink-500",
+                  )}
+                >
+                  {status}
+                </span>
+                <ChevronDown
+                  aria-hidden
+                  className={cn(
+                    "h-4 w-4 shrink-0 text-ink-400 transition-transform",
+                    open && "rotate-180",
+                  )}
+                />
+              </button>
+
+              {open && (
+                <div className="space-y-3 border-t border-hairline px-3.5 py-3">
+                  <StyleStep
+                    styles={styleMaster}
+                    path={s.path}
+                    onPathChange={(path) => onPatch(a.id, { path }, a.name)}
+                    selectedId={s.selectedId}
+                    onSelect={(id) => onPatch(a.id, { selectedId: id }, a.name)}
+                    baseStyleId={s.baseStyleId}
+                    /* Choosing what to start from REPLACES the draft — that is
+                       the whole point of the affordance. */
+                    onStartFrom={(id) => {
+                      const base = id ? styleMaster.find((m) => m.id === id) : undefined;
+                      onPatch(
+                        a.id,
+                        {
+                          baseStyleId: base?.id ?? null,
+                          draft: base ? draftFromStyle(base) : emptyDraft({ product: a.name }),
+                        },
+                        a.name,
+                      );
+                    }}
+                    draft={s.draft}
+                    onDraftChange={(draft) => onPatch(a.id, { draft }, a.name)}
+                    errors={errors}
+                    showErrors={showErrors}
+                  />
+
+                  {s.path === "customize" && (
+                    <label className="flex items-start gap-2 rounded-lg border border-hairline bg-surface-alt/40 px-3 py-2.5">
+                      <input
+                        type="checkbox"
+                        checked={s.saveToMaster}
+                        onChange={(e) => onPatch(a.id, { saveToMaster: e.target.checked }, a.name)}
+                        className="mt-0.5 h-3.5 w-3.5 shrink-0 accent-[var(--color-brand-700)]"
+                      />
+                      <span className="min-w-0">
+                        <span className="block text-[12px] font-medium text-ink-900">
+                          Save to the Style Master
                         </span>
-                      ))}
-                    </p>
+                        <span className="block text-[11.5px] text-ink-500">
+                          {s.saveToMaster
+                            ? "This style will be added to the master and offered on the next order."
+                            : "This style will be used for this costing only — it will not appear in the picker again."}
+                        </span>
+                      </span>
+                    </label>
                   )}
                 </div>
-              )}
-              {c?.mode === "manual" && (
-                <p className="mt-3 border-t border-hairline pt-3 text-[12px] text-ink-500">
-                  Parts will be defined one at a time in the Configuration table — &ldquo;Add
-                  another body part&rdquo; keeps offering the next one.
-                </p>
               )}
             </li>
           );
