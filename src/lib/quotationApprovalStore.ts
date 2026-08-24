@@ -137,9 +137,11 @@ export const allTeamsAssigned = (a: QuotationApproval): boolean =>
 
 /**
  * Send for approval. Demo simulate, matching the costing sign-off pattern:
- * the merchandiser team approves immediately, the commercial manager raises a
- * revision — so the status list has something to show without requiring a
- * second person to act.
+ * the merchandiser team approves immediately and everyone else is pending —
+ * so the reviewer list has movement to show, while the quotation itself sits
+ * honestly in Pending Approval. (It used to simulate a "changes" verdict too,
+ * which threw every real send straight into the Revised lane of the pipeline
+ * and made Pending Approval unreachable from the UI.)
  */
 export function submitQuotationForApproval(podId: string, by = "Gautam Kitclu") {
   write(podId, (a) => {
@@ -147,7 +149,6 @@ export function submitQuotationForApproval(podId: string, by = "Gautam Kitclu") 
     const reviewStatus: Record<string, ReviewStatus> = {};
     for (const key of people) {
       if (key.startsWith("merch:")) reviewStatus[key] = "approved";
-      else if (key.startsWith("commercial:")) reviewStatus[key] = "changes";
       else reviewStatus[key] = "pending";
     }
     return {

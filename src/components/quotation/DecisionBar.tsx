@@ -1,24 +1,18 @@
 /**
  * The commercial decision, and the numbers it is taken on.
  *
- * Two bars, one strip of figures. Preparing a quotation and deciding on one
- * are different jobs held by different people, so the numbers are shared and
- * the actions are not:
- *
- *   PreparationBar — what is being built. No decision to take yet.
- *   DecisionBar    — Approve / Reject / Override, for an APPROVER, and only
- *                    once the quotation has actually been submitted.
- *
- * Both are pinned to the bottom of the viewport: a reviewer scrolling through
- * twenty lines should never have to scroll back to act, or lose sight of what
- * the whole document is worth while reading one row of it.
+ * One strip of figures, pinned to the bottom of the viewport: a reviewer
+ * scrolling through twenty lines should never lose sight of what the whole
+ * document is worth while reading one row of it. The ACTIONS — send, and the
+ * approver's Approve / Override / Reject — live in the page header with every
+ * other CTA; this bar only reports.
  *
  * The strip is the same arithmetic the sheet totals show, read from
  * `commercialHealth` — one source, so a bar cannot claim a margin the table
  * above disagrees with.
  */
 
-import { CheckCircle2, FileWarning, Layers, PencilLine, XCircle } from "lucide-react";
+import { FileWarning, Layers } from "lucide-react";
 
 import { cn } from "@/lib/utils";
 import { inr, pct, usd } from "@/lib/commercialProvisions";
@@ -43,76 +37,9 @@ export function PreparationBar({
       <HealthStrip health={health} />
       <p className="ml-auto max-w-[340px] text-right text-[11px] leading-snug text-ink-500">
         {submitted
-          ? "This quotation is out for approval and read-only. Approve, override or reject it from the Approval screen."
+          ? "This quotation is out for approval and read-only. Approve, override or reject it from the header above."
           : "This quotation is still being prepared. Send it for approval from the header when the figures are right."}
       </p>
-    </BarShell>
-  );
-}
-
-export function DecisionBar({
-  health,
-  locked,
-  blockedNames,
-  onApprove,
-  onOverride,
-  onReject,
-}: {
-  health: CommercialHealth;
-  /** a decision already taken — the buttons stop offering to take it again */
-  locked: boolean;
-  /** lines out for recosting — the quotation cannot be approved while they are */
-  blockedNames: string[];
-  onApprove: () => void;
-  onOverride: () => void;
-  onReject: () => void;
-}) {
-  const blocked = blockedNames.length > 0;
-
-  return (
-    <BarShell>
-      <HealthStrip health={health} />
-
-      {/* ---- the decision ---- */}
-      <div className="ml-auto flex flex-wrap items-center gap-2">
-        {blocked && (
-          <p className="max-w-[280px] text-[11px] leading-snug text-[var(--color-risk)]">
-            {blockedNames.join(", ")} {blockedNames.length === 1 ? "is" : "are"} out for recosting.
-          </p>
-        )}
-
-        <button
-          type="button"
-          disabled={locked || health.articles === 0}
-          onClick={onReject}
-          className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-risk)]/40 bg-surface px-3.5 py-2 text-[13px] font-medium text-[var(--color-risk)] hover:bg-[var(--color-risk-soft)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-risk)]"
-        >
-          <XCircle className="h-4 w-4" aria-hidden /> Reject
-        </button>
-
-        <button
-          type="button"
-          disabled={locked || health.articles === 0}
-          onClick={onOverride}
-          className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3.5 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-        >
-          <PencilLine className="h-4 w-4" aria-hidden /> Override
-        </button>
-
-        <button
-          type="button"
-          disabled={locked || blocked || health.articles === 0}
-          title={
-            blocked
-              ? `${blockedNames.join(", ")} must come back from recosting first.`
-              : "Approve this quotation and lock it for final quotation generation"
-          }
-          onClick={onApprove}
-          className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-4 py-2 text-[13px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-        >
-          <CheckCircle2 className="h-4 w-4" aria-hidden /> Approve
-        </button>
-      </div>
     </BarShell>
   );
 }

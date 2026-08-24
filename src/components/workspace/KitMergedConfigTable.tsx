@@ -11,8 +11,8 @@
  *
  * It is not a read-only mirror. A table you can only look at sends the user
  * back to the tabs to change anything, which is the very trip this screen
- * exists to remove — so a cell carries the SAME dropdown its own sheet has,
- * opens that member's sheet on that line when clicked anywhere else, and each
+ * exists to remove — so a cell opens its component in the inspector drawer,
+ * where the SAME option choice its own sheet offers is made, and each
  * member's column can take a new component from the library on its own. Adding
  * belongs to one article because a component is an article's decision; the
  * column the user reaches for is the article they mean.
@@ -25,7 +25,7 @@
  */
 
 import { Fragment, useMemo, useState } from "react";
-import { Package, Plus } from "lucide-react";
+import { ChevronRight, Package, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { KitItem, Pod } from "@/lib/podsStore";
@@ -38,8 +38,7 @@ import {
 import type { ArticleCosting } from "@/components/workspace/ArticleCostingWorkspace";
 import { ComponentLibraryModal } from "@/components/workspace/ComponentLibraryModal";
 import { FabricDetailModal } from "@/components/workspace/FabricDetailModal";
-import { OptionPicker, type PickerOption } from "@/components/ui/pickers";
-import type { CostLine, LineKind, LineSection, OptionGroup } from "@/lib/costLines";
+import type { CostLine, LineKind, LineSection } from "@/lib/costLines";
 import type { LibraryItem } from "@/lib/library";
 
 /* ------------------------------------------------------------------ *
@@ -55,7 +54,7 @@ type Cell = {
   componentId: string;
   /**
    * The line this cell can reconfigure. Where a member spends twice under one
-   * variable name the FIRST line owns the dropdown — the summed figure is the
+   * variable name the FIRST line owns the choice — the summed figure is the
    * honest cost, but only a single line can be a single decision.
    */
   line: CostLine;
@@ -225,21 +224,7 @@ const inr2 = (n: number) =>
  */
 const inrWhole = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 
-/**
- * A cost line's option group in the shared picker's terms — the same mapping the
- * costing sheet makes, because these cells ARE that sheet's lines.
- */
-function pickerOptions(group: OptionGroup): PickerOption[] {
-  return group.options.map((o) => ({
-    id: o.id,
-    label: o.label,
-    detail: o.detail,
-    trailing: `₹${o.rate.toFixed(2)}`,
-  }));
-}
 
-/** Rate lists are short; the sheet keeps the search box out of them. */
-const NO_PICKER_SEARCH = 999;
 
 const HEAD = "px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-400";
 const CELL = "px-3 py-2 align-top text-[12px]";
@@ -258,8 +243,8 @@ export function KitMergedConfigTable({
   pod: Pod;
   members: KitItem[];
   costed: Record<string, ArticleCosting>;
-  /** open the member's full sheet with this line's component selected */
-  onFocusLine: (memberId: string, componentId: string) => void;
+  /** open this line's component master for that member (the inspector drawer) */
+  onFocusLine: (memberId: string, componentId: string, lineId?: string) => void;
   /** open the member's sheet with nothing in particular selected */
   onOpenMember?: (memberId: string) => void;
 }) {
@@ -305,8 +290,8 @@ export function KitMergedConfigTable({
     <div className="overflow-hidden rounded-xl border border-hairline bg-surface">
       <p className="border-b border-hairline px-4 py-2.5 text-[11.5px] text-ink-500">
         One sheet for the whole set — work down the variables once and read every article side by
-        side. Change any cell here, click one to open that article on that line, or add a component
-        to a single article from its own column.
+        side. Change any cell here, click one to inspect its component master, or add a component to
+        a single article from its own column.
       </p>
 
       <div className="overflow-x-auto">
@@ -457,7 +442,7 @@ function SectionRows({
   /** the cloths this section's rows consume — Raw Material only, empty elsewhere */
   fabrics: KitFabric[];
   onFabricDetail: (req: FabricRequirement) => void;
-  onFocusLine: (memberId: string, componentId: string) => void;
+  onFocusLine: (memberId: string, componentId: string, lineId?: string) => void;
   /** open the library for ONE member, scoped to this section */
   onStartAdd: (memberId: string) => void;
 }) {
@@ -498,7 +483,10 @@ function SectionRows({
             <td className={cn(CELL, "sticky left-0 z-10 bg-surface")}>
               <button
                 type="button"
-                onClick={() => first && onFocusLine(first.id, row.cells[first.id].componentId)}
+                onClick={() =>
+                  first &&
+                  onFocusLine(first.id, row.cells[first.id].componentId, row.cells[first.id].line.id)
+                }
                 className="rounded text-left font-medium text-ink-900 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
               >
                 {row.name}
@@ -513,7 +501,7 @@ function SectionRows({
                       cell={cell}
                       memberName={m.name}
                       actions={costed[m.id]?.actions}
-                      onOpenSheet={() => onFocusLine(m.id, cell.componentId)}
+                      onOpenSheet={() => onFocusLine(m.id, cell.componentId, cell.line.id)}
                     />
                   ) : (
                     <span className="block px-3 py-2 text-ink-400">—</span>
@@ -654,11 +642,11 @@ function sectionTotalFor(section: MergedSection, memberId: string) {
 /**
  * A configurable line becomes a picker; a line with nothing to choose stays the
  * plain reading it always was. Either way the WHOLE cell is the door to that
- * member's sheet on that line, exactly as a row on the single-article sheet
- * opens its component in the inspector — the kit table should not be the one
- * place where a costing line is not clickable. The dropdown keeps its own
- * clicks (it already stops them propagating), so changing a value never turns
- * into a navigation.
+ * component's master in the inspector drawer, exactly as a row on the
+ * single-article sheet opens its component in the inspector — the kit table
+ * should not be the one place where a costing line is not clickable. The
+ * dropdown keeps its own clicks (it already stops them propagating), so
+ * changing a value never turns into a navigation.
  */
 function MemberCell({
   cell,
@@ -672,57 +660,31 @@ function MemberCell({
   onOpenSheet: () => void;
 }) {
   const { line } = cell;
-  const canPick = Boolean(line.optionGroup && line.target && actions);
+  const configurable = Boolean(line.optionGroup && line.target && actions);
 
-  if (!canPick) {
-    return (
-      <button
-        type="button"
-        onClick={onOpenSheet}
-        title={`Open ${memberName} on this line`}
-        className="block h-full w-full rounded px-3 py-2 text-left transition-colors hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
-      >
-        <span className="block truncate text-[12px] text-ink-800">{cell.detail}</span>
-        <span className="block text-[10.5px] tabular-nums text-ink-500">
-          {cell.rate} · <span className="font-medium text-ink-700">{inr2(cell.cost)} / pc</span>
-        </span>
-      </button>
-    );
-  }
-
-  // No second control beside the dropdown: the cell itself is the door, so the
-  // picker never has to share its pixels with a "go to sheet" button, and the
-  // space around it — the rate, the cost, the padding — is what carries the
-  // click.
+  // One shape for every cell: the reading, and the door to the inspector —
+  // which now owns the option choice the cell's dropdown used to carry.
   return (
-    <div
-      role="button"
-      tabIndex={0}
+    <button
+      type="button"
       onClick={onOpenSheet}
-      onKeyDown={(e) => {
-        // Only the cell's own keystrokes: Enter inside the open picker belongs
-        // to the picker, not to navigation.
-        if (e.target !== e.currentTarget) return;
-        if (e.key === "Enter" || e.key === " ") {
-          e.preventDefault();
-          onOpenSheet();
-        }
-      }}
-      aria-label={`${cell.detail} on ${memberName}. Open ${memberName} on this line.`}
-      className="cursor-pointer px-3 py-2 transition-colors hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
+      title={
+        configurable
+          ? "Choose this component's option in the inspector"
+          : "View this component's master"
+      }
+      aria-label={`${cell.detail} on ${memberName}. Open this component in the inspector.`}
+      className="block h-full w-full rounded px-3 py-2 text-left transition-colors hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
     >
-      <OptionPicker
-        label={(line.optionGroup as OptionGroup).label}
-        options={pickerOptions(line.optionGroup as OptionGroup)}
-        selectedId={(line.optionGroup as OptionGroup).selectedId}
-        searchThreshold={NO_PICKER_SEARCH}
-        onPick={(optionId) =>
-          actions?.selectOption(line.kind, line.target!.componentId, line.target!.itemId, optionId)
-        }
-      />
-      <span className="mt-0.5 block text-[10.5px] tabular-nums text-ink-500">
+      <span className="flex items-center gap-1">
+        <span className="truncate text-[12px] text-ink-800">{cell.detail}</span>
+        {configurable && (
+          <ChevronRight className="h-3 w-3 shrink-0 text-ink-400" aria-hidden />
+        )}
+      </span>
+      <span className="block text-[10.5px] tabular-nums text-ink-500">
         {cell.rate} · <span className="font-medium text-ink-700">{inr2(cell.cost)} / pc</span>
       </span>
-    </div>
+    </button>
   );
 }

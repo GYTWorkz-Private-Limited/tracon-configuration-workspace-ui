@@ -1,10 +1,11 @@
 // ComponentInspector — the right column: configure a component, then read the
 // full derivation of its cost.
 //
-// Four tabs in calculation order: CONFIGURE (what it is made of) → MATERIAL
-// INFO (what the master says) → CONSUMPTION RULES (how much of it) → COSTING
-// (what that comes to). Component identity sits ABOVE the tabs, so switching
-// tabs never loses track of which component is being read.
+// Four tabs in calculation order: CONFIGURE (what it is made of — a searchable
+// list of option cards when the component carries a choice) → MATERIAL INFO
+// (what the master says) → CONSUMPTION RULES (how much of it) → COSTING (what
+// that comes to). Component identity sits ABOVE the tabs, so switching tabs
+// never loses track of which component is being read.
 
 import { useEffect, useRef, useState } from "react";
 import {
@@ -30,17 +31,47 @@ import {
   type SourceType,
   type SpecField,
 } from "@/lib/costingModel";
+import type { OptionGroup } from "@/lib/costLines";
+
+/**
+ * The component's configurable choice, moved off the sheet's row and into this
+ * panel: the option cards the reference design shows, staged behind an Apply.
+ */
+export type InspectorPicker = {
+  group: OptionGroup;
+  onPick: (optionId: string) => void;
+};
 
 type Props = {
   resolved: ResolvedComponent | null;
   productName: string;
   scenarioName: string;
   money: MoneyFormatter;
+  /** present when this component's option can be changed from here */
+  picker?: InspectorPicker;
   onClose: () => void;
 };
 
-export function ComponentInspector({ resolved, productName, scenarioName, money, onClose }: Props) {
+/** The panel's four views, in calculation order. */
+const TABS = [
+  { id: "configure", label: "Configure" },
+  { id: "material", label: "Material Info" },
+  { id: "consumption", label: "Consumption Rules" },
+  { id: "costing", label: "Costing" },
+] as const;
+
+type TabId = (typeof TABS)[number]["id"];
+
+export function ComponentInspector({
+  resolved,
+  productName,
+  scenarioName,
+  money,
+  picker,
+  onClose,
+}: Props) {
   const scrollRef = useRef<HTMLDivElement | null>(null);
+  const [tab, setTab] = useState<TabId>("configure");
 
   useEffect(() => {
     if (!resolved) return;
@@ -54,11 +85,18 @@ export function ComponentInspector({ resolved, productName, scenarioName, money,
     return () => document.removeEventListener("keydown", onKey);
   }, [resolved, onClose]);
 
-  // A different component starts scrolled to the top — carrying the previous
-  // scroll position over would land mid-way through an unrelated section.
+  // A different component starts on Configure, scrolled to the top —
+  // carrying the previous component's tab and position over would land
+  // mid-way through an unrelated reading.
   useEffect(() => {
+    setTab("configure");
     scrollRef.current?.scrollTo({ top: 0 });
   }, [resolved?.component.id]);
+
+  // Switching tabs also starts at the top of the new one.
+  useEffect(() => {
+    scrollRef.current?.scrollTo({ top: 0 });
+  }, [tab]);
 
   if (!resolved) return null;
   const { component: c, material } = resolved;
@@ -96,15 +134,248 @@ export function ComponentInspector({ resolved, productName, scenarioName, money,
         </p>
       </header>
 
-      {/* One continuous page. The calculation reads top to bottom —
-          what it is made of → what the master says → how much of it →
-          what that comes to — so no part of the derivation is ever a
-          click away from the number it produces. */}
+      {/* ---- the four views, in calculation order: what it is made of →
+              what the master says → how much of it → what that comes to ---- */}
+      <nav
+        role="tablist"
+        aria-label="Component views"
+        className="flex shrink-0 items-center gap-0.5 overflow-x-auto border-b border-hairline px-2"
+      >
+        {TABS.map((t) => (
+          <button
+            key={t.id}
+            type="button"
+            role="tab"
+            aria-selected={tab === t.id}
+            onClick={() => setTab(t.id)}
+            className={cn(
+              "whitespace-nowrap border-b-2 px-2.5 py-2 text-[12px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700",
+              tab === t.id
+                ? "border-brand-700 font-semibold text-ink-900"
+                : "border-transparent text-ink-500 hover:text-ink-900",
+            )}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
       <div ref={scrollRef} className="min-h-0 flex-1 overflow-y-auto">
-        <ConfigureTab resolved={resolved} />
-        <MaterialTab resolved={resolved} money={money} />
-        <ConsumptionTab resolved={resolved} />
-        <CostingTab resolved={resolved} money={money} />
+        {tab === "configure" &&
+          (picker ? (
+            <OptionCards key={c.id} componentName={c.name} picker={picker} onClose={onClose} />
+          ) : (
+            <ConfigureTab resolved={resolved} />
+          ))}
+        {tab === "material" && <MaterialTab resolved={resolved} money={money} />}
+        {tab === "consumption" && <ConsumptionTab resolved={resolved} />}
+        {tab === "costing" && <CostingTab resolved={resolved} money={money} />}
+      </div>
+    </aside>
+  );
+}
+
+/* ------------------------------------------------------------------ *
+ * The option picker — the sheet's dropdown, grown into cards
+ * ------------------------------------------------------------------ */
+
+/**
+ * Every option the component can be, as a card: name, rate, spec line, with
+ * the current selection ringed. The choice is STAGED — a click marks a card,
+ * Apply commits it through the same store action the dropdown used — so
+ * comparing five fabrics never re-costs the sheet five times on the way.
+ */
+function OptionCards({
+  componentName,
+  picker,
+  onClose,
+}: {
+  componentName: string;
+  picker: InspectorPicker;
+  onClose: () => void;
+}) {
+  const { group, onPick } = picker;
+  const currentId = group.selectedId;
+  const [stagedId, setStagedId] = useState<string | undefined>(undefined);
+  const [query, setQuery] = useState("");
+  const current = group.options.find((o) => o.id === currentId);
+  const dirty = stagedId !== undefined && stagedId !== currentId;
+
+  // The live selection moved — after our own Apply, or from another surface.
+  // Either way the staging is void: a stale ring with an enabled Apply would
+  // quietly revert somebody else's change.
+  useEffect(() => {
+    setStagedId(undefined);
+  }, [currentId]);
+
+  // The current selection stays visible even when the search would hide it —
+  // a list that loses "what it is now" makes every comparison one-sided.
+  const term = query.trim().toLowerCase();
+  const visible = term
+    ? group.options.filter(
+        (o) =>
+          o.id === currentId ||
+          o.label.toLowerCase().includes(term) ||
+          (o.detail ?? "").toLowerCase().includes(term),
+      )
+    : group.options;
+
+  return (
+    <div className="flex flex-col border-b border-hairline">
+      {/* what is being chosen, and what it currently is */}
+      <dl className="mx-4 mt-3 grid grid-cols-2 gap-3 rounded-lg bg-surface-alt px-3 py-2.5">
+        <div>
+          <dt className="text-[10.5px] text-ink-500">Component</dt>
+          <dd className="mt-0.5 truncate text-[12.5px] font-medium text-ink-900">
+            {componentName}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-[10.5px] text-ink-500">Current selection</dt>
+          <dd className="mt-0.5 truncate text-[12.5px] font-medium text-ink-900">
+            {current?.label ?? "—"}
+          </dd>
+        </div>
+      </dl>
+
+      <p className="mx-4 mt-2 text-[10.5px] font-semibold uppercase tracking-[0.1em] text-ink-500">
+        {group.label}
+      </p>
+
+      {/* the list is searchable — masters run long, and scrolling past forty
+          fabrics to reach the one the mill quoted is not a comparison */}
+      <label className="relative mx-4 mt-1.5 block">
+        <span className="sr-only">Search {group.label.toLowerCase()} options</span>
+        <Search
+          className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-ink-400"
+          aria-hidden
+        />
+        <input
+          type="search"
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder={`Search ${group.label.toLowerCase()}…`}
+          className="w-full rounded-md border border-hairline bg-surface py-1.5 pl-8 pr-2.5 text-[12px] text-ink-900 placeholder:text-ink-400 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-700/20"
+        />
+      </label>
+
+      <div className="mx-4 mb-3 mt-1.5 space-y-1.5">
+        {visible.length === 0 && (
+          <p className="rounded-lg border border-dashed border-hairline px-3 py-4 text-center text-[11.5px] text-ink-500">
+            Nothing matches “{query.trim()}”.
+          </p>
+        )}
+        {visible.map((o) => {
+          const isStaged = o.id === (stagedId ?? currentId);
+          return (
+            <button
+              key={o.id}
+              type="button"
+              onClick={() => setStagedId(o.id)}
+              aria-pressed={isStaged}
+              className={cn(
+                "w-full rounded-xl border px-3 py-2.5 text-left transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
+                isStaged
+                  ? "border-brand-600 bg-brand-50/60 ring-1 ring-brand-600"
+                  : "border-hairline bg-surface hover:bg-surface-alt",
+              )}
+            >
+              <span className="flex items-baseline justify-between gap-2">
+                <span className="flex min-w-0 items-center gap-1.5">
+                  {isStaged && (
+                    <Check className="h-3.5 w-3.5 shrink-0 text-brand-700" strokeWidth={3} aria-hidden />
+                  )}
+                  <span className="truncate text-[13px] font-semibold text-ink-900">{o.label}</span>
+                </span>
+                <span className="shrink-0 text-[12.5px] font-semibold tabular-nums text-ink-900">
+                  ₹{o.rate.toLocaleString("en-IN")}
+                </span>
+              </span>
+              {o.detail && (
+                <span className="mt-0.5 block text-[11.5px] leading-snug text-ink-500">
+                  {o.detail}
+                </span>
+              )}
+            </button>
+          );
+        })}
+      </div>
+
+      {/* the commit — nothing on the sheet moves until Apply */}
+      <div className="flex items-center justify-between gap-2 border-t border-hairline bg-surface-alt/60 px-4 py-2.5">
+        <button
+          type="button"
+          onClick={onClose}
+          className="rounded-full border border-hairline bg-surface px-4 py-1.5 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+        >
+          Cancel
+        </button>
+        <button
+          type="button"
+          disabled={!dirty}
+          onClick={() => stagedId && onPick(stagedId)}
+          className="inline-flex items-center gap-1.5 rounded-full bg-brand-700 px-4 py-1.5 text-[12.5px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+        >
+          <Check className="h-3.5 w-3.5" aria-hidden /> Apply {group.label.toLowerCase()}
+        </button>
+      </div>
+    </div>
+  );
+}
+
+/**
+ * The inspector shell for a line with a CHOICE but no component behind it —
+ * packaging, carton and testing lines belong to the product, not to a
+ * component, so they can never resolve in the rollup. Without this panel the
+ * removal of the row dropdowns would have made their options unreachable.
+ */
+export function LineOptionPanel({
+  title,
+  context,
+  picker,
+  onClose,
+}: {
+  title: string;
+  context?: string;
+  picker: InspectorPicker;
+  onClose: () => void;
+}) {
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        onClose();
+      }
+    };
+    document.addEventListener("keydown", onKey);
+    return () => document.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <aside
+      role="region"
+      aria-label={`${title} options`}
+      className="flex h-full w-[380px] shrink-0 flex-col border-l border-hairline bg-surface"
+    >
+      <header className="shrink-0 border-b border-hairline px-4 py-3">
+        <div className="flex items-start justify-between gap-2">
+          <div className="min-w-0">
+            <h2 className="truncate text-[14px] font-semibold text-ink-900">{title}</h2>
+            {context && <p className="mt-0.5 truncate text-[11px] text-ink-500">{context}</p>}
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close options"
+            title="Close (Esc)"
+            className="shrink-0 rounded-md p-1 text-ink-400 transition-colors hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      </header>
+      <div className="min-h-0 flex-1 overflow-y-auto">
+        <OptionCards key={title} componentName={title} picker={picker} onClose={onClose} />
       </div>
     </aside>
   );
@@ -133,21 +404,20 @@ function ConfigureTab({ resolved }: { resolved: ResolvedComponent }) {
           {!material ? (
             <>
               This component has no material — its cost comes entirely from the processes applied to
-              it. Change a step in its row on the costing sheet.
+              it. Select a process line on the sheet to change a step from this panel.
             </>
           ) : inherits ? (
             <>
               This slot is on{" "}
               <strong className="text-ink-900">{material.inheritedFrom ?? "its parent"}</strong>'s
-              cloth. Give it its own fabric from the row dropdown, or change the parent and this
+              cloth. Select the parent's row on the sheet to change the fabric here, and this
               re-costs with it.
             </>
           ) : (
             <>
               <strong className="text-ink-900">{material.name}</strong> is selected from the
-              Component Library. Every value below comes from that master — change the fabric, the
-              process or the trim in the row's dropdown on the sheet, or open the library to compare
-              masters before you switch.
+              Component Library. Every value below comes from that master — open the library to
+              compare masters before you switch.
             </>
           )}
         </p>

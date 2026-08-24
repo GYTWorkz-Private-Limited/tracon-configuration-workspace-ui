@@ -39,7 +39,7 @@ import {
   fabricRequirementsFor,
   type FabricRequirement,
 } from "@/lib/fabricRequirement";
-import { ComponentInspector } from "@/components/workspace/ComponentInspector";
+import { ComponentInspector, LineOptionPanel } from "@/components/workspace/ComponentInspector";
 import { ComponentLibraryModal } from "@/components/workspace/ComponentLibraryModal";
 import { ConfigurationRail } from "@/components/workspace/ConfigurationRail";
 
@@ -252,6 +252,14 @@ export function ArticleCostingWorkspace({
 
   /* ---- workspace UI state ---- */
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  /**
+   * The exact LINE whose row was clicked. The inspector resolves the
+   * component by `selectedId`, but a component can carry several choices
+   * (fabric, dyeing, cutting) — the line says which one the picker offers.
+   * Falls back to the component's first configurable line when selection
+   * arrived by component alone (kit focus signals, removals).
+   */
+  const [selectedLineId, setSelectedLineId] = useState<string | null>(null);
   const [libraryOpen, setLibraryOpen] = useState(false);
   const [librarySection, setLibrarySection] = useState<LineSection["id"] | null>(null);
   const [filter, setFilter] = useState<CostCategory | null>(null);
@@ -279,6 +287,7 @@ export function ArticleCostingWorkspace({
     setScenarios(DEFAULT_SCENARIOS);
     setActiveScenarioId(DEFAULT_SCENARIOS[0].id);
     setSelectedId(null);
+    setSelectedLineId(null);
     setFilter(null);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [bundle.product.id, identity.articleId]);
@@ -426,10 +435,23 @@ export function ArticleCostingWorkspace({
   const selected = rollup.components.find((c) => c.component.id === selectedId) ?? null;
   const category: CostCategory = filter ?? "direct";
 
+
   const allSections = useMemo(
     () => buildSections(rollup.components, pricedVariant.packaging, pricedVariant.testing),
     [rollup.components, pricedVariant.packaging, pricedVariant.testing],
   );
+
+  /**
+   * The selected component's configurable line, if it has one — the option
+   * cards in the inspector are this line's choice, moved off the row.
+   */
+  const selectedLine =
+    allSections.flatMap((s) => s.lines).find((l) => l.id === selectedLineId && l.optionGroup && l.target) ??
+    (selected
+      ? allSections
+          .flatMap((s) => s.lines)
+          .find((l) => l.componentId === selected.component.id && l.optionGroup && l.target)
+      : undefined);
 
   const visibleSections = useMemo(() => {
     const key = CATEGORY_SECTION[category];
@@ -760,7 +782,10 @@ export function ArticleCostingWorkspace({
 
     if (line.kind === "material") {
       updateActive(removeComponentFrom(activeVariant, componentId));
-      if (selectedId === componentId) setSelectedId(null);
+      if (selectedId === componentId) {
+        setSelectedId(null);
+        setSelectedLineId(null);
+      }
       return;
     }
     if (line.kind === "process" || line.kind === "accessory") {
@@ -804,6 +829,7 @@ export function ArticleCostingWorkspace({
     ]);
     setActiveVariantId(id);
     setSelectedId(null);
+    setSelectedLineId(null);
     setVariantModalOpen(false);
   };
 
@@ -825,6 +851,7 @@ export function ArticleCostingWorkspace({
     ]);
     setActiveVariantId(id);
     setSelectedId(null);
+    setSelectedLineId(null);
     setOptionModalOpen(false);
   };
 
@@ -834,6 +861,7 @@ export function ArticleCostingWorkspace({
     setVariants(next);
     if (!next.some((v) => v.id === activeVariantId)) setActiveVariantId(next[0].id);
     setSelectedId(null);
+    setSelectedLineId(null);
   };
 
   const addScenario = (preset: Scenario) => {
@@ -844,6 +872,7 @@ export function ArticleCostingWorkspace({
     setScenarios((prev) => [...prev, preset]);
     setActiveScenarioId(preset.id);
     setSelectedId(null);
+    setSelectedLineId(null);
   };
 
   const closeScenario = (id: string) => {
@@ -876,12 +905,12 @@ export function ArticleCostingWorkspace({
         live={live}
       />
 
-      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-canvas p-4">
+      <main className="flex min-w-0 flex-1 flex-col overflow-y-auto bg-canvas px-4 py-3">
         {/* One line of identity, not a second header: on a standalone article
             it restates the essentials next to the sheet they govern, and for a
             kit member it is the ONLY place that member's own size, MOQ and
             reference are stated — the page header above belongs to the kit. */}
-        <div className="mb-2 flex shrink-0 flex-wrap items-center gap-x-2.5 gap-y-1 px-1 text-[11.5px] text-ink-500">
+        <div className="mb-1.5 flex shrink-0 flex-wrap items-center gap-x-2.5 gap-y-0.5 px-1 text-[11.5px] text-ink-500">
           {identity.image && (
             <img
               src={identity.image}
@@ -912,6 +941,7 @@ export function ArticleCostingWorkspace({
             onSelect={(id) => {
               setActiveVariantId(id);
               setSelectedId(null);
+              setSelectedLineId(null);
             }}
             onAdd={(kind) =>
               kind === "variant" ? setVariantModalOpen(true) : setOptionModalOpen(true)
@@ -923,6 +953,7 @@ export function ArticleCostingWorkspace({
               setVariants((prev) => [...prev, duplicateVariant(src, newId, `${src.name} copy`)]);
               setActiveVariantId(newId);
               setSelectedId(null);
+              setSelectedLineId(null);
             }}
             onRename={(id, name) =>
               setVariants((prev) => prev.map((v) => (v.id === id ? { ...v, name } : v)))
@@ -967,21 +998,23 @@ export function ArticleCostingWorkspace({
           </div>
         )}
 
-        <div className="mt-3">
+        <div className="mt-2">
           <CostLineTable
             sections={visibleSections}
             money={money}
             selectedId={selectedId}
-            onSelect={setSelectedId}
+            onSelect={(componentId, line) => {
+              setSelectedId(componentId);
+              setSelectedLineId(line.id);
+            }}
             onAdd={openLibrary}
             onRemove={removeLine}
-            onSelectOption={selectLineOption}
             title={filter ? CATEGORY_COPY[category].totalLabel : "Costing Sheet"}
             caption={CATEGORY_COPY[category].caption}
             totalLabel={CATEGORY_COPY[category].totalLabel}
             total={categoryTotal}
             live={live}
-            compact={Boolean(selected)}
+            compact={Boolean(selected || selectedLine)}
             fabricRollups={fabricReqs}
           />
         </div>
@@ -995,13 +1028,51 @@ export function ArticleCostingWorkspace({
             onApply={() => {}}
           />
         </div>
+      ) : !selected && selectedLine ? (
+        <LineOptionPanel
+          title={selectedLine.name}
+          context={`${product.name} · ${selectedLine.context}`}
+          picker={{
+            group: selectedLine.optionGroup!,
+            onPick: (optionId) =>
+              selectLineOption(
+                selectedLine.kind,
+                selectedLine.target!.componentId,
+                selectedLine.target!.itemId,
+                optionId,
+              ),
+          }}
+          onClose={() => {
+            setSelectedId(null);
+            setSelectedLineId(null);
+          }}
+        />
       ) : (
         <ComponentInspector
           resolved={selected}
           productName={product.name}
           scenarioName={activeScenario.name}
           money={money}
-          onClose={() => setSelectedId(null)}
+          // The row's old dropdown, relocated: the inspector offers this
+          // component's options as cards and commits through the same action.
+          picker={
+            selectedLine?.optionGroup && selectedLine.target
+              ? {
+                  group: selectedLine.optionGroup,
+                  onPick: (optionId) =>
+                    selectLineOption(
+                      selectedLine.kind,
+                      selectedLine.target!.componentId,
+                      selectedLine.target!.itemId,
+                      optionId,
+                    ),
+                }
+              : undefined
+          }
+          onClose={() => {
+            setSelectedId(null);
+            setSelectedLineId(null);
+          }}
         />
       )}
 

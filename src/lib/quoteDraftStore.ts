@@ -293,6 +293,11 @@ export function quotationForArticle(podId: string, articleId: string): QuoteDraf
   );
 }
 
+/** Unsubscribed lookup by number — for scripts like the demo seeder. */
+export function getQuotation(quotationId: string): QuoteDraft | undefined {
+  return state[quotationId];
+}
+
 let seq = 0;
 const uid = (prefix: string) => `${prefix}-${Date.now().toString(36)}-${(seq++).toString(36)}`;
 

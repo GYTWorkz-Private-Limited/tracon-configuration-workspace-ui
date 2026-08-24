@@ -20,7 +20,6 @@ import {
   HEADLINE_ASSUMPTIONS,
   PAYMENT_TERMS,
   PAYMENT_TERMS_RATE,
-  PROVISIONS_BY_SIDE,
   SPL_PACK,
   totalProvisionPct,
   type AssumptionDef,
@@ -45,103 +44,86 @@ export function CommercialAssumptions({
   onTermsChange: (days: PaymentTermsDays) => void;
   onReset: () => void;
 }) {
-  const [allOpen, setAllOpen] = useState(false);
   const total = totalProvisionPct(rates);
+  /**
+   * Collapsed by default. These are set-once figures, and open they cost ~180px
+   * of the sheet below — which is the document actually being reviewed. The
+   * header keeps the three that get argued about (rate, terms, total provision)
+   * visible either way, so collapsing hides the controls, never the facts.
+   */
+  const [open, setOpen] = useState(false);
 
   return (
     <section
       aria-label="Commercial assumptions"
-      className="mb-4 overflow-hidden rounded-xl border border-hairline bg-surface"
+      className="mb-3 overflow-hidden rounded-xl border border-hairline bg-surface"
     >
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline bg-surface-alt px-4 py-2.5">
-        <SlidersHorizontal className="h-3.5 w-3.5 text-ink-500" aria-hidden />
-        <h2 className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-ink-700">
-          Commercial assumptions
-        </h2>
-        <span className="text-[11.5px] text-ink-500">applied to every line below</span>
-        {!readOnly && (
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-1 bg-surface-alt px-4 py-2">
+        <button
+          type="button"
+          onClick={() => setOpen((o) => !o)}
+          aria-expanded={open}
+          className="flex min-w-0 flex-1 items-center gap-2 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+        >
+          <ChevronDown
+            aria-hidden
+            className={cn("h-3.5 w-3.5 shrink-0 text-ink-500 transition-transform", !open && "-rotate-90")}
+          />
+          <SlidersHorizontal className="h-3.5 w-3.5 shrink-0 text-ink-500" aria-hidden />
+          <h2 className="shrink-0 text-[11.5px] font-semibold uppercase tracking-[0.12em] text-ink-700">
+            Commercial assumptions
+          </h2>
+          {/* The summary is the point of the collapsed state: the numbers a
+              reviewer checks before reading a single line. */}
+          <span className="truncate text-[11.5px] text-ink-500">
+            {open ? (
+              "applied to every line below"
+            ) : (
+              <>
+                {inr(fxRate, 2)}/USD · {termsDays}d terms ·{" "}
+                <span className="font-semibold text-gold-700">{pct(total, 2)}</span> total provision
+                · special packing {inr(SPL_PACK[0]?.totalInr ?? 0)}–
+                {inr(SPL_PACK[SPL_PACK.length - 1]?.totalInr ?? 0)}
+              </>
+            )}
+          </span>
+        </button>
+        {!readOnly && open && (
           <button
             type="button"
             onClick={onReset}
-            className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-2.5 py-1 text-[11.5px] font-medium text-ink-600 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            className="inline-flex shrink-0 items-center gap-1.5 rounded-md border border-hairline bg-surface px-2.5 py-1 text-[11.5px] font-medium text-ink-600 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
           >
             <RotateCcw className="h-3 w-3" aria-hidden /> House defaults
           </button>
         )}
       </header>
 
-      <div className="grid gap-4 px-4 py-3 xl:grid-cols-[minmax(0,1fr)_320px]">
-        {/* The headline band — what a commercial review argues about. */}
-        <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-hairline bg-hairline sm:grid-cols-3 lg:grid-cols-5">
-          {HEADLINE_ASSUMPTIONS.map((a) => (
-            <AssumptionCell
-              key={a.key}
-              def={a}
-              rates={rates}
-              fxRate={fxRate}
-              termsDays={termsDays}
-              total={total}
-              readOnly={readOnly}
-              onRateChange={onRateChange}
-              onTermsChange={onTermsChange}
-            />
-          ))}
-        </dl>
+      {open && (
+        <div className="grid gap-3 border-t border-hairline px-4 py-3 xl:grid-cols-[minmax(0,1fr)_320px]">
+          {/* The headline band — what a commercial review argues about. */}
+          <dl className="grid grid-cols-2 gap-px overflow-hidden rounded-lg border border-hairline bg-hairline sm:grid-cols-3 lg:grid-cols-5">
+            {HEADLINE_ASSUMPTIONS.map((a) => (
+              <AssumptionCell
+                key={a.key}
+                def={a}
+                rates={rates}
+                fxRate={fxRate}
+                termsDays={termsDays}
+                total={total}
+                readOnly={readOnly}
+                onRateChange={onRateChange}
+                onTermsChange={onTermsChange}
+              />
+            ))}
+          </dl>
 
-        <SplPackPanel />
-      </div>
-
-      {/* Every remaining provision, one panel down. The headline band is the
-          short list on purpose; this is where the rest stays reachable. */}
-      <div className="border-t border-hairline">
-        <button
-          type="button"
-          onClick={() => setAllOpen((o) => !o)}
-          aria-expanded={allOpen}
-          className="flex w-full items-center gap-2 px-4 py-2.5 text-left hover:bg-surface-alt/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-        >
-          <ChevronDown
-            aria-hidden
-            className={cn("h-4 w-4 text-ink-500 transition-transform", !allOpen && "-rotate-90")}
-          />
-          <span className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-ink-700">
-            All provisions
-          </span>
-          <span className="text-[11.5px] text-ink-500">
-            purchase {pct(sumOf(PROVISIONS_BY_SIDE.purchase, rates), 2)} · sale{" "}
-            {pct(sumOf(PROVISIONS_BY_SIDE.sale, rates), 2)}
-          </span>
-        </button>
-
-        {allOpen && (
-          <div className="grid gap-px bg-hairline md:grid-cols-2">
-            <ProvisionGroup
-              title="Provision on purchase"
-              hint="What it costs us to buy the goods"
-              defs={PROVISIONS_BY_SIDE.purchase}
-              rates={rates}
-              readOnly={readOnly}
-              onRateChange={onRateChange}
-              termsDays={termsDays}
-            />
-            <ProvisionGroup
-              title="Provision on sale"
-              hint="What it costs us to ship and bill them"
-              defs={PROVISIONS_BY_SIDE.sale}
-              rates={rates}
-              readOnly={readOnly}
-              onRateChange={onRateChange}
-              termsDays={termsDays}
-            />
-          </div>
-        )}
-      </div>
+          <SplPackPanel />
+        </div>
+      )}
     </section>
   );
 }
-
-const sumOf = (defs: ProvisionDef[], rates: ProvisionRates) =>
-  Math.round(defs.reduce((t, d) => t + (rates[d.id] ?? 0), 0) * 100) / 100;
 
 /* ------------------------------------------------------------------ *
  * One assumption
@@ -262,79 +244,6 @@ function RateInput({
         %
       </span>
     </span>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * The full provision list
- * ------------------------------------------------------------------ */
-
-function ProvisionGroup({
-  title,
-  hint,
-  defs,
-  rates,
-  readOnly,
-  onRateChange,
-  termsDays,
-}: {
-  title: string;
-  hint: string;
-  defs: ProvisionDef[];
-  rates: ProvisionRates;
-  readOnly: boolean;
-  onRateChange: (id: ProvisionDef["id"], pct: number) => void;
-  termsDays: PaymentTermsDays;
-}) {
-  return (
-    <div className="bg-surface px-4 py-3">
-      <h3 className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-700">{title}</h3>
-      <p className="mt-0.5 text-[11px] text-ink-500">{hint}</p>
-
-      <ul className="mt-2 divide-y divide-hairline">
-        {defs.map((d) => {
-          // The credit window is offered on the quotation, so the terms toggle
-          // owns this rate. Two controls for one number is how they drift.
-          const ownedByTerms = d.id === "paymentTerms";
-          const value = rates[d.id] ?? 0;
-          return (
-            <li key={d.id} className="flex items-center gap-3 py-1.5">
-              <span className="min-w-0 flex-1">
-                <span className="block text-[12px] text-ink-800" title={d.hint}>
-                  {d.label}
-                </span>
-                {ownedByTerms && (
-                  <span className="text-[10.5px] text-ink-400">
-                    set by the {termsDays}-day payment terms above
-                  </span>
-                )}
-                {d.credit && !ownedByTerms && (
-                  <span className="text-[10.5px] text-brand-700">credit — reduces loaded cost</span>
-                )}
-              </span>
-              {readOnly || ownedByTerms ? (
-                <span
-                  className={cn(
-                    "text-[12.5px] font-medium tabular-nums",
-                    value < 0 ? "text-brand-700" : "text-ink-900",
-                  )}
-                >
-                  {pct(value)}
-                </span>
-              ) : (
-                <RateInput
-                  id={d.id}
-                  label={d.label}
-                  value={value}
-                  readOnly={false}
-                  onChange={onRateChange}
-                />
-              )}
-            </li>
-          );
-        })}
-      </ul>
-    </div>
   );
 }
 

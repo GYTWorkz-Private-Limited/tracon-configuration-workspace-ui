@@ -118,6 +118,11 @@ export function useSnapshot(quotationId?: string): CostingSnapshot | undefined {
   return quotationId ? all[quotationId] : undefined;
 }
 
+/** Subscribed read of every snapshot — what the Quotations list grades risk from. */
+export function useAllSnapshots(): Record<string, CostingSnapshot> {
+  return useSnapshots();
+}
+
 /** Unsubscribed read, for event handlers and non-React callers. */
 export function snapshotFor(quotationId: string): CostingSnapshot | undefined {
   return state[quotationId];

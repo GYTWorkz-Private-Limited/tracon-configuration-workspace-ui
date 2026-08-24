@@ -376,6 +376,11 @@ export function getPod(id: string) {
   return pods.find((p) => p.id === id);
 }
 
+/** Non-hook read of every pod — for one-off scripts like the demo seeder. */
+export function getPods(): Pod[] {
+  return pods;
+}
+
 export function podIdForSrf(srfId: string): string | undefined {
   return pods.find((p) => p.articles.some((a) => a.srfRef === srfId))?.id;
 }

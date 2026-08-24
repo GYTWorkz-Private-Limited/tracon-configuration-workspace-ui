@@ -23,9 +23,11 @@ import {
   ChevronDown,
   ChevronRight,
   Package,
+  Pencil,
   Plus,
   Sparkles,
   Trash2,
+  X,
 } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
 import { ArticleLibraryDrawer } from "@/components/articles/ArticleLibraryDrawer";
@@ -186,6 +188,17 @@ function NewPod() {
 
   const addArticles = (arts: LibraryArticle[]) =>
     setArticles((prev) => [...prev, ...arts.filter((a) => !prev.some((p) => p.id === a.id))]);
+
+  // Edits made in the step-3 table live on the wizard's copy of the article —
+  // the commit in `finish` reads these same objects, so a corrected MOQ or
+  // size is what the POD is created with.
+  const updateArticle = (id: string, patch: Partial<LibraryArticle>) =>
+    setArticles((prev) => prev.map((a) => (a.id === id ? { ...a, ...patch } : a)));
+
+  // The kit's name keys its members' style state (`memberKey`), so only the
+  // MOQ is editable here — renaming would orphan any styles already chosen.
+  const updateKitMoq = (name: string, moq: string) =>
+    setKits((prev) => prev.map((k) => (k.name === name ? { ...k, moq } : k)));
 
   const removeArticle = (id: string) => {
     setArticles((prev) => prev.filter((a) => a.id !== id));
@@ -377,6 +390,8 @@ function NewPod() {
               onCreateKit={() => setKitOpen(true)}
               onRemoveArticle={removeArticle}
               onRemoveKit={(name) => setKits((prev) => prev.filter((k) => k.name !== name))}
+              onUpdateArticle={updateArticle}
+              onUpdateKitMoq={updateKitMoq}
             />
           )}
           {step === 3 && (
@@ -609,6 +624,8 @@ function StepArticles({
   onCreateKit,
   onRemoveArticle,
   onRemoveKit,
+  onUpdateArticle,
+  onUpdateKitMoq,
 }: {
   articles: LibraryArticle[];
   kits: PendingKit[];
@@ -616,8 +633,22 @@ function StepArticles({
   onCreateKit: () => void;
   onRemoveArticle: (id: string) => void;
   onRemoveKit: (name: string) => void;
+  onUpdateArticle: (id: string, patch: Partial<LibraryArticle>) => void;
+  onUpdateKitMoq: (name: string, moq: string) => void;
 }) {
   const empty = articles.length + kits.length === 0;
+  // Which row is inline-editing, and which kits are open. `kit:` prefixes keep
+  // a kit named like an article id from colliding in the same string space.
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
+  const toggleExpand = (name: string) =>
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(name)) next.delete(name);
+      else next.add(name);
+      return next;
+    });
+
   return (
     <div>
       <h2 className="text-[14px] font-semibold text-ink-900">What belongs to this POD?</h2>
@@ -649,85 +680,331 @@ function StepArticles({
           </p>
         </div>
       ) : (
-        /* A grid, not a stack: at page width a single column of 40px rows
-           wastes most of the screen and makes ten articles a scroll. */
-        <div className="mt-4 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-          {articles.map((a) => (
-            <div
-              key={a.id}
-              className="flex items-start gap-3 rounded-lg border border-hairline bg-surface px-3.5 py-3"
-            >
-              <img src={a.image} alt="" className="h-11 w-11 shrink-0 rounded object-cover" />
-              <div className="min-w-0 flex-1">
-                <div className="truncate text-[13px] font-medium text-ink-900">{a.name}</div>
-                <div className="mt-0.5 truncate text-[11.5px] text-ink-500">{a.articleNo}</div>
-                <div className="mt-1 flex flex-wrap gap-x-2 text-[11px] text-ink-500">
-                  <span>{a.size}</span>
-                  <span className="text-ink-300" aria-hidden>
-                    ·
-                  </span>
-                  <span>MOQ {a.moq}</span>
-                </div>
-              </div>
-              <button
-                type="button"
-                onClick={() => onRemoveArticle(a.id)}
-                aria-label={`Remove ${a.name}`}
-                className="rounded p-1.5 text-ink-400 hover:bg-surface-alt hover:text-danger-600"
-              >
-                <Trash2 className="h-4 w-4" />
-              </button>
-            </div>
-          ))}
-          {/* A kit names its members here rather than counting them: the whole
-              point of a set is which articles are in it, and Step 4 will ask
-              for a style per member. */}
-          {kits.map((k) => (
-            <div
-              key={k.name}
-              className="flex flex-col rounded-lg border border-[var(--color-cfg)] bg-surface px-3.5 py-3 sm:col-span-2 xl:col-span-1"
-            >
-              <div className="flex items-start gap-3">
-                <span className="flex h-11 w-11 shrink-0 items-center justify-center rounded bg-[var(--color-cfg-soft)] text-[var(--color-cfg-strong)]">
-                  <Boxes className="h-4 w-4" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-center gap-1.5">
-                    <span className="truncate text-[13px] font-medium text-ink-900">{k.name}</span>
-                    <span className="rounded-full bg-[var(--color-cfg-strong)] px-1.5 py-0.5 text-[9.5px] font-semibold uppercase tracking-[0.08em] text-white">
-                      Kit
-                    </span>
-                  </div>
-                  <div className="mt-0.5 text-[11.5px] text-ink-500">
-                    {k.items.length} article{k.items.length === 1 ? "" : "s"} · MOQ {k.moq}
-                  </div>
-                </div>
-                <button
-                  type="button"
-                  onClick={() => onRemoveKit(k.name)}
-                  aria-label={`Remove ${k.name}`}
-                  className="rounded p-1.5 text-ink-400 hover:bg-surface-alt hover:text-danger-600"
-                >
-                  <Trash2 className="h-4 w-4" />
-                </button>
-              </div>
-              <ul className="mt-2 flex flex-wrap gap-1 pl-14">
-                {k.items.map((it) => (
-                  <li
-                    key={it.id}
-                    className="rounded-full border border-hairline bg-surface-alt/60 px-2 py-0.5 text-[10.5px] text-ink-600"
-                  >
-                    {it.name}
-                    {it.qty > 1 && (
-                      <span className="ml-1 tabular-nums text-ink-400">×{it.qty}</span>
-                    )}
-                  </li>
-                ))}
-              </ul>
-            </div>
-          ))}
+        /* The same table the POD detail page uses for its articles, so the
+           order reads identically before and after it is created — and each
+           row can be corrected in place before anything is committed. */
+        <div className="mt-4 overflow-hidden rounded-lg border border-hairline">
+          <table className="w-full text-[13px]">
+            <thead className="border-b border-hairline bg-surface-alt/40 text-[11px] uppercase tracking-wide text-ink-500">
+              <tr>
+                <th className="px-4 py-2.5 text-left font-medium">Product</th>
+                <th className="px-4 py-2.5 text-left font-medium">Type</th>
+                <th className="px-4 py-2.5 text-left font-medium">Size</th>
+                <th className="px-4 py-2.5 text-left font-medium">MOQ</th>
+                <th className="w-24 px-4 py-2.5" />
+              </tr>
+            </thead>
+            <tbody>
+              {articles.map((a) =>
+                editingId === a.id ? (
+                  <WizardArticleEditRow
+                    key={a.id}
+                    article={a}
+                    onSave={(patch) => {
+                      onUpdateArticle(a.id, patch);
+                      setEditingId(null);
+                    }}
+                    onClose={() => setEditingId(null)}
+                  />
+                ) : (
+                  <tr key={a.id} className="border-b border-hairline hover:bg-surface-alt/40">
+                    <td className="px-4 py-2.5">
+                      <div className="flex items-center gap-3">
+                        <span className="w-[22px]" />
+                        <img src={a.image} alt="" className="h-8 w-8 rounded object-cover" />
+                        <div className="min-w-0">
+                          <div className="truncate font-medium text-ink-900">{a.name}</div>
+                          <div className="truncate text-[11px] text-ink-400">{a.articleNo}</div>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-2.5">
+                      <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-sky-200 bg-sky-50 px-2 py-0.5 text-[11px] font-medium text-sky-700">
+                        <Package className="h-3 w-3" /> Article
+                      </span>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-ink-700">{a.size}</td>
+                    <td className="whitespace-nowrap px-4 py-2.5 text-ink-700">{a.moq}</td>
+                    <td className="px-4 py-2.5">
+                      <RowActions
+                        name={a.name}
+                        onEdit={() => setEditingId(a.id)}
+                        onDelete={() => onRemoveArticle(a.id)}
+                      />
+                    </td>
+                  </tr>
+                ),
+              )}
+
+              {/* A kit is one row of the order; its members live behind the
+                  chevron so ten sets stay ten rows until one is opened. */}
+              {kits.map((k) => {
+                const rowKey = `kit:${k.name}`;
+                const isOpen = expanded.has(k.name);
+                return editingId === rowKey ? (
+                  <WizardKitEditRow
+                    key={rowKey}
+                    kit={k}
+                    onSave={(moq) => {
+                      onUpdateKitMoq(k.name, moq);
+                      setEditingId(null);
+                    }}
+                    onClose={() => setEditingId(null)}
+                  />
+                ) : (
+                  <KitRows
+                    key={rowKey}
+                    kit={k}
+                    isOpen={isOpen}
+                    onExpand={() => toggleExpand(k.name)}
+                    onEdit={() => setEditingId(rowKey)}
+                    onDelete={() => onRemoveKit(k.name)}
+                  />
+                );
+              })}
+            </tbody>
+          </table>
         </div>
       )}
+    </div>
+  );
+}
+
+/** A kit's table row plus, when open, one nested row per member article. */
+function KitRows({
+  kit,
+  isOpen,
+  onExpand,
+  onEdit,
+  onDelete,
+}: {
+  kit: PendingKit;
+  isOpen: boolean;
+  onExpand: () => void;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <>
+      <tr
+        className={cn(
+          "border-b border-hairline hover:bg-surface-alt/40",
+          isOpen && "bg-surface-alt/30",
+        )}
+      >
+        <td className="px-4 py-2.5">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={onExpand}
+              className="rounded p-1 text-ink-500 hover:bg-surface-alt hover:text-ink-900"
+              aria-expanded={isOpen}
+              aria-label={isOpen ? `Collapse ${kit.name}` : `Expand ${kit.name}`}
+            >
+              <ChevronRight
+                className={cn("h-3.5 w-3.5 transition-transform", isOpen && "rotate-90")}
+              />
+            </button>
+            <span className="flex h-8 w-8 items-center justify-center rounded bg-[var(--color-cfg-soft)] text-[var(--color-cfg-strong)]">
+              <Boxes className="h-4 w-4" />
+            </span>
+            <div className="min-w-0">
+              <div className="truncate font-medium text-ink-900">{kit.name}</div>
+              <div className="text-[11px] text-ink-400">
+                {kit.items.length} article{kit.items.length === 1 ? "" : "s"}
+              </div>
+            </div>
+          </div>
+        </td>
+        <td className="px-4 py-2.5">
+          <span className="inline-flex items-center gap-1 whitespace-nowrap rounded-md border border-violet-200 bg-violet-50 px-2 py-0.5 text-[11px] font-medium text-violet-700">
+            <Boxes className="h-3 w-3" /> Kit
+          </span>
+        </td>
+        <td className="whitespace-nowrap px-4 py-2.5 text-ink-400">—</td>
+        <td className="whitespace-nowrap px-4 py-2.5 text-ink-700">{kit.moq}</td>
+        <td className="px-4 py-2.5">
+          <RowActions name={kit.name} onEdit={onEdit} onDelete={onDelete} />
+        </td>
+      </tr>
+
+      {isOpen &&
+        kit.items.map((it, i, arr) => (
+          <tr
+            key={it.id}
+            className={cn("bg-surface-alt/25", i === arr.length - 1 && "border-b border-hairline")}
+          >
+            <td className="py-2 pl-4 pr-4">
+              <div className="flex items-stretch gap-3 pl-[10px]">
+                <span className="relative block w-4 shrink-0" aria-hidden>
+                  <span
+                    className={cn(
+                      "absolute left-0 top-0 w-px bg-ink-200",
+                      i === arr.length - 1 ? "h-1/2" : "h-full",
+                    )}
+                  />
+                  <span className="absolute left-0 top-1/2 block h-px w-4 bg-ink-200" />
+                </span>
+                {it.image ? (
+                  <img src={it.image} alt="" className="h-7 w-7 self-center rounded object-cover" />
+                ) : (
+                  <div className="flex h-7 w-7 items-center justify-center self-center rounded bg-ink-100 text-ink-400">
+                    <Package className="h-3.5 w-3.5" />
+                  </div>
+                )}
+                <div className="min-w-0 self-center">
+                  <div className="truncate text-[12.5px] font-medium text-ink-800">{it.name}</div>
+                  <div className="text-[11px] text-ink-400">
+                    ×{it.qty} per set{it.optional ? " · Optional" : ""}
+                  </div>
+                </div>
+              </div>
+            </td>
+            <td className="whitespace-nowrap px-4 py-2 text-[11px] text-ink-400">Kit item</td>
+            <td className="whitespace-nowrap px-4 py-2 text-[12px] text-ink-600">
+              {it.size ?? "—"}
+            </td>
+            <td className="whitespace-nowrap px-4 py-2 text-[12px] text-ink-600">
+              {it.moq ?? "—"}
+            </td>
+            <td className="px-4 py-2" />
+          </tr>
+        ))}
+    </>
+  );
+}
+
+function RowActions({
+  name,
+  onEdit,
+  onDelete,
+}: {
+  name: string;
+  onEdit: () => void;
+  onDelete: () => void;
+}) {
+  return (
+    <div className="flex items-center justify-end gap-1">
+      <button
+        type="button"
+        onClick={onEdit}
+        aria-label={`Edit ${name}`}
+        className="rounded p-1.5 text-ink-500 hover:bg-surface-alt hover:text-ink-900"
+      >
+        <Pencil className="h-3.5 w-3.5" />
+      </button>
+      <button
+        type="button"
+        onClick={onDelete}
+        aria-label={`Remove ${name}`}
+        className="rounded p-1.5 text-ink-400 hover:bg-danger-50 hover:text-danger-600"
+      >
+        <Trash2 className="h-3.5 w-3.5" />
+      </button>
+    </div>
+  );
+}
+
+/** The POD page's inline edit row, carried over: name, size and MOQ in place. */
+function WizardArticleEditRow({
+  article,
+  onSave,
+  onClose,
+}: {
+  article: LibraryArticle;
+  onSave: (patch: Partial<LibraryArticle>) => void;
+  onClose: () => void;
+}) {
+  const [form, setForm] = useState({ name: article.name, size: article.size, moq: article.moq });
+  const save = () =>
+    onSave({
+      name: form.name.trim() || article.name,
+      size: form.size.trim(),
+      moq: form.moq.trim(),
+    });
+  return (
+    <tr className="border-b border-hairline bg-amber-50/30">
+      <td className="px-4 py-2">
+        <input
+          value={form.name}
+          onChange={(e) => setForm({ ...form, name: e.target.value })}
+          aria-label="Product name"
+          className="w-full rounded-md border border-hairline bg-surface px-2 py-1.5 text-[13px]"
+        />
+      </td>
+      <td className="px-4 py-2 text-[11px] text-ink-400">Article</td>
+      <td className="px-4 py-2">
+        <input
+          value={form.size}
+          onChange={(e) => setForm({ ...form, size: e.target.value })}
+          aria-label="Size"
+          className="w-full rounded-md border border-hairline bg-surface px-2 py-1.5 text-[13px]"
+        />
+      </td>
+      <td className="px-4 py-2">
+        <input
+          value={form.moq}
+          onChange={(e) => setForm({ ...form, moq: e.target.value })}
+          aria-label="MOQ"
+          className="w-full rounded-md border border-hairline bg-surface px-2 py-1.5 text-[13px]"
+        />
+      </td>
+      <td className="px-4 py-2">
+        <EditRowActions onSave={save} onCancel={onClose} />
+      </td>
+    </tr>
+  );
+}
+
+function WizardKitEditRow({
+  kit,
+  onSave,
+  onClose,
+}: {
+  kit: PendingKit;
+  onSave: (moq: string) => void;
+  onClose: () => void;
+}) {
+  const [moq, setMoq] = useState(kit.moq);
+  return (
+    <tr className="border-b border-hairline bg-amber-50/30">
+      <td className="px-4 py-2">
+        {/* The name keys each member's style state, so it is not editable here. */}
+        <span className="pl-[22px] font-medium text-ink-900">{kit.name}</span>
+      </td>
+      <td className="px-4 py-2 text-[11px] text-ink-400">Kit</td>
+      <td className="px-4 py-2 text-ink-400">—</td>
+      <td className="px-4 py-2">
+        <input
+          value={moq}
+          onChange={(e) => setMoq(e.target.value)}
+          aria-label="Kit MOQ"
+          className="w-full rounded-md border border-hairline bg-surface px-2 py-1.5 text-[13px]"
+        />
+      </td>
+      <td className="px-4 py-2">
+        <EditRowActions onSave={() => onSave(moq.trim())} onCancel={onClose} />
+      </td>
+    </tr>
+  );
+}
+
+function EditRowActions({ onSave, onCancel }: { onSave: () => void; onCancel: () => void }) {
+  return (
+    <div className="flex items-center justify-end gap-1">
+      <button
+        onClick={onSave}
+        className="rounded p-1.5 text-emerald-700 hover:bg-emerald-50"
+        aria-label="Save"
+      >
+        <Check className="h-4 w-4" />
+      </button>
+      <button
+        onClick={onCancel}
+        className="rounded p-1.5 text-ink-500 hover:bg-surface-alt"
+        aria-label="Cancel"
+      >
+        <X className="h-4 w-4" />
+      </button>
     </div>
   );
 }

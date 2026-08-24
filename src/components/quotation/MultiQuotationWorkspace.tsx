@@ -26,20 +26,22 @@ import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeft,
   ArrowRight,
+  CheckCircle2,
   Download,
   FileText,
   History,
   Layers,
   Lock,
   MoreVertical,
-  RefreshCw,
+  PencilLine,
   Send,
   Sparkles,
   X,
+  XCircle,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { usePod } from "@/lib/podsStore";
+import { updatePod, usePod } from "@/lib/podsStore";
 import { DEFAULT_PROVISIONS, inr, pct, usd } from "@/lib/commercialProvisions";
 import { useCostingSelections } from "@/lib/costingSelectionStore";
 import {
@@ -62,7 +64,6 @@ import {
   logQuotationEvent,
   startNewVersion,
   useQuotationHistory,
-  workingVersionNo,
   type QuotationVersion,
 } from "@/lib/quotationHistory";
 import { totalsOf, viewQuote, type ViewedItem } from "@/lib/quotationView";
@@ -72,9 +73,12 @@ import { QuotationLifecycleBar } from "./QuotationLifecycleBar";
 import { inrShort } from "@/lib/fabricRequirement";
 import { requestRecost } from "@/lib/recostingStore";
 import { approveQuotation, rejectQuotation } from "@/lib/quotationApprovalStore";
+import { latestResponse, markConvertedToOrder, useBuyerRecord } from "@/lib/buyerResponseStore";
+import { validUntilOf } from "@/lib/quotationPipeline";
 import { toast } from "sonner";
 import { WorkingSheet } from "./WorkingSheet";
 import { CommercialAssumptions } from "./CommercialAssumptions";
+import { BuyerResponsePanel } from "./BuyerResponsePanel";
 import { PreparationBar } from "./DecisionBar";
 import { QuotationRiskBanner } from "./QuotationRiskBanner";
 import { VersionInputCompare } from "./VersionInputCompare";
@@ -88,7 +92,14 @@ import { RejectDialog } from "./RejectDialog";
 import { applyRowOverrides, rowsForItem } from "./quoteRows";
 import type { PaymentTermsDays } from "@/lib/quotationAssumptions";
 
-export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }) {
+export function MultiQuotationWorkspace({
+  quotationId,
+  initialAction,
+}: {
+  quotationId: string;
+  /** carried in from a list row action — "requote" opens the picker on arrival */
+  initialAction?: "requote" | "respond";
+}) {
   const navigate = useNavigate();
   const quotation = useQuotation(quotationId);
   const pod = usePod(quotation?.podId ?? "");
@@ -96,11 +107,13 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
   const selections = useCostingSelections();
   /** which stage this quotation is at — decides what the page may offer */
   const qState = useQuotationState(quotationId);
+  /** what the buyer has said so far, and the risk/conversion flags */
+  const buyerRecord = useBuyerRecord(quotationId);
 
   const [previewOpen, setPreviewOpen] = useState(false);
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [requoteOpen, setRequoteOpen] = useState(false);
+  const [requoteOpen, setRequoteOpen] = useState(initialAction === "requote");
   const [overflowOpen, setOverflowOpen] = useState(false);
   /** the item whose override dialog is open; undefined means closed */
   const [overrideFor, setOverrideFor] = useState<string | undefined>(undefined);
@@ -149,6 +162,35 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
   const liveRates = { ...DEFAULT_PROVISIONS, ...(items[0] ? ratesFor(quotation, items[0]) : {}) };
   const fxRate = views[0]?.priced.fxRate ?? 60;
 
+  // Whole-quotation INR figures at quoted quantities — what the risk banner's
+  // margin-impact estimate is computed over.
+  let costInr = 0;
+  let sellingInr = 0;
+  let rawInr = 0;
+  let quantity = 0;
+  for (const v of views) {
+    const qty = v.kind === "kit" ? v.priced.sets : v.priced.moq;
+    costInr += v.priced.commercial.finalCostInr * qty;
+    sellingInr += v.priced.commercial.sellingInr * qty;
+    quantity += qty;
+    rawInr +=
+      v.kind === "kit"
+        ? v.priced.members.reduce((t, m) => t + m.rollup.rawMaterial * m.unitsPerSet, 0) * qty
+        : v.priced.rollup.rawMaterial * qty;
+  }
+
+  // The buyer's position extends the lifecycle past what the internal stores
+  // know: an acceptance or a conversion pushes the timeline to its last steps.
+  const buyerLast = latestResponse(buyerRecord);
+  const buyerAccepted = buyerLast?.outcome === "accepted" || buyerLast?.outcome === "counter";
+  const lifecycleState = buyerRecord.convertedAt
+    ? { ...qState, stepIndex: 4, label: "Converted to Order" }
+    : buyerAccepted
+      ? { ...qState, stepIndex: 4, label: "Accepted by Buyer" }
+      : qState;
+
+  const validUntil = sent ? validUntilOf(sent.sentAt) : undefined;
+
   /** Leaving returns to the article the quotation was started from. */
   const close = () =>
     navigate({
@@ -178,6 +220,7 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
         buyer={pod.buyer}
         podId={pod.id}
         sent={sent}
+        validUntil={validUntil}
         locked={locked}
         qState={qState}
         blockedNames={blocked.map((i) => i.name)}
@@ -200,23 +243,26 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
               }
             : undefined
         }
-        onNewVersion={
-          locked
-            ? () => {
-                setOverflowOpen(false);
-                startNewVersion(quotation.id);
-              }
-            : undefined
-        }
-        newVersionNo={workingVersionNo(history)}
+        decideLocked={qState.stage === "approved"}
+        onApprove={() => {
+          approveQuotation(quotation.id);
+          // The costing side must tell the same story: the order this
+          // quotation prices is approved, on the dashboard as well.
+          updatePod(quotation.podId, { status: "approved" });
+          toast.success(`${quotation.id} approved — sent to buyer`);
+        }}
+        onOverride={() => setOverrideFor(items[0]?.id)}
+        onReject={() => setRejectFor(null)}
         onClose={close}
       />
 
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1320px] px-6 py-4 lg:px-8">
           {/* Reached from the Quotations module the user has walked no
-              workflow to get here, so the page says where it stands first. */}
-          <QuotationLifecycleBar state={qState} className="mb-4" />
+              workflow to get here, so the page says where it stands first —
+              including the buyer's answer, which lives past the internal
+              stages. */}
+          <QuotationLifecycleBar state={lifecycleState} className="mb-4" />
 
           <CommercialAssumptions
             rates={liveRates}
@@ -232,8 +278,22 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
             <>
               {/* Input-cost drift first: a quotation whose masters have moved
                   is not safe to approve, and that must be visible before the
-                  numbers are read. */}
-              <QuotationRiskBanner quotationId={quotation.id} />
+                  numbers are read. With the commercial context it states the
+                  margin impact and offers the two ways out. */}
+              <QuotationRiskBanner
+                quotationId={quotation.id}
+                // Per-unit figures: margin is scale-invariant, and the
+                // recommended price must read like the quote does — per piece
+                // or per set, never the whole order.
+                marginContext={{
+                  sellingInr: quantity > 0 ? sellingInr / quantity : sellingInr,
+                  finalCostInr: quantity > 0 ? costInr / quantity : costInr,
+                  rawMaterialInr: quantity > 0 ? rawInr / quantity : rawInr,
+                  quotedMarginPct: totals.blendedMarginPct,
+                  fxRate,
+                }}
+                onRequote={() => setRequoteOpen(true)}
+              />
               <VersionInputCompare quotationId={quotation.id} requoteOfId={quotation.requoteOf} />
 
               <WorkingSheet
@@ -252,6 +312,58 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
                 orderValueUsd={totals.orderValueUsd}
                 blendedMarginPct={totals.blendedMarginPct}
               />
+
+              {/* Once the quotation is out with the buyer, their answer is
+                  recorded here — and an acceptance offers the conversion. */}
+              {(qState.stage === "approved" || buyerRecord.responses.length > 0) && (
+                <>
+                  {buyerRecord.convertedAt ? (
+                    <p className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[12.5px] text-emerald-800">
+                      <Layers className="h-4 w-4 shrink-0" aria-hidden />
+                      <span>
+                        <strong className="font-semibold">Converted to order</strong> on{" "}
+                        {new Date(buyerRecord.convertedAt).toLocaleDateString()} at{" "}
+                        <strong className="font-semibold tabular-nums">
+                          {usd(buyerRecord.orderValueUsd ?? totals.orderValueUsd, 0)}
+                        </strong>
+                        . The quotation is closed — the order carries it from here.
+                      </span>
+                    </p>
+                  ) : (
+                    buyerAccepted && (
+                      <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-brand-600/30 bg-brand-50 px-4 py-3">
+                        <p className="min-w-0 flex-1 text-[12.5px] text-brand-800">
+                          <strong className="font-semibold">Accepted by the buyer</strong>
+                          {buyerLast?.counterPriceUsd !== undefined && (
+                            <> at a counter of {usd(buyerLast.counterPriceUsd)}</>
+                          )}{" "}
+                          — an order is expected at{" "}
+                          <strong className="font-semibold tabular-nums">
+                            {usd(totals.orderValueUsd, 0)}
+                          </strong>
+                          .
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            markConvertedToOrder(quotation.id, totals.orderValueUsd);
+                            toast.success(`${quotation.id} converted to order`);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                        >
+                          Convert to Order <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                        </button>
+                      </div>
+                    )
+                  )}
+
+                  <BuyerResponsePanel
+                    quotationId={quotation.id}
+                    quotedPriceUsd={views[0]?.priced.commercial.sellingUsd ?? 0}
+                    onRequote={() => setRequoteOpen(true)}
+                  />
+                </>
+              )}
             </>
           ) : (
             <EmptyQuotation quotationId={quotation.id} podId={pod.id} />
@@ -265,10 +377,9 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
         </div>
       </main>
 
-      {/* Approve / Reject / Override are the APPROVER's actions and belong to
-          the Approval stage — offering them here would let the person
-          preparing a quotation approve their own work before anybody had seen
-          it. What this stage has is a summary of what is being prepared. */}
+      {/* The bar only reports — every action, including the approver's three
+          calls once the quotation is submitted, lives in the header where the
+          rest of the app keeps its CTAs. */}
       {items.length > 0 && <PreparationBar health={health} submitted={qState.submitted} />}
 
       {/* ------------------------------ dialogs ------------------------------ */}
@@ -399,7 +510,11 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
                 return;
               }
             }
-            navigate({ to: "/quotations/$quotationId", params: { quotationId: next } });
+            navigate({
+              to: "/quotations/$quotationId",
+              params: { quotationId: next },
+              search: { action: undefined },
+            });
           }}
         />
       )}
@@ -415,15 +530,6 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
             setApprovalOpen(false);
             setRequoteOpen(true);
           }}
-          // The approver's three calls reuse the dialogs this page already
-          // hosts, so an override taken at approval is written by the same
-          // code — and lands in the same audit — as one taken while drafting.
-          onApprove={() => {
-            approveQuotation(quotation.id);
-            toast.success(`${quotation.id} approved`);
-          }}
-          onOverride={() => setOverrideFor(items[0]?.id)}
-          onReject={() => setRejectFor(null)}
         />
       )}
     </div>
@@ -441,6 +547,7 @@ function Header({
   buyer,
   podId,
   sent,
+  validUntil,
   locked,
   qState,
   blockedNames,
@@ -453,8 +560,10 @@ function Header({
   onPreview,
   onHistory,
   onRequote,
-  onNewVersion,
-  newVersionNo,
+  decideLocked,
+  onApprove,
+  onOverride,
+  onReject,
   onClose,
 }: {
   quotationId: string;
@@ -463,6 +572,8 @@ function Header({
   buyer: string;
   podId: string;
   sent: QuotationVersion | undefined;
+  /** when the sent version stops being an offer */
+  validUntil?: Date;
   locked: boolean;
   qState: QuotationState;
   blockedNames: string[];
@@ -475,8 +586,11 @@ function Header({
   onPreview: () => void;
   onHistory: () => void;
   onRequote?: () => void;
-  onNewVersion?: () => void;
-  newVersionNo: number;
+  /** a granted approval closes the decision; the buttons stop offering it */
+  decideLocked: boolean;
+  onApprove: () => void;
+  onOverride: () => void;
+  onReject: () => void;
   onClose: () => void;
 }) {
   const prepared = new Date(createdAt).toLocaleString("en-IN", {
@@ -528,10 +642,20 @@ function Header({
             <Meta label="Buyer">{buyer}</Meta>
             <Meta label="POD">{podId}</Meta>
             <Meta label="Prepared">{prepared}</Meta>
+            {validUntil && (
+              <Meta label="Valid until">
+                {validUntil.toLocaleDateString("en-IN", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </Meta>
+            )}
             {requoteOf && (
               <Link
                 to="/quotations/$quotationId"
                 params={{ quotationId: requoteOf }}
+                search={{ action: undefined }}
                 className="font-medium text-brand-700 hover:underline"
               >
                 Requote of {requoteOf}
@@ -569,40 +693,66 @@ function Header({
             ))}
           </div>
 
-          {/* Every figure is derived on read, so the sheet is already current.
-              The button says so out loud rather than implying a stale document
-              somebody has to remember to refresh. */}
-          <HeaderButton
-            icon={<RefreshCw className="h-4 w-4" />}
-            onClick={() =>
-              toast.success("Recalculated — costs re-read live from Configuration & Costing")
-            }
-          >
-            Recalculate
-          </HeaderButton>
-
           <HeaderButton icon={<FileText className="h-4 w-4" />} onClick={onPreview}>
             Preview
           </HeaderButton>
 
           <HeaderButton
             icon={<Download className="h-4 w-4" />}
-            onClick={() => toast.info("Export to Excel and PDF is not wired up in this build")}
+            title="Export to Excel and PDF is not wired up in this build"
+            onClick={() => undefined}
           >
             Export
           </HeaderButton>
 
-          {/* The stage's one primary action, in the header where every other
-              screen in the app carries its forward step. Once submitted the
-              way on is the Approval screen itself, not a second send. */}
+          {/* The stage's actions, in the header where every screen in the app
+              carries its CTAs. Before submission that is the send; after it,
+              the approver's three calls — a granted approval locks them. */}
           {qState.submitted ? (
-            <button
-              type="button"
-              onClick={onSendForApproval}
-              className="inline-flex items-center gap-1.5 rounded-md border border-brand-700 bg-brand-50 px-3.5 py-2 text-[13px] font-semibold text-brand-700 hover:bg-brand-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-            >
-              <Send className="h-4 w-4" /> Open Approval
-            </button>
+            <>
+              {/* A decision already granted removes the trio entirely — three
+                  disabled buttons wrap the action row onto a second line and
+                  say nothing the status pill does not. */}
+              {!decideLocked && (
+                <>
+                  <button
+                    type="button"
+                    disabled={blockedNames.length > 0}
+                    onClick={onReject}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-risk)]/40 bg-surface px-3.5 py-2 text-[13px] font-medium text-[var(--color-risk)] hover:bg-[var(--color-risk-soft)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-risk)]"
+                  >
+                    <XCircle className="h-4 w-4" aria-hidden /> Reject
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onOverride}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3.5 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                  >
+                    <PencilLine className="h-4 w-4" aria-hidden /> Override
+                  </button>
+                  <button
+                    type="button"
+                    disabled={blockedNames.length > 0}
+                    title={
+                      blockedNames.length > 0
+                        ? `${blockedNames.join(", ")} must come back from recosting first.`
+                        : "Approve this quotation and send it to the buyer"
+                    }
+                    onClick={onApprove}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                  >
+                    <CheckCircle2 className="h-4 w-4" aria-hidden /> Approve
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={onSendForApproval}
+                className="inline-flex items-center gap-1.5 rounded-md border border-brand-700 bg-brand-50 px-3.5 py-2 text-[13px] font-semibold text-brand-700 hover:bg-brand-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                <Send className="h-4 w-4" /> Open Approval
+              </button>
+            </>
           ) : (
             <button
               type="button"
@@ -652,11 +802,6 @@ function Header({
                     Generate requote
                   </OverflowItem>
                 )}
-                {onNewVersion && (
-                  <OverflowItem icon={<Send className="h-3.5 w-3.5" />} onClick={onNewVersion}>
-                    Create version {newVersionNo}
-                  </OverflowItem>
-                )}
                 <OverflowItem icon={<X className="h-3.5 w-3.5" />} onClick={onClose}>
                   Close quotation
                 </OverflowItem>
@@ -681,15 +826,18 @@ function Meta({ label, children }: { label: string; children: React.ReactNode })
 function HeaderButton({
   icon,
   onClick,
+  title,
   children,
 }: {
   icon: React.ReactNode;
   onClick: () => void;
+  title?: string;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
+      title={title}
       onClick={onClick}
       className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
     >
@@ -756,8 +904,11 @@ function EmptyQuotation({ quotationId, podId }: { quotationId: string; podId: st
  * The combined figures for the whole quotation — the same arithmetic the sheet
  * totals show, stated as the document's own position rather than as a table
  * footer, because this is the number that gets approved.
+ *
+ * Exported so the article-level Quotation step closes on the same statement —
+ * one design for the document, wherever it is read.
  */
-function CombinedSummary({
+export function CombinedSummary({
   views,
   quotationId,
   orderValueUsd,

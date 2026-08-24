@@ -11,6 +11,17 @@ import { MultiQuotationWorkspace } from "@/components/quotation/MultiQuotationWo
 import { GlobalNavFrame } from "@/components/layout/GlobalNav";
 
 export const Route = createFileRoute("/quotations/$quotationId")({
+  // The list's row actions land with intent: "requote" opens the requote
+  // picker on arrival, "respond" is a plain open (the response panel is on
+  // the page). Kept as a search param so the intent survives a refresh.
+  validateSearch: (s: Record<string, unknown>) => ({
+    action:
+      s.action === "requote"
+        ? ("requote" as const)
+        : s.action === "respond"
+          ? ("respond" as const)
+          : undefined,
+  }),
   head: () => ({
     meta: [
       { title: "Quotation · Tracon" },
@@ -26,9 +37,10 @@ export const Route = createFileRoute("/quotations/$quotationId")({
 
 function MultiQuotationStep() {
   const { quotationId } = Route.useParams();
+  const { action } = Route.useSearch();
   return (
     <GlobalNavFrame>
-      <MultiQuotationWorkspace quotationId={quotationId} />
+      <MultiQuotationWorkspace quotationId={quotationId} initialAction={action} />
     </GlobalNavFrame>
   );
 }

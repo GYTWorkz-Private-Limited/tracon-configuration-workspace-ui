@@ -213,7 +213,7 @@ export function WorkingSheet({
       aria-label="Quotation summary working sheet"
       className="mb-4 overflow-hidden rounded-xl border border-hairline bg-surface"
     >
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-hairline bg-surface-alt px-4 py-2.5">
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-hairline bg-surface-alt px-4 py-2">
         <Table2 className="h-3.5 w-3.5 text-ink-500" aria-hidden />
         <h2 className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-ink-700">
           Quotation summary · {quotationId}
@@ -321,60 +321,60 @@ export function WorkingSheet({
         <table className="w-full min-w-[1080px] border-collapse text-[12px]">
           <thead>
             <tr className="border-b border-hairline bg-surface-alt/60 text-[10px] uppercase tracking-[0.1em] text-ink-500">
-              <th scope="col" className="w-8 px-2 py-2">
+              <th scope="col" className="w-8 px-2 py-1.5">
                 <span className="sr-only">Expand</span>
               </th>
-              <th scope="col" className="w-8 px-1 py-2 text-right font-medium">
+              <th scope="col" className="w-8 px-1 py-1.5 text-right font-medium">
                 Sr.
               </th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">
+              <th scope="col" className="px-3 py-1.5 text-left font-medium">
                 Article #
               </th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">
+              <th scope="col" className="px-3 py-1.5 text-left font-medium">
                 Product
               </th>
               {shows("size") && (
-                <th scope="col" className="px-3 py-2 text-left font-medium">
+                <th scope="col" className="px-3 py-1.5 text-left font-medium">
                   Size
                 </th>
               )}
               {shows("composition") && (
-                <th scope="col" className="px-3 py-2 text-left font-medium">
+                <th scope="col" className="px-3 py-1.5 text-left font-medium">
                   Composition
                 </th>
               )}
               {shows("gsm") && (
-                <th scope="col" className="px-3 py-2 text-right font-medium">
+                <th scope="col" className="px-3 py-1.5 text-right font-medium">
                   GSM
                 </th>
               )}
-              <th scope="col" className="px-3 py-2 text-right font-medium">
+              <th scope="col" className="px-3 py-1.5 text-right font-medium">
                 Quoted MOQ
               </th>
               {shows("material") && (
-                <th scope="col" className="px-3 py-2 text-right font-medium">
+                <th scope="col" className="px-3 py-1.5 text-right font-medium">
                   Material Cost
                 </th>
               )}
-              <th scope="col" className="px-3 py-2 text-right font-medium">
+              <th scope="col" className="px-3 py-1.5 text-right font-medium">
                 Total Cost
               </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
+              <th scope="col" className="px-3 py-1.5 text-right font-medium">
                 Selling Price
               </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
+              <th scope="col" className="px-3 py-1.5 text-right font-medium">
                 Margin ₹
               </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
+              <th scope="col" className="px-3 py-1.5 text-right font-medium">
                 Margin %
               </th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">
+              <th scope="col" className="px-3 py-1.5 text-left font-medium">
                 Status
               </th>
-              <th scope="col" className="px-2 py-2 text-center font-medium">
+              <th scope="col" className="px-2 py-1.5 text-center font-medium">
                 Call-outs
               </th>
-              <th scope="col" className="w-10 px-2 py-2">
+              <th scope="col" className="w-10 px-2 py-1.5">
                 <span className="sr-only">Actions</span>
               </th>
             </tr>
@@ -415,26 +415,26 @@ export function WorkingSheet({
 
           <tfoot>
             <tr className="border-t-2 border-ink-200 bg-surface-alt/70 font-semibold text-ink-900">
-              <td className="px-2 py-2.5" />
+              <td className="px-2 py-2" />
               <td
-                className="px-3 py-2.5"
+                className="px-3 py-2"
                 colSpan={
                   3 + [shows("size"), shows("composition"), shows("gsm")].filter(Boolean).length
                 }
               >
                 Total ({visible.length} {visible.length === 1 ? "line" : "lines"})
               </td>
-              <td className="px-3 py-2.5 text-right tabular-nums">
+              <td className="px-3 py-2 text-right tabular-nums">
                 {totals.qty.toLocaleString("en-IN")}
               </td>
               {shows("material") && (
-                <td className="px-3 py-2.5 text-right tabular-nums">{usd(totals.material, 0)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">{usd(totals.material, 0)}</td>
               )}
-              <td className="px-3 py-2.5 text-right tabular-nums">{usd(totals.cost, 0)}</td>
-              <td className="px-3 py-2.5 text-right tabular-nums">{usd(totals.selling, 0)}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{usd(totals.cost, 0)}</td>
+              <td className="px-3 py-2 text-right tabular-nums">{usd(totals.selling, 0)}</td>
               <td
                 className={cn(
-                  "px-3 py-2.5 text-right tabular-nums",
+                  "px-3 py-2 text-right tabular-nums",
                   totals.marginInr < 0 && "text-[var(--color-risk)]",
                 )}
               >
@@ -442,13 +442,13 @@ export function WorkingSheet({
               </td>
               <td
                 className={cn(
-                  "px-3 py-2.5 text-right tabular-nums",
+                  "px-3 py-2 text-right tabular-nums",
                   blendedMarginPct < 0 && "text-[var(--color-risk)]",
                 )}
               >
                 {pct(blendedMarginPct, 2)}
               </td>
-              <td className="px-3 py-2.5" colSpan={3} />
+              <td className="px-3 py-2" colSpan={3} />
             </tr>
           </tfoot>
         </table>
@@ -517,39 +517,39 @@ function SheetRow({
             : "border-hairline hover:bg-surface-alt/60 focus-visible:bg-surface-alt/60",
         )}
       >
-        <td className="px-2 py-2.5">
+        <td className="px-2 py-2">
           <ChevronDown
             aria-hidden
             className={cn("h-4 w-4 text-ink-500 transition-transform", !open && "-rotate-90")}
           />
         </td>
-        <td className="px-1 py-2.5 text-right tabular-nums text-ink-400">{index + 1}</td>
-        <td className="px-3 py-2.5 font-medium text-ink-900">{row.ref}</td>
-        <td className="px-3 py-2.5 text-ink-900">{row.product}</td>
-        {shows("size") && <td className="px-3 py-2.5 text-ink-700">{row.size}</td>}
+        <td className="px-1 py-2 text-right tabular-nums text-ink-400">{index + 1}</td>
+        <td className="px-3 py-2 font-medium text-ink-900">{row.ref}</td>
+        <td className="px-3 py-2 text-ink-900">{row.product}</td>
+        {shows("size") && <td className="px-3 py-2 text-ink-700">{row.size}</td>}
         {shows("composition") && (
-          <td className="px-3 py-2.5 text-ink-700">
+          <td className="px-3 py-2 text-ink-700">
             <span className="line-clamp-2">{row.composition}</span>
           </td>
         )}
         {shows("gsm") && (
-          <td className="px-3 py-2.5 text-right tabular-nums text-ink-700">{row.gsm}</td>
+          <td className="px-3 py-2 text-right tabular-nums text-ink-700">{row.gsm}</td>
         )}
-        <td className="px-3 py-2.5 text-right tabular-nums text-ink-700">{row.qtyLabel}</td>
+        <td className="px-3 py-2 text-right tabular-nums text-ink-700">{row.qtyLabel}</td>
         {shows("material") && (
-          <td className="px-3 py-2.5 text-right tabular-nums text-ink-700">
+          <td className="px-3 py-2 text-right tabular-nums text-ink-700">
             {usd(row.materialUsd)}
           </td>
         )}
-        <td className="px-3 py-2.5 text-right tabular-nums text-ink-700">
+        <td className="px-3 py-2 text-right tabular-nums text-ink-700">
           {usd(row.totalCostUsd)}
         </td>
-        <td className="px-3 py-2.5 text-right font-semibold tabular-nums text-ink-900">
+        <td className="px-3 py-2 text-right font-semibold tabular-nums text-ink-900">
           {usd(row.sellingUsd)}
         </td>
         <td
           className={cn(
-            "px-3 py-2.5 text-right tabular-nums",
+            "px-3 py-2 text-right tabular-nums",
             negative ? "text-[var(--color-risk)]" : "text-ink-700",
           )}
         >
@@ -557,16 +557,16 @@ function SheetRow({
         </td>
         <td
           className={cn(
-            "px-3 py-2.5 text-right font-semibold tabular-nums",
+            "px-3 py-2 text-right font-semibold tabular-nums",
             negative ? "text-[var(--color-risk)]" : "text-ink-900",
           )}
         >
           {pct(row.marginPct, 2)}
         </td>
-        <td className="px-3 py-2.5">
+        <td className="px-3 py-2">
           <StatusPill status={row.status} />
         </td>
-        <td className="px-2 py-2.5 text-center">
+        <td className="px-2 py-2 text-center">
           {row.callouts.length > 0 && (
             <span
               title={row.callouts.map((c) => c.text).join("\n\n")}
@@ -577,7 +577,7 @@ function SheetRow({
             </span>
           )}
         </td>
-        <td className="px-2 py-2.5">
+        <td className="px-2 py-2">
           <RowActions
             readOnly={readOnly}
             open={open}

@@ -86,7 +86,7 @@ export function ArticleTabsBar({
         fixed ? "fixed bottom-0 left-0 right-0 z-20" : "shrink-0",
       )}
     >
-      <div className="flex items-center gap-2 px-6 py-2.5 lg:px-8">
+      <div className="flex items-center gap-2 px-6 py-2 lg:px-8">
         <div className="flex min-w-0 flex-1 items-center gap-2 overflow-x-auto">
           {articles.map((a) => {
             const active = a.id === activeId;

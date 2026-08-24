@@ -22,18 +22,25 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
-import { ArrowLeft, ArrowRight, FileText, History, Layers, Lock, Send } from "lucide-react";
+import { ArrowLeft, ArrowRight, FileText, History, Layers, Send } from "lucide-react";
 
 import { ProductHeader } from "@/components/layout/ProductHeader";
 import { WorkflowStepper } from "@/components/layout/WorkflowStepper";
 import { ArticleTabsBar } from "@/components/layout/ArticleTabsBar";
 import { ActionGroup } from "@/components/changes/FlowActions";
 import { cn } from "@/lib/utils";
-import { usePod, type Article, type Pod } from "@/lib/podsStore";
-import { usd } from "@/lib/commercialProvisions";
+import { usePod, type Article } from "@/lib/podsStore";
+import { DEFAULT_PROVISIONS } from "@/lib/commercialProvisions";
 import { useCostingSelections } from "@/lib/costingSelectionStore";
-import { rejectSelection, useQuotationForArticle, type QuoteDraft } from "@/lib/quoteDraftStore";
-import { approveQuotation, rejectQuotation } from "@/lib/quotationApprovalStore";
+import {
+  ratesFor,
+  rejectSelection,
+  resetQuotationRates,
+  setQuotationRate,
+  setQuotationTerms,
+  useQuotationForArticle,
+} from "@/lib/quoteDraftStore";
+import { rejectQuotation } from "@/lib/quotationApprovalStore";
 import { useQuotationState, type QuotationStage } from "@/lib/quotationLifecycle";
 import { toast } from "sonner";
 import { OverrideDialog } from "./OverrideDialog";
@@ -44,14 +51,16 @@ import {
   startNewVersion,
   useQuotationHistory,
   workingVersionNo,
+  type VersionStatus,
 } from "@/lib/quotationHistory";
 import { totalsOf, viewQuote, type ViewedItem } from "@/lib/quotationView";
 import { recordSnapshot, snapshotFromViews } from "@/lib/masterSnapshot";
 import { QuotationRiskBanner } from "./QuotationRiskBanner";
-import { QuoteItemCard } from "./QuoteItemCard";
-import { ConfigLegend } from "./ConfigChips";
+import { QuotationLifecycleBar } from "./QuotationLifecycleBar";
+import { CommercialAssumptions } from "./CommercialAssumptions";
+import { WorkingSheet } from "./WorkingSheet";
+import { CombinedSummary } from "./MultiQuotationWorkspace";
 import { QuotationEntryFlow } from "./QuotationEntryFlow";
-import { QuotationBenchmarkPanels } from "./QuotationBenchmarkPanels";
 import { QuotationPreview } from "./QuotationPreview";
 import { QuotationApprovalWorkspace } from "./QuotationApprovalWorkspace";
 import { QuotationHistoryPanel, VersionStatusPill } from "./QuotationHistoryPanel";
@@ -65,6 +74,7 @@ export function QuoteWorkspace({
   articleId: string;
   sel?: string;
 }) {
+  const navigate = useNavigate();
   const pod = usePod(podId);
   const quotation = useQuotationForArticle(podId, articleId);
   const history = useQuotationHistory(quotation?.id ?? "");
@@ -123,6 +133,15 @@ export function QuoteWorkspace({
   const blocked = items.filter((i) => i.rejected);
   const isMulti = quotation?.mode === "multiple";
 
+  // The same assumptions band the working sheet leads with — read through
+  // `ratesFor` so it reports what the lines were actually priced under.
+  const termsDays = quotation?.paymentTermsDays ?? 60;
+  const liveRates = {
+    ...DEFAULT_PROVISIONS,
+    ...(quotation && items[0] ? ratesFor(quotation, items[0]) : {}),
+  };
+  const fxRate = views[0]?.priced.fxRate ?? 60;
+
   const overrideItem = items.find((i) => i.id === overrideFor);
   const overrideKitView = overrideItem
     ? views.find((v) => v.item.id === overrideItem.id)
@@ -176,6 +195,7 @@ export function QuoteWorkspace({
             <Link
               to="/quotations/$quotationId"
               params={{ quotationId: quotation!.id }}
+              search={{ action: undefined }}
               className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800"
             >
               <Layers className="h-4 w-4" /> View Full Quotation
@@ -223,95 +243,78 @@ export function QuoteWorkspace({
       />
 
       <main className="min-h-0 flex-1 overflow-y-auto">
-        <ArticleQuoteStrip
-          pod={pod}
-          quotation={quotation}
-          orderValueUsd={totals.orderValueUsd}
-          marginPct={totals.blendedMarginPct}
-          lineCount={items.reduce(
-            (n, i) => n + (i.kind === "kit" ? i.members.length : i.lines.length),
-            0,
-          )}
-        />
-
         <div className="mx-auto max-w-[1320px] px-6 py-4 lg:px-8">
-          {quotation && <QuotationRiskBanner quotationId={quotation.id} />}
-          {sent && (
-            <div className="mb-3 flex flex-wrap items-center gap-x-3 gap-y-2 rounded-xl border border-hairline bg-surface-alt px-4 py-3">
-              <Lock className="h-4 w-4 shrink-0 text-ink-500" aria-hidden />
-              <div className="min-w-0">
-                <p className="flex flex-wrap items-center gap-2 text-[13px] font-semibold text-ink-900">
-                  {quotation?.id} · Version {sent.no}
-                  <VersionStatusPill status={sent.status} />
-                </p>
-                <p className="mt-0.5 text-[11.5px] text-ink-500">
-                  Sent by {sent.sentBy} on {new Date(sent.sentAt).toLocaleDateString()}
-                  {locked && ` — read-only until version ${workingVersionNo(history)} is opened.`}
-                </p>
-              </div>
-              <button
-                type="button"
-                onClick={() => setHistoryOpen(true)}
-                className="ml-auto rounded-md border border-hairline bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt"
-              >
-                View history
-              </button>
-            </div>
-          )}
+          {/* Where this quotation stands, said the same way the working sheet
+              says it — this page IS that sheet, scoped to one article. */}
+          {quotation && <QuotationLifecycleBar state={qState} className="mb-4" />}
 
-          {/* Only shown when there ARE other articles on the quotation —
-              "quoted with 0 others" is not a fact worth a banner. */}
-          {companions.length > 0 && quotation && (
-            <QuotedWithBanner
+          {/* ONE status banner. The version-sent facts fold into the stage
+              statement rather than stacking a second band above it — the two
+              banners that earn their place here are this one and the risk
+              banner below. */}
+          {quotation && (sent || companions.length > 0) && (
+            <QuotationStatusBanner
               quotationId={quotation.id}
               companions={companions.map((c) => c.name)}
               articleName={article.name}
               stage={qState.stage}
               submitted={qState.submitted}
+              sent={sent}
+              locked={locked}
+              nextVersion={workingVersionNo(history)}
+              isMulti={Boolean(isMulti)}
+              onHistory={() => setHistoryOpen(true)}
             />
           )}
 
-          <ConfigLegend className="mb-3" />
-
-          {items.length === 0 ? (
+          {items.length === 0 || !quotation ? (
             <EmptyState onQuote={() => setEntryOpen(true)} name={article.name} />
           ) : (
-            <div className="space-y-5">
-              {items.map((item, i) => (
-                <QuoteItemCard
-                  key={item.id}
-                  podId={podId}
-                  quotationId={quotation!.id}
-                  item={item}
-                  index={i}
-                  readOnly={locked}
-                  // On an article's own page the quotation may hold more; a
-                  // rejection can still name any of them.
-                  siblings={quotation!.items}
-                />
-              ))}
-            </div>
+            <>
+              {/* The recent working-sheet design, scoped to this article's
+                  position: assumptions once, then the summary sheet with its
+                  in-place drill-down, then the document's own summary. */}
+              <CommercialAssumptions
+                rates={liveRates}
+                fxRate={fxRate}
+                termsDays={termsDays}
+                readOnly={locked}
+                onRateChange={(id, value) => setQuotationRate(quotation.id, id, value)}
+                onTermsChange={(d) => setQuotationTerms(quotation.id, d)}
+                onReset={() => resetQuotationRates(quotation.id)}
+              />
+
+              <QuotationRiskBanner quotationId={quotation.id} />
+
+              <WorkingSheet
+                views={views}
+                pod={pod}
+                quotationId={quotation.id}
+                readOnly={locked}
+                onOverride={(itemId) => setOverrideFor(itemId)}
+                onReject={(itemId) => setRejectFor(itemId)}
+                onOpenContext={(id) =>
+                  navigate({
+                    to: "/config/$podId/$articleId",
+                    params: { podId, articleId: id },
+                    search: { sel: undefined },
+                  })
+                }
+              />
+
+              <CombinedSummary
+                views={views}
+                quotationId={quotation.id}
+                orderValueUsd={totals.orderValueUsd}
+                blendedMarginPct={totals.blendedMarginPct}
+              />
+            </>
           )}
 
-          <p className="mt-3 text-[10.5px] text-ink-400">
+          <p className="mt-3 pb-2 text-[10.5px] text-ink-400">
             * Cost figures are pulled live from Configuration & Costing. Changing a scenario there
             moves this quotation — the quote never holds its own copy of a cost.
           </p>
-
-          {views[0] && (
-            <QuotationBenchmarkPanels
-              buyer={pod.buyer}
-              srfRef={views[0].item.srfRef}
-              productName={views[0].item.name}
-              sizeLabel={
-                views[0].kind === "kit"
-                  ? `Set of ${views[0].priced.members.length}`
-                  : (views[0].item.size ?? views[0].priced.sizeLabel)
-              }
-              moq={views[0].kind === "kit" ? views[0].priced.sets : views[0].priced.moq}
-              currentPriceUsd={views[0].priced.commercial.sellingUsd}
-            />
-          )}
         </div>
       </main>
 
@@ -403,15 +406,6 @@ export function QuoteWorkspace({
           costingRef={article.srfRef}
           views={views}
           onClose={() => setApprovalOpen(false)}
-          // A single-article quotation is decided on the full document, which
-          // is this one — so the decisions act on it directly rather than
-          // handing off to a consolidated workspace that does not exist here.
-          onApprove={() => {
-            approveQuotation(quotation.id);
-            toast.success(`${quotation.id} approved`);
-          }}
-          onOverride={() => setOverrideFor(items[0]?.id)}
-          onReject={() => setRejectFor(null)}
         />
       )}
     </div>
@@ -419,106 +413,65 @@ export function QuoteWorkspace({
 }
 
 /* ------------------------------------------------------------------ *
- * Strips and banners
+ * The one status banner
  * ------------------------------------------------------------------ */
 
-function ArticleQuoteStrip({
-  pod,
-  quotation,
-  orderValueUsd,
-  marginPct,
-  lineCount,
-}: {
-  pod: Pod;
-  quotation?: QuoteDraft;
-  orderValueUsd: number;
-  marginPct: number;
-  lineCount: number;
-}) {
-  const cells = [
-    { label: "Buyer", value: pod.buyer, note: pod.buyerRef },
-    {
-      label: "Quotation",
-      value: quotation?.id ?? "—",
-      note: quotation
-        ? quotation.mode === "multiple"
-          ? `${quotation.items.length} articles`
-          : "single product"
-        : "not quoted yet",
-    },
-    { label: "Margin", value: `${marginPct.toFixed(1)}%`, note: `${lineCount} configured lines` },
-    {
-      label: "This article's value",
-      value: usd(orderValueUsd, 0),
-      note: "at quoted quantities",
-      strong: true,
-    },
-  ];
-
-  return (
-    <div className="border-b border-hairline bg-surface px-6 lg:px-8">
-      <dl className="mx-auto grid max-w-[1320px] grid-cols-2 gap-px bg-hairline lg:grid-cols-4">
-        {cells.map((c) => (
-          <div key={c.label} className="bg-surface px-4 py-3">
-            <dt className="text-[10px] font-medium uppercase tracking-[0.12em] text-ink-500">
-              {c.label}
-            </dt>
-            <dd
-              className={cn(
-                "mt-0.5 truncate tabular-nums",
-                c.strong ? "text-[19px] font-semibold text-brand-800" : "text-[15px] text-ink-900",
-              )}
-            >
-              {c.value}
-            </dd>
-            <dd className="text-[11px] text-ink-400">{c.note}</dd>
-          </div>
-        ))}
-      </dl>
-    </div>
-  );
-}
-
 /**
- * This article is part of a bigger quotation, and here is the way into it.
+ * Where this quotation stands, in one band.
  *
- * The wording follows the quotation's stage, because the fact the reader needs
- * changes with it: before submission the point is that the article will not be
- * sent on its own; afterwards the point is that it is already out, with
- * others, and this page is no longer where anything happens to it.
+ * This used to be two banners — "Version N sent" and "quoted with others" —
+ * stacked above the sheet. They answered the same reader's question ("can I
+ * still change this, and where does it live?"), so they are one statement now:
+ * the stage leads, and the version facts and companions are its detail.
  */
-function QuotedWithBanner({
+function QuotationStatusBanner({
   quotationId,
   companions,
   articleName,
   stage,
   submitted,
+  sent,
+  locked,
+  nextVersion,
+  isMulti,
+  onHistory,
 }: {
   quotationId: string;
   companions: string[];
   articleName: string;
   stage: QuotationStage;
   submitted: boolean;
+  /** the latest sent version, if any */
+  sent?: { no: number; status: VersionStatus; sentBy: string; sentAt: string };
+  locked: boolean;
+  nextVersion: number;
+  isMulti: boolean;
+  onHistory: () => void;
 }) {
-  const others = `${companions.length} other article${companions.length === 1 ? "" : "s"}`;
+  const withOthers = companions.length > 0;
 
-  const { title, detail, tone } = submitted
+  const { title, tone } = submitted
     ? stage === "approval" || stage === "changes"
-      ? {
-          title: "In approval",
-          detail: `${articleName} is part of quotation ${quotationId} with ${companions.join(" and ")}. The quotation is read-only while it is being reviewed.`,
-          tone: "amber" as const,
-        }
-      : {
-          title: stage === "approved" ? "Approved" : "Submitted",
-          detail: `Included in ${quotationId} with ${others} — ${companions.join(" and ")}.`,
-          tone: "brand" as const,
-        }
-    : {
-        title: "Quoted with other articles",
-        detail: `${articleName} is part of a consolidated quotation with ${companions.join(" and ")}. It is sent for approval as one document.`,
-        tone: "neutral" as const,
-      };
+      ? { title: "In approval", tone: "amber" as const }
+      : stage === "approved"
+        ? { title: "Approved", tone: "brand" as const }
+        : { title: "Submitted", tone: "brand" as const }
+    : sent
+      ? { title: `Version ${sent.no} sent`, tone: "neutral" as const }
+      : { title: "Quoted with other articles", tone: "neutral" as const };
+
+  const detail = [
+    withOthers
+      ? `${articleName} is part of quotation ${quotationId} with ${companions.join(" and ")}, sent for approval as one document.`
+      : null,
+    sent
+      ? `Version ${sent.no} sent by ${sent.sentBy} on ${new Date(sent.sentAt).toLocaleDateString()}${locked ? ` — read-only until version ${nextVersion} is opened` : ""}.`
+      : submitted
+        ? "The quotation is read-only while it is being reviewed."
+        : null,
+  ]
+    .filter(Boolean)
+    .join(" ");
 
   return (
     <div
@@ -533,16 +486,33 @@ function QuotedWithBanner({
     >
       <Layers className="h-4 w-4 shrink-0 text-ink-500" aria-hidden />
       <div className="min-w-0">
-        <p className="text-[13px] font-semibold text-ink-900">{title}</p>
+        <p className="flex flex-wrap items-center gap-2 text-[13px] font-semibold text-ink-900">
+          {title}
+          {sent && <VersionStatusPill status={sent.status} />}
+        </p>
         <p className="mt-0.5 text-[11.5px] text-ink-600">{detail}</p>
       </div>
-      <Link
-        to="/quotations/$quotationId"
-        params={{ quotationId }}
-        className="ml-auto inline-flex items-center gap-1.5 rounded-md border border-brand-700 bg-surface px-3.5 py-1.5 text-[12.5px] font-semibold text-brand-700 hover:bg-brand-100"
-      >
-        View Quotation <ArrowRight className="h-3.5 w-3.5" />
-      </Link>
+      <div className="ml-auto flex shrink-0 items-center gap-2">
+        {sent && (
+          <button
+            type="button"
+            onClick={onHistory}
+            className="rounded-md border border-hairline bg-surface px-3 py-1.5 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt"
+          >
+            View history
+          </button>
+        )}
+        {isMulti && (
+          <Link
+            to="/quotations/$quotationId"
+            params={{ quotationId }}
+            search={{ action: undefined }}
+            className="inline-flex items-center gap-1.5 rounded-md border border-brand-700 bg-surface px-3.5 py-1.5 text-[12.5px] font-semibold text-brand-700 hover:bg-brand-100"
+          >
+            View Quotation <ArrowRight className="h-3.5 w-3.5" />
+          </Link>
+        )}
+      </div>
     </div>
   );
 }

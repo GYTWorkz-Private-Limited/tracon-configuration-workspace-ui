@@ -10,8 +10,9 @@
  *   ─ merged table: one row per variable, one column per member ─
  *
  * The merged table carries member identity in its own column headers, so it is
- * also the navigation: a column header (or any cell) opens that member's full
- * sheet, and "Merged view" in the band comes back.
+ * also the navigation: a column header opens that member's full sheet, a cell
+ * opens its component's master in a drawer over the table (with the full sheet
+ * one click further), and "Merged view" in the band comes back.
  *
  * Every member's sheet stays mounted through all of it. That is deliberate:
  * the merged table renders from the roll-ups those sheets report, and
@@ -19,15 +20,18 @@
  * moment you looked elsewhere.
  */
 
-import { useCallback, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
+import { ArrowUpRight } from "lucide-react";
 import { toast } from "sonner";
 
 import { cn } from "@/lib/utils";
+import { createMoney } from "@/lib/money";
 import type { Article, Pod } from "@/lib/podsStore";
 import {
   ArticleCostingWorkspace,
   type ArticleCosting,
 } from "@/components/workspace/ArticleCostingWorkspace";
+import { ComponentInspector, LineOptionPanel } from "@/components/workspace/ComponentInspector";
 import {
   KitProductHeader,
   memberOf,
@@ -56,10 +60,22 @@ export function KitCostingWorkspace({
   const members = kit.kitItems ?? [];
   const [view, setView] = useState<KitView>("merged");
   const [costed, setCosted] = useState<Record<string, ArticleCosting>>({});
-  // A merged-table click carries a target line into the member's sheet. The
-  // nonce makes the same cell clickable twice — the inspector may have been
-  // closed since — without the signal object churning on unrelated renders.
+  // Jumping to a member's sheet carries a target line with it. The nonce makes
+  // the same line jumpable twice — the inspector may have been closed since —
+  // without the signal object churning on unrelated renders.
   const [focus, setFocus] = useState<{ memberId: string; componentId: string; nonce: number }>();
+  /**
+   * The component a merged-table click is inspecting. A row click should not
+   * cost the reader their place in the set — so instead of navigating to the
+   * member's sheet, the clicked line's component master opens in a drawer OVER
+   * the table, and the full sheet stays one deliberate click further away.
+   */
+  const [inspect, setInspect] = useState<{
+    memberId: string;
+    componentId: string;
+    /** the exact clicked line — names WHICH of the component's choices to offer */
+    lineId?: string;
+  } | null>(null);
 
   // Members report their roll-up as they change. A stable callback keeps the
   // child effect from re-firing on every parent render.
@@ -71,10 +87,40 @@ export function KitCostingWorkspace({
     );
   }, []);
 
-  const focusLine = useCallback((memberId: string, componentId: string) => {
+  const focusLine = useCallback((memberId: string, componentId: string, lineId?: string) => {
+    setInspect({ memberId, componentId, lineId });
+  }, []);
+
+  /** The drawer's escape hatch: the member's full sheet, opened on this line. */
+  const openMemberSheet = useCallback((memberId: string, componentId: string) => {
+    setInspect(null);
     setFocus((prev) => ({ memberId, componentId, nonce: (prev?.nonce ?? 0) + 1 }));
     setView(memberView(memberId));
   }, []);
+
+  // Configuration costs in ₹; the drawer reads the same numbers the table shows.
+  const money = useMemo(() => createMoney("INR", 1), []);
+
+  // Resolved fresh from the member's live rollup on every render, so an
+  // option applied in the drawer re-reads its own consequence immediately.
+  const inspected = inspect
+    ? (costed[inspect.memberId]?.rollup.components.find(
+        (c) => c.component.id === inspect.componentId,
+      ) ?? null)
+    : null;
+  const inspectedMember = inspect ? members.find((m) => m.id === inspect.memberId) : undefined;
+  // The inspected component's configurable line — the drawer's option cards
+  // are this choice, committed through the member's own published action.
+  const inspectedCosting = inspect ? costed[inspect.memberId] : undefined;
+  const inspectedLine =
+    inspect && inspectedCosting
+      ? (inspectedCosting.sections
+          .flatMap((s) => s.lines)
+          .find((l) => l.id === inspect.lineId && l.optionGroup && l.target) ??
+        inspectedCosting.sections
+          .flatMap((s) => s.lines)
+          .find((l) => l.componentId === inspect.componentId && l.optionGroup && l.target))
+      : undefined;
 
   if (members.length === 0) {
     return (
@@ -177,6 +223,72 @@ export function KitCostingWorkspace({
                 />
               </div>
             </div>
+
+            {/* The component master, as a drawer over the merged table. The
+                inspector is the SAME right column the member's own sheet
+                shows, so a component answers "what is this made of, how much,
+                what does it come to" identically from either door. */}
+            {inspect && (inspected || inspectedLine) && (
+              <div className="fixed inset-0 z-50 flex">
+                <div
+                  className="flex-1 bg-ink-900/30 backdrop-blur-[1px]"
+                  onClick={() => setInspect(null)}
+                  aria-hidden
+                />
+                <div className="flex h-full shrink-0 flex-col bg-surface shadow-2xl">
+                  <div className="min-h-0 flex-1">
+                    {!inspected && inspectedLine ? (
+                      <LineOptionPanel
+                        title={inspectedLine.name}
+                        context={`${inspectedMember?.name ?? ""} · ${inspectedLine.context}`}
+                        picker={{
+                          group: inspectedLine.optionGroup!,
+                          onPick: (optionId) =>
+                            inspectedCosting!.actions.selectOption(
+                              inspectedLine.kind,
+                              inspectedLine.target!.componentId,
+                              inspectedLine.target!.itemId,
+                              optionId,
+                            ),
+                        }}
+                        onClose={() => setInspect(null)}
+                      />
+                    ) : (
+                    <ComponentInspector
+                      resolved={inspected}
+                      productName={inspectedMember?.name ?? ""}
+                      scenarioName={costed[inspect.memberId]?.scenarioName ?? ""}
+                      money={money}
+                      picker={
+                        inspectedLine?.optionGroup && inspectedLine.target && inspectedCosting
+                          ? {
+                              group: inspectedLine.optionGroup,
+                              onPick: (optionId) =>
+                                inspectedCosting.actions.selectOption(
+                                  inspectedLine.kind,
+                                  inspectedLine.target!.componentId,
+                                  inspectedLine.target!.itemId,
+                                  optionId,
+                                ),
+                            }
+                          : undefined
+                      }
+                      onClose={() => setInspect(null)}
+                    />
+                    )}
+                  </div>
+                  {/* The trip the click used to make, kept one step away. */}
+                  <button
+                    type="button"
+                    onClick={() => openMemberSheet(inspect.memberId, inspect.componentId)}
+                    className="flex shrink-0 items-center justify-center gap-1.5 border-t border-hairline bg-surface-alt/60 px-4 py-2.5 text-[12px] font-medium text-brand-700 transition-colors hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
+                  >
+                    Open {inspectedMember?.name ?? "member"}&rsquo;s full sheet on this line
+                    <ArrowUpRight className="h-3.5 w-3.5" aria-hidden />
+                  </button>
+                </div>
+              </div>
+            )}
             {copilotOpen && (
               /* The merged view scrolls with the page, so the panel sticks to
                  the viewport instead of scrolling off with the table. */

@@ -17,6 +17,7 @@
  */
 
 import { useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Boxes,
   Check,
@@ -24,7 +25,6 @@ import {
   History,
   MessageSquareWarning,
   Package,
-  PencilLine,
   Send,
   Sparkles,
   X,
@@ -94,9 +94,6 @@ export function QuotationApprovalWorkspace({
   views,
   onClose,
   onRequote,
-  onApprove,
-  onOverride,
-  onReject,
 }: {
   pod: Pod;
   /** the quotation being approved — one request per quotation, never per article */
@@ -111,16 +108,8 @@ export function QuotationApprovalWorkspace({
    * the host owns the picker, this just hands over to it.
    */
   onRequote?: () => void;
-  /**
-   * The approver's decisions. The host owns them because Override and Reject
-   * open the dialogs it already hosts for the quotation — the same dialogs,
-   * writing to the same store, rather than a second set that only approvers
-   * can reach.
-   */
-  onApprove: () => void;
-  onOverride: () => void;
-  onReject: () => void;
 }) {
+  const navigate = useNavigate();
   const approval = useQuotationApproval(quotationId);
   const history = useQuotationHistory(quotationId);
   const totals = totalsOf(views);
@@ -152,8 +141,12 @@ export function QuotationApprovalWorkspace({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3">
             <button
-              onClick={onClose}
-              aria-label="Back to quotation"
+              // Before sending, closing returns to the quotation being drafted.
+              // Once it is out for approval this workspace is done — closing
+              // lands on the costing dashboard, not back inside a read-only
+              // loop of the same document.
+              onClick={() => (approval.submitted ? navigate({ to: "/pods" }) : onClose())}
+              aria-label={approval.submitted ? "Close — back to costing dashboard" : "Back to quotation"}
               className="mt-1 rounded-md p-1 text-ink-500 hover:bg-surface-alt hover:text-ink-900"
             >
               <X className="h-4 w-4" />
@@ -329,36 +322,13 @@ export function QuotationApprovalWorkspace({
               </>
             ) : (
               <div className="space-y-2">
+                {/* Once sent, the panel only reports. The verdict is the
+                    REVIEWERS' to give from their own seats — the sender does
+                    not carry Approve / Override / Reject on the screen they
+                    submitted from. */}
                 <p className="text-center text-[11.5px] text-ink-500">
                   Sent {new Date(approval.submittedAt ?? Date.now()).toLocaleString("en-GB")}
                 </p>
-
-                {/* The approver's three calls. They exist only once the
-                    quotation has actually been submitted — before that there
-                    is nothing to approve and nobody has been asked. */}
-                <div className="grid grid-cols-3 gap-1.5">
-                  <button
-                    type="button"
-                    onClick={onApprove}
-                    className="inline-flex items-center justify-center gap-1 rounded-md bg-brand-700 px-2 py-2 text-[12px] font-semibold text-white hover:bg-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-                  >
-                    <Check className="h-3.5 w-3.5" aria-hidden /> Approve
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onOverride}
-                    className="inline-flex items-center justify-center gap-1 rounded-md border border-hairline bg-surface px-2 py-2 text-[12px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-                  >
-                    <PencilLine className="h-3.5 w-3.5" aria-hidden /> Override
-                  </button>
-                  <button
-                    type="button"
-                    onClick={onReject}
-                    className="inline-flex items-center justify-center gap-1 rounded-md border border-[var(--color-risk)]/40 bg-surface px-2 py-2 text-[12px] font-medium text-[var(--color-risk)] hover:bg-[var(--color-risk-soft)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-risk)]"
-                  >
-                    <X className="h-3.5 w-3.5" aria-hidden /> Reject
-                  </button>
-                </div>
 
                 <button
                   type="button"

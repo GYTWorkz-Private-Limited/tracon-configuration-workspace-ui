@@ -233,6 +233,8 @@ export function sendVersionForApproval(
   snapshot: { lines: VersionLine[]; orderValueUsd: number; blendedMarginPct: number },
   by = "Gautam Kitclu",
   note?: string,
+  /** when the send happened — the demo seeder backdates lapsed offers */
+  sentAt = new Date().toISOString(),
 ): number {
   const h = historyOf(quotationId);
   const no = h.versions.length + 1;
@@ -241,7 +243,7 @@ export function sendVersionForApproval(
     no,
     quotationId,
     status: "sent",
-    sentAt: new Date().toISOString(),
+    sentAt,
     sentBy: by,
     note,
     lines: snapshot.lines,

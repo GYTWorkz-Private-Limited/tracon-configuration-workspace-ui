@@ -59,7 +59,7 @@ export function CostBreakdownStrip({
             onClick={() => onSelect(cell.key)}
             aria-pressed={isActive}
             className={cn(
-              "group flex flex-col gap-1.5 border-r border-hairline px-5 py-3 text-left transition-colors last:border-r-0",
+              "group flex flex-col gap-0.5 border-r border-hairline px-4 py-1.5 text-left transition-colors last:border-r-0",
               "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700",
               isActive ? "bg-brand-50" : "hover:bg-surface-alt",
               isDirect && "bg-surface-alt",
@@ -72,7 +72,7 @@ export function CostBreakdownStrip({
             <span className="flex items-baseline gap-2">
               <span
                 className={cn(
-                  "text-[17px] font-semibold tabular-nums transition-colors",
+                  "text-[15px] font-semibold tabular-nums transition-colors",
                   isDirect ? "text-brand-700" : "text-ink-900",
                   live && "text-brand-600",
                 )}
@@ -82,8 +82,9 @@ export function CostBreakdownStrip({
               <span className="text-[11.5px] tabular-nums text-ink-400">{pct.toFixed(1)}%</span>
             </span>
             {/* Progress indicator — share of direct cost. Not the only signal:
-                the percentage above carries the same information as text. */}
-            <span className="h-1 w-full overflow-hidden rounded-full bg-ink-100" aria-hidden>
+                the percentage above carries the same information as text, so
+                it stays a hairline rather than a band. */}
+            <span className="h-0.5 w-full overflow-hidden rounded-full bg-ink-100" aria-hidden>
               <span
                 className={cn(
                   "block h-full rounded-full transition-all duration-500",

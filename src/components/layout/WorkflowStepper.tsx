@@ -103,7 +103,7 @@ export function WorkflowStepper({
 
   return (
     <div className="border-b border-hairline bg-surface">
-      <div className="flex items-center gap-1 overflow-x-auto px-6 py-2.5 lg:px-8">
+      <div className="flex items-center gap-1 overflow-x-auto px-6 py-1.5 lg:px-8">
         {/* The master flow ahead of the module steps: POD → Template → Style
             are decisions made BEFORE costing starts, and showing them here is
             what stops a user skipping one — the band answers "where am I in
