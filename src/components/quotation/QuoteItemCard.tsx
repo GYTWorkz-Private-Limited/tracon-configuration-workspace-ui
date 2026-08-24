@@ -130,8 +130,17 @@ function optionsOf(builds: BuildRef[], variantId: string): BuildRef[] {
  * One place, so a figure changed in the dialog and the same figure changed
  * inline can never take different paths into the quotation.
  */
-function applyOverrides(quotationId: string, item: QuoteItem, overrides: RowOverride[]) {
+function applyOverrides(
+  quotationId: string,
+  item: QuoteItem,
+  overrides: RowOverride[],
+  reason: string,
+) {
   const isKit = item.kind === "kit";
+
+  // The reason first, so the audit reads as a decision followed by its
+  // consequences rather than a series of unexplained figures.
+  logQuotationEvent(quotationId, "option_changed", `${item.name} — override applied: ${reason}`);
 
   for (const o of overrides) {
     if (o.moq !== undefined) updateLine(quotationId, item.id, o.lineId, { moqOverride: o.moq });
@@ -245,8 +254,8 @@ function ProductCard({
           initialLineId={quoted.lineId}
           isKit={false}
           onClose={() => setOverriding(false)}
-          onSave={(overrides) => {
-            applyOverrides(quotationId, item, overrides);
+          onSave={(overrides, reason) => {
+            applyOverrides(quotationId, item, overrides, reason);
             setOverriding(false);
           }}
         />
@@ -416,8 +425,8 @@ function KitCard({ podId, quotationId, item, index, readOnly, showSummary, sibli
           initialLineId={rows[0]?.lineId ?? item.id}
           isKit
           onClose={() => setOverriding(false)}
-          onSave={(result) => {
-            applyOverrides(quotationId, item, result);
+          onSave={(result, reason) => {
+            applyOverrides(quotationId, item, result, reason);
             setOverriding(false);
           }}
         />

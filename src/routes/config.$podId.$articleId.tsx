@@ -19,6 +19,7 @@ import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { ArrowLeft, ArrowRight, Boxes, PackagePlus, Sparkles } from "lucide-react";
 
+import { GlobalNav } from "@/components/layout/GlobalNav";
 import { ProductHeader } from "@/components/layout/ProductHeader";
 import { WorkflowStepper } from "@/components/layout/WorkflowStepper";
 import { ArticleTabsBar } from "@/components/layout/ArticleTabsBar";
@@ -150,6 +151,7 @@ function ConfigurationWorkspacePage() {
     /* The tab bar is docked to the viewport bottom; the padding keeps the
        last rows of any sheet clear of it. */
     <div className="flex h-screen w-full flex-col bg-canvas pb-[52px]">
+      <GlobalNav />
       <ProductHeader
         pod={pod}
         article={article}
@@ -164,11 +166,14 @@ function ConfigurationWorkspacePage() {
               ? `${inr2(costing.rollup.directCost)} / pc`
               : "₹ —"
         }
+        /* Back goes to the dashboard, not to the POD's setup page: opening a
+           POD lands here, so that page is not a step the user came through
+           and sending them "back" to it would be showing them template and
+           article pickers for work that is already configured. */
         backTo={
           <Link
-            to="/pods/$id"
-            params={{ id: pod.id }}
-            aria-label="Back to articles"
+            to="/pods"
+            aria-label="Back to the costing dashboard"
             className="rounded-md p-1 text-ink-500 hover:bg-surface-alt hover:text-ink-900"
           >
             <ArrowLeft className="h-4 w-4" />

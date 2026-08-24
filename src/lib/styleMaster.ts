@@ -31,20 +31,56 @@ export type StylePart = {
   /** finished dimensions, inches */
   finishedWidth: number;
   finishedLength: number;
+  /**
+   * CUT size, inches — finished plus the seam and hem the cutter actually
+   * lays. The spec sheet states both because they answer different questions:
+   * finished is what the buyer measures, cut is what the marker consumes.
+   */
+  cutWidth?: number;
+  cutLength?: number;
   /** metres per piece, cut-size — pinned onto the seeded rule as an override */
   consumption: number;
   wastagePct: number;
+  /** how this part's edges are closed — hem, mitre, piping, overlock */
+  edgeFinish?: string;
+  /** the workmanship this part demands, as the spec sheet words it */
+  workmanship?: string;
+  /** component-specific specification — GSM, count, construction note */
+  spec?: string;
   /** which library the user will pick this part's material from */
   slot: "fabric" | "trim";
 };
 
 export type StyleDef = {
   id: string;
+  /** style code as the spec sheet prints it */
   code: string;
   name: string;
   category: string;
+  /** the product/article this style makes */
+  product?: string;
+  /** construction / style type — "Two-panel, bagged out", "Single ply hemmed" */
+  construction?: string;
+  /** the style's overall edge treatment, when it has one rule */
+  edgeFinish?: string;
+  /** workmanship notes that belong to the style rather than one part */
+  workmanship?: string[];
   description: string;
   parts: StylePart[];
+  /**
+   * Styles the team built by hand and saved. A master is a shared asset, so a
+   * saved style says who added it and when — an unattributed row in a master
+   * list is one nobody will dare delete later.
+   */
+  custom?: boolean;
+  savedAt?: string;
+  savedBy?: string;
+  /**
+   * Built by hand for ONE costing and not promoted to the master. It still has
+   * to exist — it is what seeds the sheet's parts — but it is not a shared
+   * asset, so it never appears in the picker for the next order.
+   */
+  oneTime?: boolean;
 };
 
 /** The recorded choice when the user opts OUT of the master. */
@@ -56,6 +92,14 @@ export const STYLE_MASTER: StyleDef[] = [
     code: "STY-PLM-201",
     name: "Bordered Placemat",
     category: "Table Linen",
+    product: "Placemat",
+    construction: "Two-panel, bagged out with mitred contrast border",
+    edgeFinish: "Mitred border, corded piping in the perimeter seam",
+    workmanship: [
+      "Single needle lockstitch, 10-11 SPI",
+      "Piping inserted continuous, joins hidden at one corner",
+      "Border mitres matched at all four corners",
+    ],
     description: "Two-panel placemat with a contrast border and corded piping in the seam.",
     parts: [
       {
@@ -105,6 +149,13 @@ export const STYLE_MASTER: StyleDef[] = [
     code: "STY-RUN-118",
     name: "Table Runner — Tasselled",
     category: "Table Linen",
+    product: "Table Runner",
+    construction: "Face and backing bagged out, pointed ends, turned through",
+    edgeFinish: 'Bagged-out edge, topstitched 1/8" from the seam',
+    workmanship: [
+      "Points trimmed and turned square before topstitch",
+      "Tassel cord anchored through both plies at each point",
+    ],
     description: "Lined runner with pointed ends finished in tassels on cord.",
     parts: [
       {
@@ -154,6 +205,14 @@ export const STYLE_MASTER: StyleDef[] = [
     code: "STY-DUV-402",
     name: "Duvet Set — Piped",
     category: "Bed Linen",
+    product: "Duvet Cover — Queen",
+    construction: "Two-panel cover, self-piped perimeter, concealed zip at foot",
+    edgeFinish: "Self-fabric bias piping on all four sides",
+    workmanship: [
+      "Bias strips cut at 45° across the width",
+      "Zip guard flap bar-tacked at both ends",
+      "French seam on the internal flap",
+    ],
     description: "Queen duvet cover with self-piped edges, zip closure and internal flap.",
     parts: [
       {
@@ -214,6 +273,13 @@ export const STYLE_MASTER: StyleDef[] = [
     code: "STY-APR-305",
     name: "Apron — Classic",
     category: "Kitchen Linen",
+    product: "Bib Apron",
+    construction: "One-piece body, self-fabric ties and neck strap, patch pocket",
+    edgeFinish: 'Double-fold hem 1/2" on all edges',
+    workmanship: [
+      "Ties folded four-ply and edge-stitched",
+      "Pocket bar-tacked at both top corners and at the divide",
+    ],
     description: "Bib apron with waist ties, adjustable neck strap and a patch pocket.",
     parts: [
       {
@@ -260,9 +326,37 @@ export const STYLE_MASTER: StyleDef[] = [
   },
 ];
 
+/**
+ * Cut size, when the style did not state one.
+ *
+ * The seeded parts carry finished dimensions and the consumption rule's own
+ * seam and hem allowances; cut size is what those add up to. Deriving it keeps
+ * one source of truth — a hand-typed cut size would be free to drift from the
+ * geometry the consumption was actually calculated on.
+ */
+export const SEAM_ALLOWANCE = 0.5;
+export const HEM_ALLOWANCE = 0.5;
+
+export function cutSizeOf(part: StylePart): { width: number; length: number } {
+  return {
+    width: part.cutWidth ?? part.finishedWidth + SEAM_ALLOWANCE * 2,
+    length: part.cutLength ?? part.finishedLength + HEM_ALLOWANCE * 2,
+  };
+}
+
+export const cutSizeLabel = (part: StylePart) => {
+  const { width, length } = cutSizeOf(part);
+  return `${width}" × ${length}"`;
+};
+
 export function styleById(styleId: string | undefined): StyleDef | undefined {
   if (!styleId || styleId === MANUAL_STYLE_ID) return undefined;
-  return STYLE_MASTER.find((s) => s.id === styleId);
+  return [...STYLE_MASTER, ...customStyles].find((s) => s.id === styleId);
+}
+
+/** Every style the picker can offer — the shipped master plus saved ones. */
+export function allStyles(): StyleDef[] {
+  return [...customStyles.filter((s) => !s.oneTime), ...STYLE_MASTER];
 }
 
 /* ------------------------------------------------------------------ *
@@ -329,6 +423,111 @@ export function applyStyleParts(styleId: string): ComponentDef[] {
       accessories: [],
     };
   });
+}
+
+/* ------------------------------------------------------------------ *
+ * Styles the team saved — a manual build promoted to a reusable master
+ * ------------------------------------------------------------------ */
+
+/**
+ * A style built by hand is worth keeping only if the next order can find it.
+ * Saving one writes it beside the shipped master and it behaves identically
+ * from then on — same picker, same seeding, same confirmation summary — which
+ * is the whole point of "Save as Style Master": the second time this product
+ * is costed, nobody types the parts again.
+ */
+const CUSTOM_KEY = "tracon.customStyles.v1";
+
+let customStyles: StyleDef[] = [];
+const customListeners = new Set<() => void>();
+
+function isStyleList(value: unknown): value is StyleDef[] {
+  return (
+    Array.isArray(value) &&
+    value.every(
+      (s) =>
+        Boolean(s) &&
+        typeof s === "object" &&
+        typeof (s as StyleDef).id === "string" &&
+        Array.isArray((s as StyleDef).parts),
+    )
+  );
+}
+
+function loadCustom() {
+  if (typeof window === "undefined") return;
+  try {
+    const raw = window.localStorage.getItem(CUSTOM_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : null;
+    // Stored state outlives the code that wrote it: a saved style with the
+    // wrong shape is dropped rather than allowed to break every picker.
+    if (isStyleList(parsed)) customStyles = parsed;
+  } catch {
+    customStyles = [];
+  }
+}
+
+function emitCustom() {
+  if (typeof window !== "undefined") {
+    try {
+      window.localStorage.setItem(CUSTOM_KEY, JSON.stringify(customStyles));
+    } catch {
+      // ignore
+    }
+  }
+  customListeners.forEach((l) => l());
+}
+
+loadCustom();
+
+function subscribeCustom(cb: () => void) {
+  customListeners.add(cb);
+  return () => customListeners.delete(cb);
+}
+
+/** Stable empty snapshot so SSR and the first client render agree. */
+const serverCustom: StyleDef[] = [];
+
+export function useCustomStyles(): StyleDef[] {
+  return useSyncExternalStore(
+    subscribeCustom,
+    () => customStyles,
+    () => serverCustom,
+  );
+}
+
+/** Every style the picker can offer, subscribed. */
+export function useAllStyles(): StyleDef[] {
+  const custom = useCustomStyles();
+  return [...custom.filter((s) => !s.oneTime), ...STYLE_MASTER];
+}
+
+export function saveCustomStyle(
+  style: Omit<StyleDef, "id" | "custom" | "savedAt">,
+  savedBy = "You",
+  oneTime = false,
+): StyleDef {
+  const saved: StyleDef = {
+    ...style,
+    oneTime,
+    id: `sty-custom-${Math.random().toString(36).slice(2, 8)}`,
+    custom: true,
+    savedAt: new Date().toLocaleDateString("en-IN", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    }),
+    savedBy,
+  };
+  customStyles = [saved, ...customStyles];
+  emitCustom();
+  return saved;
+}
+
+export function deleteCustomStyle(styleId: string) {
+  if (!customStyles.some((s) => s.id === styleId)) return;
+  customStyles = customStyles.filter((s) => s.id !== styleId);
+  emitCustom();
 }
 
 /* ------------------------------------------------------------------ *

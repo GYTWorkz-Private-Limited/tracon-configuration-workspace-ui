@@ -63,7 +63,11 @@ export function QuotationEntryFlow({
     if (!open || !existing || !articleId) return;
     onClose();
     if (existing.mode === "multiple") {
-      navigate({ to: "/quotations/$quotationId", params: { quotationId: existing.id } });
+      navigate({
+        to: "/quotations/$quotationId",
+        params: { quotationId: existing.id },
+        search: { action: undefined },
+      });
     } else {
       navigate({
         to: "/quotation/$podId/$articleId",
@@ -84,7 +88,11 @@ export function QuotationEntryFlow({
     // number, so it gets its own workspace. One article stays where it has
     // always been shown: on that article's Quotation step.
     if (mode === "multiple") {
-      navigate({ to: "/quotations/$quotationId", params: { quotationId } });
+      navigate({
+        to: "/quotations/$quotationId",
+        params: { quotationId },
+        search: { action: undefined },
+      });
       return;
     }
     navigate({

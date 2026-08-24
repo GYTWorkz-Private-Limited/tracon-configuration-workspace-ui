@@ -1,98 +1,136 @@
 /**
- * A quotation over several articles — QT-2601 — as its own document.
+ * The Quotation Working Sheet — a commercial review and approval workspace.
  *
- * The reason this is a page and not a section of an article: a quotation that
- * contains a Placemat, a Runner and a Napkin belongs to none of them. Rendering
- * it under whichever article the user happened to start from makes the other
- * two look like sub-items of the first, and gives the combined quotation no
- * place of its own to carry a number, a status, or a single Send for Approval.
+ * This page does NOT build products. The articles, variants, MOQ breaks and
+ * costs all arrive from Configuration & Costing already decided; what happens
+ * here is the commercial pass over them: Review → Override → Approve / Reject
+ * → send the quotation. Keeping creation out is what makes the separation
+ * legible — Configuration answers "what is this and what does it cost", the
+ * quotation answers "what do we sell it for, and do we stand behind that".
  *
- * What it reuses, deliberately: the same `QuoteItemCard` the single-product
- * quotation renders, the same pricing through `quotationView`, the same
- * selection modal, the same approval and history surfaces. The only thing new
- * here is the frame around them — and the fact that the summary is computed
- * once, for the whole quotation, because one quotation is sent as one number.
+ * The shape follows the working sheet the costing team already reads:
+ *
+ *   assumptions          — priced under these, stated once
+ *     summary sheet      — one row per article, the comparison
+ *       drill-down       — the full build-up, in place, on the row
+ *   decision bar         — the three-way call, always in reach
+ *
+ * There is exactly one quotation object behind all of it: the `QuoteDraft`.
+ * Every figure on this page is re-derived from it through `quotationView`, so
+ * the sheet, the drill-down, the preview and the approval screen cannot
+ * disagree with each other.
  */
 
 import { useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "@tanstack/react-router";
 import {
   ArrowLeft,
-  ChevronDown,
+  ArrowRight,
+  CheckCircle2,
+  Download,
   FileText,
   History,
   Layers,
   Lock,
-  PackagePlus,
+  MoreVertical,
+  PencilLine,
   Send,
   Sparkles,
-  Trash2,
   X,
+  XCircle,
 } from "lucide-react";
 
 import { cn } from "@/lib/utils";
-import { usePod } from "@/lib/podsStore";
-import { inr, pct, usd } from "@/lib/commercialProvisions";
+import { updatePod, usePod } from "@/lib/podsStore";
+import { DEFAULT_PROVISIONS, inr, pct, usd } from "@/lib/commercialProvisions";
 import { useCostingSelections } from "@/lib/costingSelectionStore";
 import {
-  addProducts,
   createRequote,
-  removeItems,
+  ratesFor,
+  rejectSelection,
+  resetQuotationRates,
   revisionNo,
+  setItemSellingPrice,
+  setLineSellingPrice,
+  setQuotationRate,
+  setQuotationTerms,
+  updateLine,
   useQuotation,
+  type QuoteItem,
 } from "@/lib/quoteDraftStore";
 import {
   STATUS_LABEL,
   latestVersion,
+  logQuotationEvent,
   startNewVersion,
   useQuotationHistory,
-  workingVersionNo,
+  type QuotationVersion,
 } from "@/lib/quotationHistory";
 import { totalsOf, viewQuote, type ViewedItem } from "@/lib/quotationView";
+import { commercialHealth } from "@/lib/quotationReview";
+import { useQuotationState, type QuotationState } from "@/lib/quotationLifecycle";
+import { QuotationLifecycleBar } from "./QuotationLifecycleBar";
 import { inrShort } from "@/lib/fabricRequirement";
 import { requestRecost } from "@/lib/recostingStore";
+import { approveQuotation, rejectQuotation } from "@/lib/quotationApprovalStore";
+import { latestResponse, markConvertedToOrder, useBuyerRecord } from "@/lib/buyerResponseStore";
+import { validUntilOf } from "@/lib/quotationPipeline";
 import { toast } from "sonner";
-import { QuoteItemCard } from "./QuoteItemCard";
 import { WorkingSheet } from "./WorkingSheet";
+import { CommercialAssumptions } from "./CommercialAssumptions";
+import { BuyerResponsePanel } from "./BuyerResponsePanel";
+import { PreparationBar } from "./DecisionBar";
 import { QuotationRiskBanner } from "./QuotationRiskBanner";
 import { VersionInputCompare } from "./VersionInputCompare";
 import { recordSnapshot, snapshotFromViews } from "@/lib/masterSnapshot";
-import { ConfigLegend } from "./ConfigChips";
-import { ArticleSelectionModal } from "./ArticleSelectionModal";
 import { QuotationPreview } from "./QuotationPreview";
 import { QuotationApprovalWorkspace } from "./QuotationApprovalWorkspace";
 import { QuotationHistoryPanel, VersionStatusPill } from "./QuotationHistoryPanel";
 import { RequotePicker } from "./RequotePicker";
+import { OverrideDialog, type RowOverride } from "./OverrideDialog";
+import { RejectDialog } from "./RejectDialog";
+import { applyRowOverrides, rowsForItem } from "./quoteRows";
+import type { PaymentTermsDays } from "@/lib/quotationAssumptions";
 
-export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }) {
+export function MultiQuotationWorkspace({
+  quotationId,
+  initialAction,
+}: {
+  quotationId: string;
+  /** carried in from a list row action — "requote" opens the picker on arrival */
+  initialAction?: "requote" | "respond";
+}) {
   const navigate = useNavigate();
   const quotation = useQuotation(quotationId);
   const pod = usePod(quotation?.podId ?? "");
   const history = useQuotationHistory(quotationId);
   const selections = useCostingSelections();
+  /** which stage this quotation is at — decides what the page may offer */
+  const qState = useQuotationState(quotationId);
+  /** what the buyer has said so far, and the risk/conversion flags */
+  const buyerRecord = useBuyerRecord(quotationId);
 
-  const [addOpen, setAddOpen] = useState(false);
   const [previewOpen, setPreviewOpen] = useState(false);
   const [approvalOpen, setApprovalOpen] = useState(false);
   const [historyOpen, setHistoryOpen] = useState(false);
-  const [focus, setFocus] = useState<string>("all");
-  const [picked, setPicked] = useState<Set<string>>(new Set());
-  const [requoteOpen, setRequoteOpen] = useState(false);
-  // The detail cards default to open: the working sheet is a new entry point,
-  // not a curtain over what users already rely on seeing.
-  const [detailsOpen, setDetailsOpen] = useState(true);
+  const [requoteOpen, setRequoteOpen] = useState(initialAction === "requote");
+  const [overflowOpen, setOverflowOpen] = useState(false);
+  /** the item whose override dialog is open; undefined means closed */
+  const [overrideFor, setOverrideFor] = useState<string | undefined>(undefined);
+  /** the item a rejection was started from; null means the whole quotation */
+  const [rejectFor, setRejectFor] = useState<string | null | undefined>(undefined);
 
   const items = useMemo(() => quotation?.items ?? [], [quotation]);
   const views: ViewedItem[] = useMemo(
-    () => (quotation ? viewQuote(quotation.podId, items, selections) : []),
-    [quotation, items, selections],
+    () => (quotation ? viewQuote(quotation, selections) : []),
+    [quotation, selections],
   );
   const totals = totalsOf(views);
+  const health = commercialHealth(views);
 
   /* ---- masters this pricing referenced, date-stamped ----
      Recorded every time the quotation is read, so the snapshot always names
-     the rates the figures on screen were actually built from. The risk banner
-     compares these against the (simulated) refreshed masters. */
+     the rates the figures on screen were actually built from. */
   useEffect(() => {
     if (quotation && views.length > 0) {
       recordSnapshot(quotation.id, snapshotFromViews(views));
@@ -113,11 +151,45 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
   }
 
   const sent = latestVersion(history);
-  const locked = history.locked;
-  const activeFocus = focus !== "all" && items.some((i) => i.id === focus) ? focus : "all";
-  // A quotation with a line out for recosting is not a quotation yet.
+  // A submitted quotation is frozen for the same reason a sent version is:
+  // what a reviewer is looking at must not move under them.
+  const locked = history.locked || !qState.editable;
   const blocked = items.filter((i) => i.rejected);
-  const quotedIds = new Set(items.map((i) => i.articleId));
+  const termsDays = quotation.paymentTermsDays ?? 60;
+
+  // The rates actually in force. Read through `ratesFor` so the band reports
+  // what the lines were priced under, rather than a parallel set of defaults.
+  const liveRates = { ...DEFAULT_PROVISIONS, ...(items[0] ? ratesFor(quotation, items[0]) : {}) };
+  const fxRate = views[0]?.priced.fxRate ?? 60;
+
+  // Whole-quotation INR figures at quoted quantities — what the risk banner's
+  // margin-impact estimate is computed over.
+  let costInr = 0;
+  let sellingInr = 0;
+  let rawInr = 0;
+  let quantity = 0;
+  for (const v of views) {
+    const qty = v.kind === "kit" ? v.priced.sets : v.priced.moq;
+    costInr += v.priced.commercial.finalCostInr * qty;
+    sellingInr += v.priced.commercial.sellingInr * qty;
+    quantity += qty;
+    rawInr +=
+      v.kind === "kit"
+        ? v.priced.members.reduce((t, m) => t + m.rollup.rawMaterial * m.unitsPerSet, 0) * qty
+        : v.priced.rollup.rawMaterial * qty;
+  }
+
+  // The buyer's position extends the lifecycle past what the internal stores
+  // know: an acceptance or a conversion pushes the timeline to its last steps.
+  const buyerLast = latestResponse(buyerRecord);
+  const buyerAccepted = buyerLast?.outcome === "accepted" || buyerLast?.outcome === "counter";
+  const lifecycleState = buyerRecord.convertedAt
+    ? { ...qState, stepIndex: 4, label: "Converted to Order" }
+    : buyerAccepted
+      ? { ...qState, stepIndex: 4, label: "Accepted by Buyer" }
+      : qState;
+
+  const validUntil = sent ? validUntilOf(sent.sentAt) : undefined;
 
   /** Leaving returns to the article the quotation was started from. */
   const close = () =>
@@ -127,300 +199,237 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
       search: { sel: undefined },
     });
 
-  const toggle = (id: string) => {
-    const next = new Set(picked);
-    if (next.has(id)) next.delete(id);
-    else next.add(id);
-    setPicked(next);
-  };
-
-  /**
-   * A working-sheet row is an index entry; opening it must defeat both things
-   * that could be hiding the card — the details collapse and a focus pill —
-   * before the scroll, or the jump lands on nothing.
-   */
-  const openCard = (id: string) => {
-    setDetailsOpen(true);
-    if (activeFocus !== "all") setFocus("all");
-    requestAnimationFrame(() => {
-      document.getElementById(`card-${id}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const openCosting = (articleId: string) =>
+    navigate({
+      to: "/config/$podId/$articleId",
+      params: { podId: quotation.podId, articleId },
+      search: { sel: undefined },
     });
-  };
+
+  const overrideItem = items.find((i) => i.id === overrideFor);
+  const overrideKitView = overrideItem
+    ? views.find((v) => v.item.id === overrideItem.id)
+    : undefined;
 
   return (
     <div className="flex h-screen w-full flex-col bg-canvas">
-      <header className="shrink-0 border-b border-hairline bg-surface px-6 py-3 lg:px-8">
-        <div className="mx-auto flex max-w-[1320px] flex-wrap items-start gap-4">
-          <Link
-            to="/quotations"
-            aria-label="All quotations"
-            className="mt-1 rounded-md p-1 text-ink-500 hover:bg-surface-alt hover:text-ink-900"
-          >
-            <ArrowLeft className="h-4 w-4" />
-          </Link>
-
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <span className="text-[10px] font-semibold uppercase tracking-[0.12em] text-ink-400">
-                Quotation
-              </span>
-              <h1 className="text-[19px] font-semibold text-ink-900">{quotation.id}</h1>
-              {/* A requote is a new commercial round — say which one, so nobody
-                  mistakes the revision for the document the buyer already has. */}
-              {quotation.requoteOf && (
-                <span className="rounded-full bg-brand-700 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-white">
-                  V{revisionNo(quotation.id)} · Revised
-                </span>
-              )}
-              {sent ? (
-                <VersionStatusPill status={sent.status} />
-              ) : (
-                <span className="rounded-full border border-hairline bg-surface px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ink-600">
-                  Draft
-                </span>
-              )}
-              {locked && (
-                <span className="inline-flex items-center gap-1 text-[11px] text-ink-500">
-                  <Lock className="h-3 w-3" aria-hidden /> Read-only
-                </span>
-              )}
-            </div>
-            <p className="mt-0.5 flex flex-wrap items-center gap-x-2 text-[12px] text-ink-500">
-              <span>
-                {pod.buyer} · {pod.id} · {items.length} article{items.length === 1 ? "" : "s"}{" "}
-                quoted as one document
-              </span>
-              {quotation.requoteOf && (
-                <Link
-                  to="/quotations/$quotationId"
-                  params={{ quotationId: quotation.requoteOf }}
-                  className="font-medium text-brand-700 hover:underline"
-                >
-                  Requote of {quotation.requoteOf}
-                </Link>
-              )}
-            </p>
-          </div>
-
-          <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
-            <button
-              type="button"
-              onClick={() => setHistoryOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-            >
-              <History className="h-4 w-4" /> History
-              {history.versions.length > 0 && (
-                <span className="rounded-full bg-ink-100 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-ink-600">
-                  v{history.versions.length}
-                </span>
-              )}
-            </button>
-            <button
-              type="button"
-              onClick={() => setPreviewOpen(true)}
-              className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-            >
-              <FileText className="h-4 w-4" /> Preview Quotation
-            </button>
-            {/* A quotation the buyer has agreed is finished. Going again is a
-                new document, so it gets its own button rather than reopening
-                the one they accepted. */}
-            {/* Any sent version — approved, rejected, superseded — can be the
-                start of the next round; the customer's answer is exactly when
-                a requote happens. */}
-            {sent && (
-              <button
-                type="button"
-                onClick={() => setRequoteOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-md border border-brand-700 bg-brand-50 px-3 py-2 text-[13px] font-medium text-brand-700 hover:bg-brand-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-              >
-                <Sparkles className="h-4 w-4" /> Generate Requote
-              </button>
-            )}
-            {locked ? (
-              <button
-                type="button"
-                onClick={() => startNewVersion(quotation.id)}
-                className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800"
-              >
-                <Send className="h-4 w-4" /> Create version {workingVersionNo(history)}
-              </button>
-            ) : (
-              <button
-                type="button"
-                disabled={items.length === 0 || blocked.length > 0}
-                title={
-                  blocked.length > 0
-                    ? `${blocked.map((i) => i.name).join(", ")} ${blocked.length === 1 ? "is" : "are"} out for recosting — the quotation cannot be sent until ${blocked.length === 1 ? "it comes" : "they come"} back.`
-                    : undefined
-                }
-                onClick={() => setApprovalOpen(true)}
-                className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-medium text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40"
-              >
-                <Send className="h-4 w-4" /> Send for Approval
-              </button>
-            )}
-            <button
-              type="button"
-              onClick={close}
-              aria-label="Close this quotation"
-              title="Back to the article"
-              className="rounded-md p-2 text-ink-500 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-            >
-              <X className="h-4 w-4" />
-            </button>
-          </div>
-        </div>
-      </header>
+      <Header
+        quotationId={quotation.id}
+        requoteOf={quotation.requoteOf}
+        createdAt={quotation.createdAt}
+        buyer={pod.buyer}
+        podId={pod.id}
+        sent={sent}
+        validUntil={validUntil}
+        locked={locked}
+        qState={qState}
+        blockedNames={blocked.map((i) => i.name)}
+        itemCount={items.length}
+        onSendForApproval={() => setApprovalOpen(true)}
+        termsDays={termsDays}
+        overflowOpen={overflowOpen}
+        onOverflow={setOverflowOpen}
+        onTerms={(d) => setQuotationTerms(quotation.id, d)}
+        onPreview={() => setPreviewOpen(true)}
+        onHistory={() => {
+          setOverflowOpen(false);
+          setHistoryOpen(true);
+        }}
+        onRequote={
+          sent
+            ? () => {
+                setOverflowOpen(false);
+                setRequoteOpen(true);
+              }
+            : undefined
+        }
+        decideLocked={qState.stage === "approved"}
+        onApprove={() => {
+          approveQuotation(quotation.id);
+          // The costing side must tell the same story: the order this
+          // quotation prices is approved, on the dashboard as well.
+          updatePod(quotation.podId, { status: "approved" });
+          toast.success(`${quotation.id} approved — sent to buyer`);
+        }}
+        onOverride={() => setOverrideFor(items[0]?.id)}
+        onReject={() => setRejectFor(null)}
+        onClose={close}
+      />
 
       <main className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto max-w-[1320px] px-6 py-4 lg:px-8">
-          {/* Which articles are on this quotation, and the way to each one. */}
-          <nav
-            aria-label="Articles on this quotation"
-            className="mb-4 flex flex-wrap items-center gap-2 rounded-xl border border-hairline bg-surface px-3.5 py-2.5"
-          >
-            <span className="mr-1 text-[10px] font-medium uppercase tracking-[0.12em] text-ink-500">
-              On this quotation
-            </span>
-            <FocusPill active={activeFocus === "all"} onClick={() => setFocus("all")}>
-              All items <span className="tabular-nums text-ink-400">{items.length}</span>
-            </FocusPill>
-            {items.map((item) => (
-              <FocusPill
-                key={item.id}
-                active={activeFocus === item.id}
-                onClick={() => setFocus(item.id)}
-              >
-                {item.kind === "kit" ? `Kit — ${item.name}` : item.name}
-              </FocusPill>
-            ))}
-            {!locked && (
-              <button
-                type="button"
-                onClick={() => setAddOpen(true)}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-full border border-dashed border-brand-600 bg-brand-50/50 px-3.5 py-1.5 text-[12.5px] font-semibold text-brand-700 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-              >
-                <PackagePlus className="h-3.5 w-3.5" aria-hidden /> Add Product
-              </button>
-            )}
-          </nav>
+          {/* Reached from the Quotations module the user has walked no
+              workflow to get here, so the page says where it stands first —
+              including the buyer's answer, which lives past the internal
+              stages. */}
+          <QuotationLifecycleBar state={lifecycleState} className="mb-4" />
 
-          {!locked && items.length > 0 && (
-            <SelectedProducts
-              items={items.map((i) => ({ id: i.id, name: i.name, kind: i.kind }))}
-              picked={picked}
-              onToggle={toggle}
-              onSelectAll={() =>
-                setPicked(
-                  picked.size === items.length ? new Set() : new Set(items.map((i) => i.id)),
-                )
-              }
-              onRemove={() => {
-                removeItems(quotation.id, Array.from(picked));
-                setPicked(new Set());
-              }}
-            />
-          )}
+          <CommercialAssumptions
+            rates={liveRates}
+            fxRate={fxRate}
+            termsDays={termsDays}
+            readOnly={locked}
+            onRateChange={(id, value) => setQuotationRate(quotation.id, id, value)}
+            onTermsChange={(d) => setQuotationTerms(quotation.id, d)}
+            onReset={() => resetQuotationRates(quotation.id)}
+          />
 
-          {/* Summary first, the way the Excel working sheet opens — the cards
-              below are the drill-down, not the entry point. */}
-          {items.length > 0 && (
+          {items.length > 0 ? (
             <>
               {/* Input-cost drift first: a quotation whose masters have moved
-                  is not safe to send, and that must be visible before the
-                  numbers. */}
-              <QuotationRiskBanner quotationId={quotation.id} />
+                  is not safe to approve, and that must be visible before the
+                  numbers are read. With the commercial context it states the
+                  margin impact and offers the two ways out. */}
+              <QuotationRiskBanner
+                quotationId={quotation.id}
+                // Per-unit figures: margin is scale-invariant, and the
+                // recommended price must read like the quote does — per piece
+                // or per set, never the whole order.
+                marginContext={{
+                  sellingInr: quantity > 0 ? sellingInr / quantity : sellingInr,
+                  finalCostInr: quantity > 0 ? costInr / quantity : costInr,
+                  rawMaterialInr: quantity > 0 ? rawInr / quantity : rawInr,
+                  quotedMarginPct: totals.blendedMarginPct,
+                  fxRate,
+                }}
+                onRequote={() => setRequoteOpen(true)}
+              />
               <VersionInputCompare quotationId={quotation.id} requoteOfId={quotation.requoteOf} />
-              <WorkingSheet views={views} quotationId={quotation.id} onOpen={openCard} />
-            </>
-          )}
 
-          <ConfigLegend className="mb-3" />
+              <WorkingSheet
+                views={views}
+                pod={pod}
+                quotationId={quotation.id}
+                readOnly={locked}
+                onOverride={(itemId) => setOverrideFor(itemId)}
+                onReject={(itemId) => setRejectFor(itemId)}
+                onOpenContext={openCosting}
+              />
 
-          {items.length === 0 ? (
-            <div className="rounded-xl border border-dashed border-ink-200 bg-surface px-6 py-14 text-center">
-              <h2 className="text-[15px] font-semibold text-ink-900">
-                Nothing left on this quotation
-              </h2>
-              <p className="mx-auto mt-1 max-w-[440px] text-[12.5px] text-ink-500">
-                Add a costed product, set or kit back onto {quotation.id}.
-              </p>
-              <button
-                type="button"
-                onClick={() => setAddOpen(true)}
-                className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-4 py-2 text-[13px] font-semibold text-white hover:bg-brand-800"
-              >
-                <PackagePlus className="h-4 w-4" /> Add Product
-              </button>
-            </div>
-          ) : (
-            <section aria-label="Article details">
-              <button
-                type="button"
-                onClick={() => setDetailsOpen((o) => !o)}
-                aria-expanded={detailsOpen}
-                className="mb-3 flex w-full items-center gap-2 rounded-md px-1 py-1 text-left focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-              >
-                <ChevronDown
-                  aria-hidden
-                  className={cn(
-                    "h-4 w-4 text-ink-500 transition-transform",
-                    !detailsOpen && "-rotate-90",
-                  )}
-                />
-                <h2 className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-ink-700">
-                  Article details
-                </h2>
-                <span className="text-[11.5px] tabular-nums text-ink-500">{items.length}</span>
-              </button>
-              {detailsOpen && (
-                <div className="space-y-5">
-                  {items.map((item, i) =>
-                    activeFocus === "all" || activeFocus === item.id ? (
-                      // The id is the working sheet's jump target; scroll-mt
-                      // keeps the landed-on card clear of the viewport edge.
-                      <div key={item.id} id={`card-${item.id}`} className="scroll-mt-4">
-                        <QuoteItemCard
-                          podId={quotation.podId}
-                          quotationId={quotation.id}
-                          item={item}
-                          index={i}
-                          readOnly={locked}
-                          siblings={items}
-                          // One quotation, one summary — at the end, over everything.
-                          showSummary={false}
-                        />
+              <CombinedSummary
+                views={views}
+                quotationId={quotation.id}
+                orderValueUsd={totals.orderValueUsd}
+                blendedMarginPct={totals.blendedMarginPct}
+              />
+
+              {/* Once the quotation is out with the buyer, their answer is
+                  recorded here — and an acceptance offers the conversion. */}
+              {(qState.stage === "approved" || buyerRecord.responses.length > 0) && (
+                <>
+                  {buyerRecord.convertedAt ? (
+                    <p className="mt-4 flex flex-wrap items-center gap-2 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3 text-[12.5px] text-emerald-800">
+                      <Layers className="h-4 w-4 shrink-0" aria-hidden />
+                      <span>
+                        <strong className="font-semibold">Converted to order</strong> on{" "}
+                        {new Date(buyerRecord.convertedAt).toLocaleDateString()} at{" "}
+                        <strong className="font-semibold tabular-nums">
+                          {usd(buyerRecord.orderValueUsd ?? totals.orderValueUsd, 0)}
+                        </strong>
+                        . The quotation is closed — the order carries it from here.
+                      </span>
+                    </p>
+                  ) : (
+                    buyerAccepted && (
+                      <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border border-brand-600/30 bg-brand-50 px-4 py-3">
+                        <p className="min-w-0 flex-1 text-[12.5px] text-brand-800">
+                          <strong className="font-semibold">Accepted by the buyer</strong>
+                          {buyerLast?.counterPriceUsd !== undefined && (
+                            <> at a counter of {usd(buyerLast.counterPriceUsd)}</>
+                          )}{" "}
+                          — an order is expected at{" "}
+                          <strong className="font-semibold tabular-nums">
+                            {usd(totals.orderValueUsd, 0)}
+                          </strong>
+                          .
+                        </p>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            markConvertedToOrder(quotation.id, totals.orderValueUsd);
+                            toast.success(`${quotation.id} converted to order`);
+                          }}
+                          className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-brand-800 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                        >
+                          Convert to Order <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+                        </button>
                       </div>
-                    ) : null,
+                    )
                   )}
-                </div>
+
+                  <BuyerResponsePanel
+                    quotationId={quotation.id}
+                    quotedPriceUsd={views[0]?.priced.commercial.sellingUsd ?? 0}
+                    onRequote={() => setRequoteOpen(true)}
+                  />
+                </>
               )}
-            </section>
+            </>
+          ) : (
+            <EmptyQuotation quotationId={quotation.id} podId={pod.id} />
           )}
 
-          {items.length > 0 && <CombinedSummary views={views} quotationId={quotation.id} />}
-
-          <p className="mt-3 text-[10.5px] text-ink-400">
-            * Cost figures are pulled live from Configuration & Costing. Each article keeps its own
-            lifecycle — being on this quotation does not change what stage it is at.
+          <p className="mt-3 pb-2 text-[10.5px] leading-relaxed text-ink-400">
+            Costs are read live from Configuration &amp; Costing — this workspace prices them, it
+            does not change them. Articles, variants and MOQ breaks are added upstream, on the
+            Costing Report.
           </p>
         </div>
       </main>
 
-      <ArticleSelectionModal
-        open={addOpen}
-        onClose={() => setAddOpen(false)}
-        podId={quotation.podId}
-        articles={pod.articles}
-        alreadyQuotedIds={quotedIds}
-        title={`Add Products to ${quotation.id}`}
-        confirmLabel="Add to Quotation"
-        onConfirm={(ids) => {
-          addProducts(quotation.id, ids);
-          setAddOpen(false);
-        }}
-      />
+      {/* The bar only reports — every action, including the approver's three
+          calls once the quotation is submitted, lives in the header where the
+          rest of the app keeps its CTAs. */}
+      {items.length > 0 && <PreparationBar health={health} submitted={qState.submitted} />}
+
+      {/* ------------------------------ dialogs ------------------------------ */}
+
+      {overrideItem && (
+        <OverrideDialog
+          articleName={overrideItem.name}
+          rows={rowsForItem(
+            quotation,
+            overrideItem,
+            selections,
+            overrideKitView?.kind === "kit"
+              ? {
+                  priced: {
+                    ...overrideKitView.priced.members[0],
+                    commercial: overrideKitView.priced.commercial,
+                  },
+                  sets: overrideKitView.priced.sets,
+                }
+              : undefined,
+          )}
+          initialLineId={overrideItem.quotedLineId ?? overrideItem.lines[0]?.id ?? overrideItem.id}
+          isKit={overrideItem.kind === "kit"}
+          onClose={() => setOverrideFor(undefined)}
+          onSave={(overrides, reason) => {
+            applyRowOverrides(quotation.id, overrideItem, overrides, reason);
+            setOverrideFor(undefined);
+            toast.success(`${overrideItem.name} — override applied`);
+          }}
+        />
+      )}
+
+      {rejectFor !== undefined && (
+        <RejectDialog
+          quotationId={quotation.id}
+          podId={pod.id}
+          items={items}
+          preselect={rejectFor ? [rejectFor] : items.map((i) => i.id)}
+          onClose={() => setRejectFor(undefined)}
+          onConfirm={(selection, reason) => {
+            rejectSelection(quotation.id, selection, reason);
+            // A rejection taken by an approver is also a verdict on the
+            // approval itself, so the reviewer panel reflects it rather than
+            // sitting at "pending" over a quotation that has been sent back.
+            if (qState.submitted) rejectQuotation(quotation.id);
+            setRejectFor(undefined);
+            toast.success("Sent back, with your reason recorded against the line");
+          }}
+        />
+      )}
 
       <QuotationPreview
         open={previewOpen}
@@ -455,16 +464,12 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
           items={items}
           versionNo={sent?.no}
           statusLabel={sent ? STATUS_LABEL[sent.status] : "Draft"}
-          priceOf={(id) => {
-            const v = views.find((x) => x.item.id === id);
-            return v ? v.priced.commercial.sellingUsd : 0;
-          }}
+          priceOf={(id) => views.find((x) => x.item.id === id)?.priced.commercial.sellingUsd ?? 0}
           onClose={() => setRequoteOpen(false)}
           onConfirm={(picks, destination) => {
             // Sending to the costing team is not a new quotation — it is the
             // recosting ask itself, on the same document. The articles move to
-            // Recosting, the team re-costs and marks them ready, and only then
-            // is anything new raised.
+            // Recosting, and only when they come back is anything new raised.
             if (destination === "team") {
               const chosen = items.filter((i) => picks.some((x) => x.itemId === i.id));
               for (const item of chosen) {
@@ -489,7 +494,7 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
             // Editing the configuration means the costing is being redone, so
             // hand-set cost and price must not survive into the new round;
             // editing the quotation keeps the costing and moves only the
-            // commercial position. Same distinction createRequote always drew.
+            // commercial position.
             const scope = destination === "configuration" ? "full" : "override";
             const next = createRequote(
               quotation.id,
@@ -499,20 +504,17 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
             if (!next) return;
 
             if (destination === "configuration") {
-              // The work continues in Configuration, on the first selected
-              // article; the requote reads its costs live from there, so the
-              // path back is Costing Report → Quotation as always.
               const first = items.find((i) => i.id === picks[0]?.itemId);
               if (first) {
-                navigate({
-                  to: "/config/$podId/$articleId",
-                  params: { podId: pod.id, articleId: first.articleId },
-                  search: { sel: undefined },
-                });
+                openCosting(first.articleId);
                 return;
               }
             }
-            navigate({ to: "/quotations/$quotationId", params: { quotationId: next } });
+            navigate({
+              to: "/quotations/$quotationId",
+              params: { quotationId: next },
+              search: { action: undefined },
+            });
           }}
         />
       )}
@@ -534,105 +536,363 @@ export function MultiQuotationWorkspace({ quotationId }: { quotationId: string }
   );
 }
 
-function FocusPill({
-  active,
+/* ------------------------------------------------------------------ *
+ * Header
+ * ------------------------------------------------------------------ */
+
+function Header({
+  quotationId,
+  requoteOf,
+  createdAt,
+  buyer,
+  podId,
+  sent,
+  validUntil,
+  locked,
+  qState,
+  blockedNames,
+  itemCount,
+  onSendForApproval,
+  termsDays,
+  overflowOpen,
+  onOverflow,
+  onTerms,
+  onPreview,
+  onHistory,
+  onRequote,
+  decideLocked,
+  onApprove,
+  onOverride,
+  onReject,
+  onClose,
+}: {
+  quotationId: string;
+  requoteOf?: string;
+  createdAt: string;
+  buyer: string;
+  podId: string;
+  sent: QuotationVersion | undefined;
+  /** when the sent version stops being an offer */
+  validUntil?: Date;
+  locked: boolean;
+  qState: QuotationState;
+  blockedNames: string[];
+  itemCount: number;
+  onSendForApproval: () => void;
+  termsDays: PaymentTermsDays;
+  overflowOpen: boolean;
+  onOverflow: (open: boolean) => void;
+  onTerms: (days: PaymentTermsDays) => void;
+  onPreview: () => void;
+  onHistory: () => void;
+  onRequote?: () => void;
+  /** a granted approval closes the decision; the buttons stop offering it */
+  decideLocked: boolean;
+  onApprove: () => void;
+  onOverride: () => void;
+  onReject: () => void;
+  onClose: () => void;
+}) {
+  const prepared = new Date(createdAt).toLocaleString("en-IN", {
+    day: "2-digit",
+    month: "short",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+
+  return (
+    <header className="shrink-0 border-b border-hairline bg-surface px-6 py-3 lg:px-8">
+      <div className="mx-auto flex max-w-[1320px] flex-wrap items-start gap-4">
+        <Link
+          to="/quotations"
+          aria-label="All quotations"
+          className="mt-1 rounded-md p-1 text-ink-500 hover:bg-surface-alt hover:text-ink-900"
+        >
+          <ArrowLeft className="h-4 w-4" />
+        </Link>
+
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-[19px] font-semibold text-ink-900">Quotation Working Sheet</h1>
+            {requoteOf && (
+              <span className="rounded-full bg-brand-700 px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-white">
+                V{revisionNo(quotationId)} · Revised
+              </span>
+            )}
+            {/* A quotation nobody has submitted is a DRAFT. Calling it
+                "Pending Approval" before it has been sent claims a stage it
+                has not reached and makes the Send action look redundant. */}
+            {sent ? (
+              <VersionStatusPill status={sent.status} />
+            ) : (
+              <span className="rounded-full border border-hairline bg-surface px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-[0.06em] text-ink-600">
+                {qState.label}
+              </span>
+            )}
+            {locked && (
+              <span className="inline-flex items-center gap-1 text-[11px] text-ink-500">
+                <Lock className="h-3 w-3" aria-hidden /> Read-only
+              </span>
+            )}
+          </div>
+
+          <p className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[12px] text-ink-500">
+            <span className="font-semibold text-ink-700">{quotationId}</span>
+            <Meta label="Buyer">{buyer}</Meta>
+            <Meta label="POD">{podId}</Meta>
+            <Meta label="Prepared">{prepared}</Meta>
+            {validUntil && (
+              <Meta label="Valid until">
+                {validUntil.toLocaleDateString("en-IN", {
+                  day: "2-digit",
+                  month: "short",
+                  year: "numeric",
+                })}
+              </Meta>
+            )}
+            {requoteOf && (
+              <Link
+                to="/quotations/$quotationId"
+                params={{ quotationId: requoteOf }}
+                search={{ action: undefined }}
+                className="font-medium text-brand-700 hover:underline"
+              >
+                Requote of {requoteOf}
+              </Link>
+            )}
+          </p>
+        </div>
+
+        <div className="ml-auto flex shrink-0 flex-wrap items-center gap-2">
+          {/* Payment terms lead the actions because they are the assumption a
+              buyer conversation moves most often, and every figure below
+              re-prices when they change. */}
+          <div
+            className="flex items-center gap-1 rounded-full border border-hairline bg-surface p-0.5"
+            role="group"
+            aria-label="Payment terms"
+          >
+            <span className="pl-2 pr-1 text-[11px] font-medium text-ink-500">Payment terms</span>
+            {([60, 90] as const).map((d) => (
+              <button
+                key={d}
+                type="button"
+                disabled={locked}
+                onClick={() => onTerms(d)}
+                aria-pressed={termsDays === d}
+                className={cn(
+                  "rounded-full px-3 py-1 text-[11.5px] font-medium transition-colors disabled:cursor-not-allowed disabled:opacity-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
+                  termsDays === d
+                    ? "bg-brand-700 font-semibold text-white"
+                    : "text-ink-600 hover:bg-surface-alt hover:text-ink-900",
+                )}
+              >
+                {d} Days
+              </button>
+            ))}
+          </div>
+
+          <HeaderButton icon={<FileText className="h-4 w-4" />} onClick={onPreview}>
+            Preview
+          </HeaderButton>
+
+          <HeaderButton
+            icon={<Download className="h-4 w-4" />}
+            title="Export to Excel and PDF is not wired up in this build"
+            onClick={() => undefined}
+          >
+            Export
+          </HeaderButton>
+
+          {/* The stage's actions, in the header where every screen in the app
+              carries its CTAs. Before submission that is the send; after it,
+              the approver's three calls — a granted approval locks them. */}
+          {qState.submitted ? (
+            <>
+              {/* A decision already granted removes the trio entirely — three
+                  disabled buttons wrap the action row onto a second line and
+                  say nothing the status pill does not. */}
+              {!decideLocked && (
+                <>
+                  <button
+                    type="button"
+                    disabled={blockedNames.length > 0}
+                    onClick={onReject}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-[var(--color-risk)]/40 bg-surface px-3.5 py-2 text-[13px] font-medium text-[var(--color-risk)] hover:bg-[var(--color-risk-soft)] disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--color-risk)]"
+                  >
+                    <XCircle className="h-4 w-4" aria-hidden /> Reject
+                  </button>
+                  <button
+                    type="button"
+                    onClick={onOverride}
+                    className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3.5 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                  >
+                    <PencilLine className="h-4 w-4" aria-hidden /> Override
+                  </button>
+                  <button
+                    type="button"
+                    disabled={blockedNames.length > 0}
+                    title={
+                      blockedNames.length > 0
+                        ? `${blockedNames.join(", ")} must come back from recosting first.`
+                        : "Approve this quotation and send it to the buyer"
+                    }
+                    onClick={onApprove}
+                    className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+                  >
+                    <CheckCircle2 className="h-4 w-4" aria-hidden /> Approve
+                  </button>
+                </>
+              )}
+              <button
+                type="button"
+                onClick={onSendForApproval}
+                className="inline-flex items-center gap-1.5 rounded-md border border-brand-700 bg-brand-50 px-3.5 py-2 text-[13px] font-semibold text-brand-700 hover:bg-brand-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                <Send className="h-4 w-4" /> Open Approval
+              </button>
+            </>
+          ) : (
+            <button
+              type="button"
+              disabled={itemCount === 0 || blockedNames.length > 0}
+              title={
+                blockedNames.length > 0
+                  ? `${blockedNames.join(", ")} ${blockedNames.length === 1 ? "is" : "are"} out for recosting — the quotation cannot be sent until ${blockedNames.length === 1 ? "it comes" : "they come"} back.`
+                  : itemCount === 0
+                    ? "There is nothing on this quotation to send"
+                    : "Choose approvers and send this quotation for approval"
+              }
+              onClick={onSendForApproval}
+              className="inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-3.5 py-2 text-[13px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              <Send className="h-4 w-4" /> Send for Approval
+              <ArrowRight className="h-3.5 w-3.5" aria-hidden />
+            </button>
+          )}
+
+          <div
+            className="relative"
+            onBlur={(e) => {
+              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) onOverflow(false);
+            }}
+          >
+            <button
+              type="button"
+              aria-haspopup="menu"
+              aria-expanded={overflowOpen}
+              aria-label="More quotation actions"
+              onClick={() => onOverflow(!overflowOpen)}
+              className="rounded-md border border-hairline bg-surface p-2 text-ink-600 hover:bg-surface-alt hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+            >
+              <MoreVertical className="h-4 w-4" />
+            </button>
+
+            {overflowOpen && (
+              <div
+                role="menu"
+                className="absolute right-0 top-full z-40 mt-1 w-60 overflow-hidden rounded-lg border border-hairline bg-surface py-1 shadow-lg"
+              >
+                <OverflowItem icon={<History className="h-3.5 w-3.5" />} onClick={onHistory}>
+                  Version history &amp; audit
+                </OverflowItem>
+                {onRequote && (
+                  <OverflowItem icon={<Sparkles className="h-3.5 w-3.5" />} onClick={onRequote}>
+                    Generate requote
+                  </OverflowItem>
+                )}
+                <OverflowItem icon={<X className="h-3.5 w-3.5" />} onClick={onClose}>
+                  Close quotation
+                </OverflowItem>
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+    </header>
+  );
+}
+
+function Meta({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <span>
+      <span className="text-ink-400">{label} </span>
+      <span className="font-medium text-ink-700">{children}</span>
+    </span>
+  );
+}
+
+function HeaderButton({
+  icon,
+  onClick,
+  title,
+  children,
+}: {
+  icon: React.ReactNode;
+  onClick: () => void;
+  title?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <button
+      type="button"
+      title={title}
+      onClick={onClick}
+      className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-2 text-[13px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+    >
+      {icon}
+      {children}
+    </button>
+  );
+}
+
+function OverflowItem({
+  icon,
   onClick,
   children,
 }: {
-  active: boolean;
+  icon: React.ReactNode;
   onClick: () => void;
   children: React.ReactNode;
 }) {
   return (
     <button
       type="button"
+      role="menuitem"
       onClick={onClick}
-      aria-current={active}
-      className={cn(
-        "inline-flex shrink-0 items-center gap-1.5 rounded-full border px-3.5 py-1.5 text-[12.5px] transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-        active
-          ? "border-brand-700 bg-brand-50 font-semibold text-brand-800"
-          : "border-hairline bg-surface text-ink-600 hover:bg-surface-alt hover:text-ink-900",
-      )}
+      className="flex w-full items-center gap-2 px-3 py-2 text-left text-[12.5px] text-ink-700 hover:bg-surface-alt focus-visible:bg-surface-alt focus-visible:outline-none"
     >
+      <span className="text-ink-500">{icon}</span>
       {children}
     </button>
   );
 }
 
 /* ------------------------------------------------------------------ *
- * Managing what is on the quotation
+ * Nothing to review
  * ------------------------------------------------------------------ */
 
 /**
- * The list of what is currently quoted, with the bulk actions.
- *
- * Separate from the article navigation above because they answer different
- * questions: the nav asks "show me this one", this asks "what is on here, and
- * take these off".
+ * A quotation with no lines is a routing problem, not something to fix here —
+ * articles arrive from the Costing Report, so that is where the way out points.
  */
-function SelectedProducts({
-  items,
-  picked,
-  onToggle,
-  onSelectAll,
-  onRemove,
-}: {
-  items: { id: string; name: string; kind: "product" | "kit" }[];
-  picked: Set<string>;
-  onToggle: (id: string) => void;
-  onSelectAll: () => void;
-  onRemove: () => void;
-}) {
-  const all = picked.size === items.length && items.length > 0;
-
+function EmptyQuotation({ quotationId, podId }: { quotationId: string; podId: string }) {
   return (
-    <section
-      aria-label="Selected products"
-      className="mb-4 overflow-hidden rounded-xl border border-hairline bg-surface"
-    >
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-2 border-b border-hairline bg-surface-alt px-4 py-2.5">
-        <h2 className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-ink-700">
-          Selected products
-        </h2>
-        <span className="text-[11.5px] text-ink-500">
-          {picked.size} of {items.length} selected
-        </span>
-        <div className="ml-auto flex items-center gap-2">
-          <button
-            type="button"
-            onClick={onSelectAll}
-            className="rounded-md border border-hairline bg-surface px-3 py-1.5 text-[12px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-          >
-            {all ? "Clear selection" : "Select all"}
-          </button>
-          <button
-            type="button"
-            disabled={picked.size === 0}
-            onClick={onRemove}
-            className="inline-flex items-center gap-1.5 rounded-md border border-hairline bg-surface px-3 py-1.5 text-[12px] font-medium text-[#8f2c22] hover:bg-surface-alt disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-          >
-            <Trash2 className="h-3.5 w-3.5" aria-hidden /> Remove selected
-          </button>
-        </div>
-      </header>
-
-      <ul className="flex flex-wrap gap-x-6 gap-y-2 px-4 py-3">
-        {items.map((i) => (
-          <li key={i.id}>
-            <label className="flex cursor-pointer items-center gap-2 text-[12.5px] text-ink-800">
-              <input
-                type="checkbox"
-                checked={picked.has(i.id)}
-                onChange={() => onToggle(i.id)}
-                className="h-3.5 w-3.5 accent-[var(--color-brand-700)]"
-              />
-              {i.kind === "kit" ? `Kit — ${i.name}` : i.name}
-            </label>
-          </li>
-        ))}
-      </ul>
-    </section>
+    <div className="rounded-xl border border-dashed border-ink-200 bg-surface px-6 py-14 text-center">
+      <h2 className="text-[15px] font-semibold text-ink-900">Nothing on this quotation</h2>
+      <p className="mx-auto mt-1 max-w-[460px] text-[12.5px] leading-relaxed text-ink-500">
+        {quotationId} has no lines to review. Articles are added upstream: mark a costing ready on
+        the Costing Report, then continue to quotation.
+      </p>
+      <Link
+        to="/pods/$id"
+        params={{ id: podId }}
+        className="mt-4 inline-flex items-center gap-1.5 rounded-md bg-brand-700 px-4 py-2 text-[13px] font-semibold text-white hover:bg-brand-800"
+      >
+        Go to the POD
+      </Link>
+    </div>
   );
 }
 
@@ -641,16 +901,24 @@ function SelectedProducts({
  * ------------------------------------------------------------------ */
 
 /**
- * The combined figures for the whole quotation.
+ * The combined figures for the whole quotation — the same arithmetic the sheet
+ * totals show, stated as the document's own position rather than as a table
+ * footer, because this is the number that gets approved.
  *
- * Same neutral ribbon treatment as the single-product summary, and the same
- * arithmetic — `totalsOf` over the same priced views the cards above render.
- * Per-article summaries are switched off in this workspace: the buyer receives
- * one quotation, so there is one number to approve.
+ * Exported so the article-level Quotation step closes on the same statement —
+ * one design for the document, wherever it is read.
  */
-function CombinedSummary({ views, quotationId }: { views: ViewedItem[]; quotationId: string }) {
-  const totals = totalsOf(views);
-
+export function CombinedSummary({
+  views,
+  quotationId,
+  orderValueUsd,
+  blendedMarginPct,
+}: {
+  views: ViewedItem[];
+  quotationId: string;
+  orderValueUsd: number;
+  blendedMarginPct: number;
+}) {
   let costInr = 0;
   let sellingInr = 0;
   let quantity = 0;
@@ -663,31 +931,31 @@ function CombinedSummary({ views, quotationId }: { views: ViewedItem[]; quotatio
 
   const cells = [
     { label: "Articles", value: String(views.length) },
-    { label: "Quoted MOQ", value: quantity.toLocaleString("en-IN") },
+    { label: "Quoted quantity", value: quantity.toLocaleString("en-IN") },
     { label: "Total Cost", value: inr(costInr, 0) },
     { label: "Selling Price", value: inr(sellingInr, 0) },
-    { label: "Margin", value: pct(totals.blendedMarginPct, 1), strong: true },
+    { label: "Margin", value: pct(blendedMarginPct, 2), strong: true },
     {
       label: "Total Quote Value",
-      value: `${usd(totals.orderValueUsd, 0)} · ${inrShort(sellingInr)}`,
+      value: `${usd(orderValueUsd, 0)} · ${inrShort(sellingInr)}`,
       strong: true,
     },
   ];
 
   return (
     <section
-      aria-label="Total quotation summary"
-      className="mt-5 overflow-hidden rounded-lg border border-hairline bg-surface"
+      aria-label="Final quotation summary"
+      className="overflow-hidden rounded-xl border border-brand-600/30 bg-surface"
     >
-      <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline bg-surface-alt px-4 py-2.5">
-        <Layers className="h-3.5 w-3.5 text-ink-500" aria-hidden />
-        <h2 className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-ink-700">
-          Total quotation summary · {quotationId}
+      <header className="flex flex-wrap items-center gap-x-3 gap-y-1 border-b border-hairline bg-brand-50 px-4 py-2.5">
+        <Layers className="h-3.5 w-3.5 text-brand-700" aria-hidden />
+        <h2 className="text-[11.5px] font-semibold uppercase tracking-[0.12em] text-brand-800">
+          Final quotation summary · {quotationId}
         </h2>
         <span className="ml-auto flex items-baseline gap-2">
           <span className="text-[10.5px] uppercase tracking-[0.1em] text-ink-500">Quote value</span>
           <span className="text-[19px] font-semibold tabular-nums text-ink-900">
-            {usd(totals.orderValueUsd, 0)}
+            {usd(orderValueUsd, 0)}
           </span>
           <span className="text-[12px] tabular-nums text-ink-500">{inrShort(sellingInr)}</span>
         </span>
@@ -712,8 +980,8 @@ function CombinedSummary({ views, quotationId }: { views: ViewedItem[]; quotatio
       </dl>
 
       <p className="border-t border-hairline px-4 py-2 text-[11px] text-ink-500">
-        Every article's own cost, price and margin stay on its card above — this is what the buyer
-        receives as one quotation.
+        This is what the buyer receives as one quotation. Each article's own cost, price and margin
+        stay on its row above.
       </p>
     </section>
   );

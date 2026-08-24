@@ -9,7 +9,7 @@
 // the same way the roll-up is computed.
 
 import { Fragment, useState } from "react";
-import { BookOpen, Check, ChevronDown, Layers, Plus, Settings2, Trash2 } from "lucide-react";
+import { BookOpen, ChevronRight, Layers, Plus, Settings2, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { MoneyFormatter } from "@/lib/money";
 import type { CostLine, LineSection, OptionGroup } from "@/lib/costLines";
@@ -21,18 +21,13 @@ type Props = {
   money: MoneyFormatter;
   /** the component whose inspector is open */
   selectedId: string | null;
-  onSelect: (componentId: string) => void;
+  /** the row's component opens the inspector; the LINE names which of the
+      component's choices the inspector should offer */
+  onSelect: (componentId: string, line: CostLine) => void;
   /** open the Component Library, optionally scoped to one section */
   onAdd: (section?: LineSection["id"]) => void;
   /** delete a line from the configuration */
   onRemove: (line: CostLine) => void;
-  /** picking an option on a line re-costs immediately */
-  onSelectOption: (
-    kind: CostLine["kind"],
-    componentId: string,
-    itemId: string,
-    optionId: string,
-  ) => void;
   /** heading + total wording for the active view */
   title: string;
   caption: string;
@@ -126,7 +121,14 @@ function FabricRollupRow({
 }
 
 const HEAD =
-  "px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-400 whitespace-nowrap";
+  "px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-400 whitespace-nowrap";
+
+/**
+ * Rate lists are short and already grouped by the row they hang off, so the
+ * sheet keeps the search box out of them entirely — including the eleven-entry
+ * fabric master list, which is the one group that would otherwise cross the
+ * shared default and change how a row that exists today looks.
+ */
 
 export function CostLineTable({
   sections,
@@ -135,7 +137,6 @@ export function CostLineTable({
   onSelect,
   onAdd,
   onRemove,
-  onSelectOption,
   title,
   caption,
   totalLabel,
@@ -156,12 +157,14 @@ export function CostLineTable({
 
   return (
     <section className="flex flex-col overflow-hidden rounded-xl border border-hairline bg-surface shadow-sm">
-      <header className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-hairline px-5 py-3.5">
-        <div>
-          <h2 className="text-[13.5px] font-semibold uppercase tracking-[0.08em] text-ink-900">
+      <header className="flex shrink-0 flex-wrap items-center justify-between gap-x-3 gap-y-1 border-b border-hairline px-5 py-2">
+        {/* Title and caption share one line: the caption is orientation, not a
+            heading of its own, and stacking it cost a row of the sheet. */}
+        <div className="flex min-w-0 flex-wrap items-baseline gap-x-2">
+          <h2 className="text-[13px] font-semibold uppercase tracking-[0.08em] text-ink-900">
             {title}
           </h2>
-          <p className="mt-0.5 text-[12px] text-ink-500">{caption}</p>
+          <p className="truncate text-[11.5px] text-ink-500">{caption}</p>
         </div>
         <div className="flex items-center gap-1.5">
           {!readOnly && (
@@ -267,8 +270,7 @@ export function CostLineTable({
                       money={money}
                       live={live}
                       selected={selectedId === line.componentId}
-                      onSelect={() => onSelect(line.componentId)}
-                      onSelectOption={onSelectOption}
+                      onSelect={() => onSelect(line.componentId, line)}
                       onRemove={() => onRemove(line)}
                       readOnly={readOnly}
                     />
@@ -311,7 +313,7 @@ export function CostLineTable({
         </table>
       </div>
 
-      <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-hairline bg-surface-alt px-5 py-3.5">
+      <footer className="flex shrink-0 items-center justify-between gap-4 border-t border-hairline bg-surface-alt px-5 py-2.5">
         <div>
           <div className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-600">
             {totalLabel} <span className="font-normal text-ink-400">(per pc)</span>
@@ -323,7 +325,7 @@ export function CostLineTable({
         </div>
         <span
           className={cn(
-            "text-[22px] font-semibold tabular-nums transition-colors",
+            "text-[19px] font-semibold tabular-nums transition-colors",
             live ? "text-brand-600" : "text-ink-900",
           )}
         >
@@ -365,7 +367,6 @@ function LineRow({
   live,
   selected,
   onSelect,
-  onSelectOption,
   onRemove,
   readOnly,
 }: {
@@ -376,16 +377,10 @@ function LineRow({
   live?: boolean;
   selected: boolean;
   onSelect: () => void;
-  onSelectOption: (
-    kind: CostLine["kind"],
-    componentId: string,
-    itemId: string,
-    optionId: string,
-  ) => void;
   onRemove: () => void;
   readOnly?: boolean;
 }) {
-  const pad = dense ? "py-1.5" : "py-2.5";
+  const pad = dense ? "py-1" : "py-1.5";
   const cell = cn("px-3 align-middle text-[12.5px] text-ink-700", pad);
 
   return (
@@ -429,24 +424,22 @@ function LineRow({
         </td>
       )}
 
-      {/* Selected Option — a real control where the variable is configurable,
-          plain text where the value comes from the master and is read-only. */}
+      {/* Selected Option — stated, not edited. The choice itself moved to the
+          side panel: clicking the row opens the inspector, whose option cards
+          commit through the same action the old dropdown called. The chevron
+          marks the lines where there IS a choice to make. */}
       <td className={cn(cell, "max-w-[240px]")}>
-        {line.optionGroup && line.target && !readOnly ? (
-          <OptionPicker
-            group={line.optionGroup}
-            onPick={(optionId) =>
-              onSelectOption(line.kind, line.target!.componentId, line.target!.itemId, optionId)
-            }
-          />
-        ) : (
-          <span className="block truncate" title={line.detail}>
-            {readOnly && line.optionGroup
+        <span className="flex items-center gap-1" title={line.detail}>
+          <span className="truncate">
+            {line.optionGroup
               ? (line.optionGroup.options.find((o) => o.id === line.optionGroup?.selectedId)
                   ?.label ?? line.detail)
               : line.detail}
           </span>
-        )}
+          {line.optionGroup && line.target && !readOnly && (
+            <ChevronRight className="h-3 w-3 shrink-0 text-ink-400" aria-hidden />
+          )}
+        </span>
       </td>
 
       {!compact && (
@@ -494,96 +487,5 @@ function LineRow({
         )}
       </td>
     </tr>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * Option picker
- * ------------------------------------------------------------------ */
-
-function OptionPicker({ group, onPick }: { group: OptionGroup; onPick: (id: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const selected = group.options.find((o) => o.id === group.selectedId);
-
-  return (
-    <span className="relative inline-block max-w-full">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        aria-expanded={open}
-        aria-label={`${group.label}: ${selected?.label ?? "not set"}. Change.`}
-        className="inline-flex max-w-full items-center gap-1 rounded-md border border-hairline bg-surface px-2 py-1 text-[12px] text-ink-800 transition-colors hover:border-brand-700 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-      >
-        <span className="truncate">{selected?.label ?? "Select…"}</span>
-        <ChevronDown className="h-3 w-3 shrink-0 text-ink-400" aria-hidden />
-      </button>
-
-      {open && (
-        <>
-          <span
-            className="fixed inset-0 z-30"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-            }}
-          />
-          <span className="absolute left-0 top-full z-40 mt-1 block w-[280px] overflow-hidden rounded-lg border border-hairline bg-surface shadow-2xl">
-            <span className="block border-b border-hairline px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-500">
-              {group.label}
-            </span>
-            <span className="block max-h-[260px] overflow-y-auto p-1">
-              {group.options.map((o) => {
-                const active = o.id === group.selectedId;
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOpen(false);
-                      onPick(o.id);
-                    }}
-                    className={cn(
-                      "flex w-full items-start gap-1.5 rounded px-2 py-1.5 text-left transition-colors",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-                      active ? "bg-brand-50" : "hover:bg-surface-alt",
-                    )}
-                  >
-                    <Check
-                      className={cn(
-                        "mt-0.5 h-3 w-3 shrink-0 text-brand-700",
-                        !active && "opacity-0",
-                      )}
-                      aria-hidden
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span
-                        className={cn(
-                          "block truncate text-[12px]",
-                          active ? "font-medium text-brand-800" : "text-ink-800",
-                        )}
-                      >
-                        {o.label}
-                      </span>
-                      {o.detail && (
-                        <span className="block truncate text-[10.5px] text-ink-400">
-                          {o.detail}
-                        </span>
-                      )}
-                    </span>
-                    <span className="shrink-0 text-[11px] tabular-nums text-ink-500">
-                      ₹{o.rate.toFixed(2)}
-                    </span>
-                  </button>
-                );
-              })}
-            </span>
-          </span>
-        </>
-      )}
-    </span>
   );
 }

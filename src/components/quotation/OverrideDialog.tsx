@@ -15,13 +15,64 @@
  * inline cells use, and the commercial calculation derives everything else
  * exactly as it always did — pin the price and margin follows, set the margin
  * and the price follows.
+ *
+ * An override always carries a reason. A hand-set price with no explanation is
+ * indistinguishable from a typo three weeks later, and the audit trail is the
+ * whole point of routing the decision through a dialog rather than an inline
+ * cell — original value, new value, difference, who, when, why.
  */
 
 import { useEffect, useState } from "react";
 import { RotateCcw, X } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { inr, usd } from "@/lib/commercialProvisions";
+import { inr, pct, usd } from "@/lib/commercialProvisions";
 import type { QuoteRow } from "./QuoteLinesTable";
+
+/**
+ * What the row would leave, given whatever has been typed so far.
+ *
+ * Computed here rather than saved-and-read-back so the reviewer sees the
+ * consequence before committing to it — the same formula `commercialProvisions`
+ * applies when a price is pinned: margin is what the price leaves over the
+ * final cost.
+ */
+function NewMargin({ row, override }: { row: QuoteRow; override: RowOverride }) {
+  const c = row.priced.commercial;
+
+  if (override.clearSelling) {
+    return <span className="text-[11.5px] text-ink-500">back to {pct(c.marginPct, 1)}</span>;
+  }
+
+  if (override.sellingUsd !== undefined && override.sellingUsd > 0) {
+    const sellingInr = override.sellingUsd * c.fxRate;
+    const next = sellingInr > 0 ? ((sellingInr - c.finalCostInr) / sellingInr) * 100 : 0;
+    return (
+      <span className="inline-flex flex-col items-end">
+        <span
+          className={cn(
+            "text-[12.5px] font-semibold tabular-nums",
+            next < 0 ? "text-[var(--color-risk)]" : "text-brand-700",
+          )}
+        >
+          {pct(next, 2)}
+        </span>
+        <span className="text-[10.5px] tabular-nums text-ink-400 line-through">
+          {pct(c.marginPct, 2)}
+        </span>
+      </span>
+    );
+  }
+
+  if (override.marginPct !== undefined) {
+    return (
+      <span className="text-[12.5px] font-semibold tabular-nums text-brand-700">
+        {pct(override.marginPct, 2)}
+      </span>
+    );
+  }
+
+  return <span className="text-[12px] tabular-nums text-ink-400">{pct(c.marginPct, 2)}</span>;
+}
 
 /** What one row is being changed to. Absent fields are left alone. */
 export type RowOverride = {
@@ -48,9 +99,10 @@ export function OverrideDialog({
   initialLineId: string;
   isKit: boolean;
   onClose: () => void;
-  onSave: (overrides: RowOverride[]) => void;
+  onSave: (overrides: RowOverride[], reason: string) => void;
 }) {
   const [draft, setDraft] = useState<Record<string, RowOverride>>({});
+  const [reason, setReason] = useState("");
 
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => e.key === "Escape" && onClose();
@@ -117,6 +169,9 @@ export function OverrideDialog({
                 </th>
                 <th scope="col" className="px-3 py-2 text-right font-medium">
                   Selling price $
+                </th>
+                <th scope="col" className="px-3 py-2 text-right font-medium">
+                  New margin
                 </th>
               </tr>
             </thead>
@@ -222,6 +277,12 @@ export function OverrideDialog({
                         </div>
                       )}
                     </td>
+
+                    {/* What the typed figures leave, before anything is saved —
+                        the answer to "and does that actually fix the margin?" */}
+                    <td className="px-3 py-2.5 text-right">
+                      <NewMargin row={r} override={o} />
+                    </td>
                   </tr>
                 );
               })}
@@ -229,26 +290,49 @@ export function OverrideDialog({
           </table>
         </div>
 
-        <footer className="flex shrink-0 items-center gap-3 border-t border-hairline bg-surface-alt/40 px-5 py-3.5">
-          <span className="text-[12px] text-ink-500">
-            {changed.length === 0
-              ? "Nothing changed yet"
-              : `${changed.length} configuration${changed.length === 1 ? "" : "s"} changed`}
-          </span>
-          <div className="ml-auto flex items-center gap-2">
-            <button
-              onClick={onClose}
-              className="rounded-md border border-hairline bg-surface px-3.5 py-2 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-            >
-              Cancel
-            </button>
-            <button
-              disabled={changed.length === 0}
-              onClick={() => onSave(changed)}
-              className="rounded-md bg-brand-700 px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-            >
-              Save overrides
-            </button>
+        <footer className="shrink-0 border-t border-hairline bg-surface-alt/40 px-5 py-3.5">
+          <label className="block">
+            <span className="text-[11px] font-semibold uppercase tracking-[0.1em] text-ink-600">
+              Reason{" "}
+              <span className="font-normal normal-case tracking-normal text-ink-400">
+                — recorded against the override with your name and the time
+              </span>
+            </span>
+            <textarea
+              rows={2}
+              value={reason}
+              onChange={(e) => setReason(e.target.value)}
+              placeholder="Why is this price being set by hand? e.g. matched to the buyer's counter-offer on the 4,800 pc break."
+              className="mt-1 w-full resize-y rounded-md border border-hairline bg-surface px-3 py-2 text-[12.5px] text-ink-900 placeholder:text-ink-400 focus:border-brand-600 focus:outline-none focus:ring-2 focus:ring-brand-700/20"
+            />
+          </label>
+
+          <div className="mt-3 flex items-center gap-3">
+            <span className="text-[12px] text-ink-500">
+              {changed.length === 0
+                ? "Nothing changed yet"
+                : `${changed.length} configuration${changed.length === 1 ? "" : "s"} changed`}
+            </span>
+            <div className="ml-auto flex items-center gap-2">
+              <button
+                onClick={onClose}
+                className="rounded-md border border-hairline bg-surface px-3.5 py-2 text-[12.5px] font-medium text-ink-700 hover:bg-surface-alt focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                Cancel
+              </button>
+              <button
+                disabled={changed.length === 0 || reason.trim().length === 0}
+                title={
+                  reason.trim().length === 0
+                    ? "An override needs a reason before it can be applied."
+                    : undefined
+                }
+                onClick={() => onSave(changed, reason.trim())}
+                className="rounded-md bg-brand-700 px-4 py-2 text-[12.5px] font-semibold text-white hover:bg-brand-800 disabled:cursor-not-allowed disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
+              >
+                Apply Override
+              </button>
+            </div>
           </div>
         </footer>
       </div>

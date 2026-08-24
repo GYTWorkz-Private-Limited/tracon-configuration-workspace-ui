@@ -8,7 +8,6 @@ import {
   Scripts,
 } from "@tanstack/react-router";
 import { useEffect, type ReactNode } from "react";
-import { Toaster } from "sonner";
 
 import appCss from "../styles.css?url";
 import { ChangesLayer } from "../components/changes/ChangesLayer";
@@ -124,7 +123,6 @@ function RootComponent() {
     <QueryClientProvider client={queryClient}>
       <Outlet />
       <ChangesLayer />
-      <Toaster position="top-right" richColors closeButton />
     </QueryClientProvider>
 
   );

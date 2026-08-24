@@ -17,6 +17,7 @@ import { createFileRoute, notFound, redirect, useNavigate } from "@tanstack/reac
 import { SRFS, INQUIRIES } from "@/lib/inquiries-data";
 import { getPod, podIdForSrf, usePod } from "@/lib/podsStore";
 import { CostingReportWorkspace } from "@/components/config/CostingReportWorkspace";
+import { GlobalNavFrame } from "@/components/layout/GlobalNav";
 
 /** `"£4.80 FOB"` → 4.8. The report prices against a number. */
 function targetPriceOf(input: string): number {
@@ -117,37 +118,41 @@ function CostingReportRoute() {
   const approved = Boolean(search.approvalId) || search.mode === "approved";
 
   return (
-    <CostingReportWorkspace
-      srfId={srf.id}
-      productName={article?.name ?? srf.productName}
-      buyer={pod?.buyer ?? srf.buyer}
-      buyerRef={pod?.buyerRef}
-      podRef={pod?.id ?? podId ?? srf.id}
-      statusLabel={approved ? "Costing approved" : "Costing in progress"}
-      updatedAt={article?.updatedAt}
-      targetPriceUsd={targetPriceOf(srf.targetPrice) || 5.5}
-      articles={pod?.articles.map((a) => ({ id: a.id, name: a.name, size: a.size, moq: a.moq }))}
-      activeArticleId={article?.id}
-      navPodId={pod?.id ?? podId}
-      navArticleId={article?.id}
-      initialApprovalOpen={search.approval === true}
-      onSelectArticle={(id) =>
-        navigate({
-          to: "/costing/$id",
-          params: { id: pod?.articles.find((a) => a.id === id)?.srfRef ?? srf.id },
-          search: { ...search, articleId: id },
-          replace: true,
-        })
-      }
-      onClose={() =>
-        pod && article
-          ? navigate({
-              to: "/config/$podId/$articleId",
-              params: { podId: pod.id, articleId: article.id },
-              search: { sel: search.sel },
-            })
-          : navigate({ to: "/pods" })
-      }
-    />
+    /* The report paints itself over the viewport, so it is framed rather than
+       preceded — otherwise the global strip would be underneath it. */
+    <GlobalNavFrame>
+      <CostingReportWorkspace
+        srfId={srf.id}
+        productName={article?.name ?? srf.productName}
+        buyer={pod?.buyer ?? srf.buyer}
+        buyerRef={pod?.buyerRef}
+        podRef={pod?.id ?? podId ?? srf.id}
+        statusLabel={approved ? "Costing approved" : "Costing in progress"}
+        updatedAt={article?.updatedAt}
+        targetPriceUsd={targetPriceOf(srf.targetPrice) || 5.5}
+        articles={pod?.articles.map((a) => ({ id: a.id, name: a.name, size: a.size, moq: a.moq }))}
+        activeArticleId={article?.id}
+        navPodId={pod?.id ?? podId}
+        navArticleId={article?.id}
+        initialApprovalOpen={search.approval === true}
+        onSelectArticle={(id) =>
+          navigate({
+            to: "/costing/$id",
+            params: { id: pod?.articles.find((a) => a.id === id)?.srfRef ?? srf.id },
+            search: { ...search, articleId: id },
+            replace: true,
+          })
+        }
+        onClose={() =>
+          pod && article
+            ? navigate({
+                to: "/config/$podId/$articleId",
+                params: { podId: pod.id, articleId: article.id },
+                search: { sel: search.sel },
+              })
+            : navigate({ to: "/pods" })
+        }
+      />
+    </GlobalNavFrame>
   );
 }

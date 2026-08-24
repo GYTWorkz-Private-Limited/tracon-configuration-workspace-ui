@@ -8,8 +8,9 @@
 // Adding is a deliberate second step: pick where it goes, then Add to sheet.
 
 import { useMemo, useState } from "react";
-import { BookOpen, Plus, Search, X } from "lucide-react";
+import { BookOpen, Plus, X } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { FilterChip, SearchField } from "@/components/ui/pickers";
 import {
   FABRIC_PATHS,
   FABRIC_SLOTS,
@@ -116,16 +117,12 @@ export function ComponentLibraryModal({ open, onClose, section, targets, onAdd }
 
         {/* ---- search + kind filter ---- */}
         <div className="flex shrink-0 flex-wrap items-center gap-2 border-b border-hairline px-5 py-2.5">
-          <label className="relative flex min-w-[260px] flex-1 items-center">
-            <Search className="pointer-events-none absolute left-2.5 h-3.5 w-3.5 text-ink-400" />
-            <span className="sr-only">Search the component library</span>
-            <input
-              value={q}
-              onChange={(e) => setQ(e.target.value)}
-              placeholder="Search by name, code, composition, GSM, supplier, slot…"
-              className="w-full rounded-md border border-hairline bg-surface py-1.5 pl-8 pr-2 text-[12.5px] text-ink-900 placeholder:text-ink-400 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-            />
-          </label>
+          <SearchField
+            value={q}
+            onChange={setQ}
+            label="Search the component library"
+            placeholder="Search by name, code, composition, GSM, supplier, slot…"
+          />
           <div className="flex flex-wrap items-center gap-1">
             <FilterChip active={kind === "all"} onClick={() => setKind("all")}>
               All ({pool.length})
@@ -384,32 +381,5 @@ function Block({ title, children }: { title: string; children: React.ReactNode }
       </h4>
       {children}
     </section>
-  );
-}
-
-function FilterChip({
-  active,
-  onClick,
-  children,
-}: {
-  active: boolean;
-  onClick: () => void;
-  children: React.ReactNode;
-}) {
-  return (
-    <button
-      type="button"
-      onClick={onClick}
-      aria-pressed={active}
-      className={cn(
-        "rounded-full border px-2.5 py-1 text-[11.5px] transition-colors",
-        "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-        active
-          ? "border-brand-700 bg-brand-50 font-medium text-brand-800"
-          : "border-hairline bg-surface text-ink-600 hover:bg-surface-alt",
-      )}
-    >
-      {children}
-    </button>
   );
 }

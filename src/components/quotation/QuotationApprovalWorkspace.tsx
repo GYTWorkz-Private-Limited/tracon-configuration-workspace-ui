@@ -1,19 +1,23 @@
 /**
  * Approval — the step after Quotation.
  *
- * Left (70%): the SAME quotation the Quotation Workspace built, rendered
- * read-only — every product and kit, its scenario/variant/option, MOQ, direct
- * cost, commercial costs, final cost, selling price, margin and quoted value.
- * Nothing here is re-priced or re-typed; it comes from `quotationView`, the
- * same read every other quotation surface uses.
+ * Left: the SAME quotation the Quotation Workspace built, rendered by the SAME
+ * `WorkingSheet` component, read-only. Not a second rendering of the same
+ * figures: an approver who is shown a different-looking document from the one
+ * that was prepared has to work out for themselves whether it is the same
+ * quotation, and a bespoke approval view is exactly where the two drift apart.
  *
- * Right (30%): reviewer assignment — who approves, submit, status. The
- * mechanics mirror the existing costing sign-off flow (same team shape, same
- * submit-then-track pattern) so approval reads as one consistent idea used
- * at two stages of the workflow, not two unrelated ones.
+ * Right: the workflow — who it went to, who has acted, what they said, and the
+ * history. The mechanics mirror the existing costing sign-off flow (same team
+ * shape, same submit-then-track pattern) so approval reads as one consistent
+ * idea used at two stages of the workflow, not two unrelated ones.
+ *
+ * The split is deliberate: LEFT is the thing being decided, RIGHT is the
+ * decision process around it.
  */
 
 import { useState } from "react";
+import { useNavigate } from "@tanstack/react-router";
 import {
   Boxes,
   Check,
@@ -46,6 +50,7 @@ import {
   workingVersionNo,
   type VersionLine,
 } from "@/lib/quotationHistory";
+import { WorkingSheet } from "./WorkingSheet";
 import { ConfigChips } from "./ConfigChips";
 import { KitComposition } from "./QuoteItemCard";
 import { QuotationHistoryPanel } from "./QuotationHistoryPanel";
@@ -104,6 +109,7 @@ export function QuotationApprovalWorkspace({
    */
   onRequote?: () => void;
 }) {
+  const navigate = useNavigate();
   const approval = useQuotationApproval(quotationId);
   const history = useQuotationHistory(quotationId);
   const totals = totalsOf(views);
@@ -135,8 +141,12 @@ export function QuotationApprovalWorkspace({
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div className="flex items-start gap-3">
             <button
-              onClick={onClose}
-              aria-label="Back to quotation"
+              // Before sending, closing returns to the quotation being drafted.
+              // Once it is out for approval this workspace is done — closing
+              // lands on the costing dashboard, not back inside a read-only
+              // loop of the same document.
+              onClick={() => (approval.submitted ? navigate({ to: "/pods" }) : onClose())}
+              aria-label={approval.submitted ? "Close — back to costing dashboard" : "Back to quotation"}
               className="mt-1 rounded-md p-1 text-ink-500 hover:bg-surface-alt hover:text-ink-900"
             >
               <X className="h-4 w-4" />
@@ -204,10 +214,10 @@ export function QuotationApprovalWorkspace({
       />
 
       <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* LEFT — the quotation, read-only */}
+        {/* LEFT — the quotation, in the very sheet it was prepared in */}
         <div className="min-w-0 flex-1 overflow-y-auto">
-          <div className="mx-auto max-w-[1000px] space-y-4 px-6 py-6 lg:px-8">
-            <div className="flex items-center gap-2">
+          <div className="mx-auto max-w-[1100px] px-6 py-5 lg:px-8">
+            <div className="mb-3 flex items-center gap-2">
               <h2 className="text-[13px] font-semibold text-ink-900">Quotation under review</h2>
               <span className="rounded-full bg-ink-100 px-2 py-0.5 text-[11px] text-ink-600">
                 read only
@@ -219,7 +229,17 @@ export function QuotationApprovalWorkspace({
                 This quotation has no items.
               </p>
             ) : (
-              views.map((v) => <ApprovalItem key={v.item.id} view={v} />)
+              <WorkingSheet
+                views={views}
+                pod={pod}
+                quotationId={quotationId}
+                // The approver reads and decides; they do not edit the sheet.
+                // A change to the quotation is an Override, which is a
+                // recorded decision rather than a quiet correction.
+                readOnly
+                onOverride={() => undefined}
+                onReject={() => undefined}
+              />
             )}
           </div>
         </div>
@@ -302,9 +322,14 @@ export function QuotationApprovalWorkspace({
               </>
             ) : (
               <div className="space-y-2">
+                {/* Once sent, the panel only reports. The verdict is the
+                    REVIEWERS' to give from their own seats — the sender does
+                    not carry Approve / Override / Reject on the screen they
+                    submitted from. */}
                 <p className="text-center text-[11.5px] text-ink-500">
                   Sent {new Date(approval.submittedAt ?? Date.now()).toLocaleString("en-GB")}
                 </p>
+
                 <button
                   type="button"
                   onClick={() => setHistoryOpen(true)}

@@ -1,22 +1,8 @@
 import { Link, useRouterState } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import {
-  Calculator,
-  FileText,
-  Settings,
-  HelpCircle,
-  Bell,
-  ChevronDown,
-  PanelLeft,
-} from "lucide-react";
+import { Calculator, Bell, ChevronDown, PanelLeft } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { usePods } from "@/lib/podsStore";
-import { useAllQuoteDrafts } from "@/lib/quoteDraftStore";
-
-const bottomNav = [
-  { title: "Settings", url: "/settings", icon: Settings },
-  { title: "Help", url: "/help", icon: HelpCircle },
-];
+import { NavMenuButton, useNavDestinations } from "./GlobalNav";
 
 function NavItem({
   to,
@@ -81,8 +67,6 @@ function loadCollapsed(): boolean {
 export function AppShell({ children }: { children: React.ReactNode }) {
   const currentPath = useRouterState({ select: (r) => r.location.pathname });
   const isActive = (p: string) => currentPath === p || currentPath.startsWith(p + "/");
-  const [hydrated, setHydrated] = useState(false);
-  useEffect(() => setHydrated(true), []);
   // Start expanded on the server pass; the stored choice applies after
   // hydration so both passes render the same markup.
   const [collapsed, setCollapsed] = useState(false);
@@ -97,25 +81,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       return !c;
     });
   };
-  const pods = usePods();
-  const quotations = useAllQuoteDrafts();
-  const activePods = pods.filter(
-    (p) => p.status === "in_progress" || p.status === "pending_approval",
-  ).length;
-  const badgeOf = (n: number) => (hydrated && n > 0 ? n : undefined);
   // Quotation is still a STEP of the costing workflow — it is reached from the
   // Costing Report and nothing here creates one. What the sidebar offers is
   // the register: a way to FIND a quotation once it exists, which the POD it
-  // was built in cannot do.
-  const primaryNav: { title: string; url: string; icon: typeof Calculator; badge?: number }[] = [
-    { title: "Costing", url: "/pods", icon: Calculator, badge: badgeOf(activePods) },
-    {
-      title: "Quotations",
-      url: "/quotations",
-      icon: FileText,
-      badge: badgeOf(quotations.length),
-    },
-  ];
+  // was built in cannot do. The list is shared with the workspace drawer so
+  // the two shells can never drift apart.
+  const { primary: primaryNav, bottom: bottomNav } = useNavDestinations();
 
   return (
     <div className="min-h-screen w-full bg-canvas">
@@ -187,6 +158,12 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <div className={cn(collapsed ? "lg:pl-[60px]" : "lg:pl-[236px]")}>
         {/* Top nav */}
         <header className="sticky top-0 z-20 flex h-14 items-center gap-4 border-b border-hairline bg-canvas/80 px-6 backdrop-blur-md lg:px-10">
+          {/* The same hamburger and the same drawer as the full-screen
+              workspaces — below `lg` this is the only navigation there is,
+              since the sidebar is hidden, and above it the drawer stays as the
+              one affordance a user has to learn. The button beside it is a
+              different job: it resizes the rail, it does not open a menu. */}
+          <NavMenuButton className="-mr-2.5" />
           <button
             type="button"
             onClick={toggleCollapsed}

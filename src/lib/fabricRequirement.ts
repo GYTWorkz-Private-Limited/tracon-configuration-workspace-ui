@@ -122,12 +122,42 @@ export function nextTierFor(tiers: RateTier[] | undefined, metres: number): Rate
 /** Articles that share a fabric pool. Kits contribute through their members. */
 function costableArticles(pod: Pod): Article[] {
   const out: Article[] = [];
+  const seen = new Set<string>();
+
   for (const a of pod.articles ?? []) {
-    // A kit is not a thing that consumes fabric — its members are, and they
-    // are already articles on the POD. Counting both would double the metres.
     if (a.type === "kit") continue;
     out.push(a);
+    seen.add(a.id);
   }
+
+  /**
+   * A kit itself consumes nothing — its MEMBERS do. Where a member is also a
+   * standalone article on the POD it has already been counted above, and
+   * counting it twice would double the metres; where it is not — every kit
+   * built through the wizard or the Add Kit drawer keeps its members inside
+   * `kitItems` only — it would otherwise consume no cloth at all, and the set
+   * would show no fabric requirement despite being cut from it.
+   */
+  for (const kit of pod.articles ?? []) {
+    if (kit.type !== "kit") continue;
+    for (const member of kit.kitItems ?? []) {
+      if (seen.has(member.id)) continue;
+      seen.add(member.id);
+      out.push({
+        id: member.id,
+        name: member.name,
+        size: member.size ?? kit.size,
+        // A member without its own MOQ is bought at the set's rate: one set
+        // needs `qty` of it, so the piece count follows the sets ordered.
+        moq: member.moq ?? kit.moq,
+        status: member.status ?? "not_started",
+        srfRef: member.srfRef ?? kit.srfRef,
+        updatedAt: kit.updatedAt,
+        image: member.image,
+      });
+    }
+  }
+
   return out;
 }
 

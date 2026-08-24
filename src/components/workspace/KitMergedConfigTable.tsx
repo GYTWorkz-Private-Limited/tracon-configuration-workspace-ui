@@ -11,11 +11,11 @@
  *
  * It is not a read-only mirror. A table you can only look at sends the user
  * back to the tabs to change anything, which is the very trip this screen
- * exists to remove — so a cell carries the SAME dropdown its own sheet has,
- * and a section can take a new component from the library on one member or on
- * every member at once. Adding to the whole set in one act is the only place in
- * the product where "all three placemats get this label" is a single decision
- * rather than three.
+ * exists to remove — so a cell opens its component in the inspector drawer,
+ * where the SAME option choice its own sheet offers is made, and each
+ * member's column can take a new component from the library on its own. Adding
+ * belongs to one article because a component is an article's decision; the
+ * column the user reaches for is the article they mean.
  *
  * Nothing here is a second copy of any number, and nothing here is a second
  * copy of any behaviour: rows are cut from the lines each member's own sheet
@@ -25,7 +25,7 @@
  */
 
 import { Fragment, useMemo, useState } from "react";
-import { Check, ChevronDown, Package, Plus } from "lucide-react";
+import { ChevronRight, Package, Plus } from "lucide-react";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
 import type { KitItem, Pod } from "@/lib/podsStore";
@@ -38,7 +38,7 @@ import {
 import type { ArticleCosting } from "@/components/workspace/ArticleCostingWorkspace";
 import { ComponentLibraryModal } from "@/components/workspace/ComponentLibraryModal";
 import { FabricDetailModal } from "@/components/workspace/FabricDetailModal";
-import type { CostLine, LineKind, LineSection, OptionGroup } from "@/lib/costLines";
+import type { CostLine, LineKind, LineSection } from "@/lib/costLines";
 import type { LibraryItem } from "@/lib/library";
 
 /* ------------------------------------------------------------------ *
@@ -54,7 +54,7 @@ type Cell = {
   componentId: string;
   /**
    * The line this cell can reconfigure. Where a member spends twice under one
-   * variable name the FIRST line owns the dropdown — the summed figure is the
+   * variable name the FIRST line owns the choice — the summed figure is the
    * honest cost, but only a single line can be a single decision.
    */
   line: CostLine;
@@ -224,11 +224,13 @@ const inr2 = (n: number) =>
  */
 const inrWhole = (n: number) => `₹${Math.round(n).toLocaleString("en-IN")}`;
 
+
+
 const HEAD = "px-3 py-2 text-[10px] font-semibold uppercase tracking-[0.14em] text-ink-400";
 const CELL = "px-3 py-2 align-top text-[12px]";
 
-/** Which members a library add is destined for, and from which section. */
-type AddFlow = { section: LineKind; memberIds: string[] };
+/** Which member a library add is destined for, and from which section. */
+type AddFlow = { section: LineKind; memberId: string };
 
 export function KitMergedConfigTable({
   pod,
@@ -241,8 +243,8 @@ export function KitMergedConfigTable({
   pod: Pod;
   members: KitItem[];
   costed: Record<string, ArticleCosting>;
-  /** open the member's full sheet with this line's component selected */
-  onFocusLine: (memberId: string, componentId: string) => void;
+  /** open this line's component master for that member (the inspector drawer) */
+  onFocusLine: (memberId: string, componentId: string, lineId?: string) => void;
   /** open the member's sheet with nothing in particular selected */
   onOpenMember?: (memberId: string) => void;
 }) {
@@ -250,13 +252,13 @@ export function KitMergedConfigTable({
   const fabrics = useMemo(() => kitFabrics(pod, members), [pod, members]);
 
   /**
-   * The add flow is two decisions — WHICH articles, then WHICH master — and it
-   * is deliberately in that order: the member choice is about the set, and
-   * asking it first means the library browser stays the same screen the sheet
-   * opens, with no extra step bolted onto its footer.
+   * The add flow carries no member question of its own: the affordance lives in
+   * the member's OWN COLUMN of the section header, so the column that was
+   * clicked already says which article is being added to. That leaves exactly
+   * one decision — which master — and the library browser is the whole flow,
+   * the same single screen the article sheet opens.
    */
   const [flow, setFlow] = useState<AddFlow | null>(null);
-  const [libraryOpen, setLibraryOpen] = useState(false);
   /** which cloth's full breakdown is open, if any */
   const [fabricDetail, setFabricDetail] = useState<FabricRequirement | null>(null);
 
@@ -267,48 +269,29 @@ export function KitMergedConfigTable({
     0,
   );
 
-  const chosen = flow ? members.filter((m) => flow.memberIds.includes(m.id)) : [];
+  const target = flow ? members.find((m) => m.id === flow.memberId) : undefined;
 
   /**
-   * Attach targets are offered by NAME, not by id: "Body Fabric" on the
-   * placemat and "Body Fabric" on the runner are different component ids for
-   * what the costing team reads as one part, and a set-wide add has to mean
-   * the part, not one article's row of the database.
+   * The attach targets are that member's own components, by id — one article is
+   * being configured, so there is nothing to reconcile across the set and a
+   * process or trim lands on exactly the part the user picked.
    */
-  const unionTargets = (() => {
-    const byName = new Map<string, string>();
-    for (const m of chosen) {
-      for (const t of costed[m.id]?.actions.attachTargets ?? []) {
-        if (!byName.has(t.name)) byName.set(t.name, t.name);
-      }
-    }
-    return [...byName.keys()].map((name) => ({ id: name, name }));
-  })();
+  const addTargets = flow ? (costed[flow.memberId]?.actions.attachTargets ?? []) : [];
 
-  const addToChosen = (item: LibraryItem, targetName: string | null, slot: string) => {
-    if (!flow) return;
-    const landed: string[] = [];
-    for (const m of chosen) {
-      const actions = costed[m.id]?.actions;
-      if (!actions) continue;
-      // A member without that part still gets product-level items; a process or
-      // trim with nowhere to attach is skipped rather than guessed at.
-      const target = targetName
-        ? (actions.attachTargets.find((t) => t.name === targetName)?.id ?? null)
-        : null;
-      actions.addFromLibrary(item, target, slot);
-      landed.push(m.name);
-    }
-    setLibraryOpen(false);
+  const addToMember = (item: LibraryItem, targetId: string | null, slot: string) => {
+    const actions = flow ? costed[flow.memberId]?.actions : undefined;
     setFlow(null);
-    if (landed.length) toast.success(`${item.name} added to ${landed.join(", ")}`);
+    if (!actions || !target) return;
+    actions.addFromLibrary(item, targetId, slot);
+    toast.success(`${item.name} added to ${target.name}`);
   };
 
   return (
     <div className="overflow-hidden rounded-xl border border-hairline bg-surface">
       <p className="border-b border-hairline px-4 py-2.5 text-[11.5px] text-ink-500">
         One sheet for the whole set — work down the variables once and read every article side by
-        side. Change any cell here, or add a component to one article or all of them.
+        side. Change any cell here, click one to inspect its component master, or add a component to
+        a single article from its own column.
       </p>
 
       <div className="overflow-x-auto">
@@ -390,24 +373,7 @@ export function KitMergedConfigTable({
                 fabrics={section.id === "material" ? fabrics : []}
                 onFabricDetail={setFabricDetail}
                 onFocusLine={onFocusLine}
-                flow={flow?.section === section.id ? flow : null}
-                onStartAdd={() =>
-                  setFlow({ section: section.id, memberIds: members.map((m) => m.id) })
-                }
-                onCancelAdd={() => setFlow(null)}
-                onToggleMember={(id) =>
-                  setFlow((f) =>
-                    !f
-                      ? f
-                      : {
-                          ...f,
-                          memberIds: f.memberIds.includes(id)
-                            ? f.memberIds.filter((x) => x !== id)
-                            : [...f.memberIds, id],
-                        },
-                  )
-                }
-                onOpenLibrary={() => setLibraryOpen(true)}
+                onStartAdd={(memberId) => setFlow({ section: section.id, memberId })}
               />
             ))}
           </tbody>
@@ -451,11 +417,11 @@ export function KitMergedConfigTable({
       )}
 
       <ComponentLibraryModal
-        open={libraryOpen && Boolean(flow)}
-        onClose={() => setLibraryOpen(false)}
+        open={Boolean(flow)}
+        onClose={() => setFlow(null)}
         section={flow?.section ?? null}
-        targets={unionTargets}
-        onAdd={addToChosen}
+        targets={addTargets}
+        onAdd={addToMember}
       />
     </div>
   );
@@ -468,11 +434,7 @@ function SectionRows({
   fabrics,
   onFabricDetail,
   onFocusLine,
-  flow,
   onStartAdd,
-  onCancelAdd,
-  onToggleMember,
-  onOpenLibrary,
 }: {
   section: MergedSection;
   members: KitItem[];
@@ -480,64 +442,37 @@ function SectionRows({
   /** the cloths this section's rows consume — Raw Material only, empty elsewhere */
   fabrics: KitFabric[];
   onFabricDetail: (req: FabricRequirement) => void;
-  onFocusLine: (memberId: string, componentId: string) => void;
-  /** the in-progress add, when it belongs to THIS section */
-  flow: AddFlow | null;
-  onStartAdd: () => void;
-  onCancelAdd: () => void;
-  onToggleMember: (memberId: string) => void;
-  onOpenLibrary: () => void;
+  onFocusLine: (memberId: string, componentId: string, lineId?: string) => void;
+  /** open the library for ONE member, scoped to this section */
+  onStartAdd: (memberId: string) => void;
 }) {
   return (
     <>
       {/* The add sits on the SECTION header because the section is what decides
           which slice of the library is on offer — the same rule the sheet's own
-          per-section add follows. */}
+          per-section add follows. But it sits once PER COLUMN, because adding a
+          component is an article's decision: the column the user reaches for is
+          the article they mean, so no separate "which articles" question has to
+          be asked and then read back. */}
       <tr className="border-b border-hairline bg-surface-alt/60">
         <td className="sticky left-0 z-10 bg-surface-alt px-3 py-1.5 text-[10.5px] font-semibold uppercase tracking-[0.12em] text-ink-500">
           {section.label}
         </td>
-        <td colSpan={members.length} className="px-3 py-1.5">
-          {flow ? (
-            <span className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11.5px] text-ink-700">
-              <span className="font-medium text-ink-900">Add to</span>
-              {members.map((m) => (
-                <label key={m.id} className="flex items-center gap-1.5">
-                  <input
-                    type="checkbox"
-                    checked={flow.memberIds.includes(m.id)}
-                    onChange={() => onToggleMember(m.id)}
-                    className="h-3.5 w-3.5 accent-brand-700"
-                  />
-                  {m.name}
-                </label>
-              ))}
-              <button
-                type="button"
-                disabled={flow.memberIds.length === 0}
-                onClick={onOpenLibrary}
-                className="rounded-md border border-brand-700 bg-brand-50 px-2 py-0.5 font-medium text-brand-800 transition-colors hover:bg-brand-100 disabled:opacity-40 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-              >
-                Choose from library
-              </button>
-              <button
-                type="button"
-                onClick={onCancelAdd}
-                className="rounded px-1.5 py-0.5 text-ink-500 hover:text-ink-900 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-              >
-                Cancel
-              </button>
-            </span>
-          ) : (
+        {members.map((m) => (
+          <td key={m.id} className="px-3 py-1.5">
             <button
               type="button"
-              onClick={onStartAdd}
+              onClick={() => onStartAdd(m.id)}
+              title={`Add ${section.label} to ${m.name}`}
+              // Ten "Add" buttons read alike to a screen reader; the column is
+              // the whole point of this control, so it belongs in the name.
+              aria-label={`Add ${section.label} to ${m.name}`}
               className="inline-flex items-center gap-1 rounded px-1 py-0.5 text-[11px] font-medium text-ink-500 transition-colors hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
             >
-              <Plus className="h-3 w-3" aria-hidden /> Add component
+              <Plus className="h-3 w-3" aria-hidden /> Add
             </button>
-          )}
-        </td>
+          </td>
+        ))}
       </tr>
       {section.rows.map((row) => {
         // The row label steers to the FIRST member that has this variable —
@@ -548,7 +483,10 @@ function SectionRows({
             <td className={cn(CELL, "sticky left-0 z-10 bg-surface")}>
               <button
                 type="button"
-                onClick={() => first && onFocusLine(first.id, row.cells[first.id].componentId)}
+                onClick={() =>
+                  first &&
+                  onFocusLine(first.id, row.cells[first.id].componentId, row.cells[first.id].line.id)
+                }
                 className="rounded text-left font-medium text-ink-900 hover:text-brand-700 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
               >
                 {row.name}
@@ -563,7 +501,7 @@ function SectionRows({
                       cell={cell}
                       memberName={m.name}
                       actions={costed[m.id]?.actions}
-                      onOpenSheet={() => onFocusLine(m.id, cell.componentId)}
+                      onOpenSheet={() => onFocusLine(m.id, cell.componentId, cell.line.id)}
                     />
                   ) : (
                     <span className="block px-3 py-2 text-ink-400">—</span>
@@ -703,9 +641,12 @@ function sectionTotalFor(section: MergedSection, memberId: string) {
 
 /**
  * A configurable line becomes a picker; a line with nothing to choose stays the
- * plain reading it always was. Both keep the door to the full sheet, but the
- * door moved to its own small control — a dropdown inside a navigation button
- * would make every attempt to change a value a navigation instead.
+ * plain reading it always was. Either way the WHOLE cell is the door to that
+ * component's master in the inspector drawer, exactly as a row on the
+ * single-article sheet opens its component in the inspector — the kit table
+ * should not be the one place where a costing line is not clickable. The
+ * dropdown keeps its own clicks (it already stops them propagating), so
+ * changing a value never turns into a navigation.
  */
 function MemberCell({
   cell,
@@ -719,136 +660,31 @@ function MemberCell({
   onOpenSheet: () => void;
 }) {
   const { line } = cell;
-  const canPick = Boolean(line.optionGroup && line.target && actions);
+  const configurable = Boolean(line.optionGroup && line.target && actions);
 
-  if (!canPick) {
-    return (
-      <button
-        type="button"
-        onClick={onOpenSheet}
-        title={`Open ${memberName} on this line`}
-        className="block h-full w-full rounded px-3 py-2 text-left transition-colors hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
-      >
-        <span className="block truncate text-[12px] text-ink-800">{cell.detail}</span>
-        <span className="block text-[10.5px] tabular-nums text-ink-500">
-          {cell.rate} · <span className="font-medium text-ink-700">{inr2(cell.cost)} / pc</span>
-        </span>
-      </button>
-    );
-  }
-
-  // No second control beside the dropdown: this table IS where a kit is
-  // configured, so the cell's only job is to change the value. The full sheet
-  // stays one click away on the row label, which is the same door for every
-  // member and never competes with the picker for the same pixels.
+  // One shape for every cell: the reading, and the door to the inspector —
+  // which now owns the option choice the cell's dropdown used to carry.
   return (
-    <div className="px-3 py-2">
-      <OptionPicker
-        group={line.optionGroup as OptionGroup}
-        onPick={(optionId) =>
-          actions?.selectOption(line.kind, line.target!.componentId, line.target!.itemId, optionId)
-        }
-      />
-      <span className="mt-0.5 block text-[10.5px] tabular-nums text-ink-500">
+    <button
+      type="button"
+      onClick={onOpenSheet}
+      title={
+        configurable
+          ? "Choose this component's option in the inspector"
+          : "View this component's master"
+      }
+      aria-label={`${cell.detail} on ${memberName}. Open this component in the inspector.`}
+      className="block h-full w-full rounded px-3 py-2 text-left transition-colors hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-brand-700"
+    >
+      <span className="flex items-center gap-1">
+        <span className="truncate text-[12px] text-ink-800">{cell.detail}</span>
+        {configurable && (
+          <ChevronRight className="h-3 w-3 shrink-0 text-ink-400" aria-hidden />
+        )}
+      </span>
+      <span className="block text-[10.5px] tabular-nums text-ink-500">
         {cell.rate} · <span className="font-medium text-ink-700">{inr2(cell.cost)} / pc</span>
       </span>
-    </div>
-  );
-}
-
-/* ------------------------------------------------------------------ *
- * Option picker — the sheet's control, rebuilt here
- *
- * It is a copy of `CostLineTable`'s picker because that one is private to the
- * sheet's row markup (spans inside a <td>, no popover portal). Sharing it would
- * mean exporting the sheet's internals to serve a different table; the honest
- * cost is a small duplicated control, and the behaviour it must match — label,
- * chevron, check marks, click-away — is entirely visible here.
- * ------------------------------------------------------------------ */
-
-function OptionPicker({ group, onPick }: { group: OptionGroup; onPick: (id: string) => void }) {
-  const [open, setOpen] = useState(false);
-  const selected = group.options.find((o) => o.id === group.selectedId);
-
-  return (
-    <span className="relative inline-block min-w-0 flex-1">
-      <button
-        type="button"
-        onClick={(e) => {
-          e.stopPropagation();
-          setOpen((v) => !v);
-        }}
-        aria-expanded={open}
-        aria-label={`${group.label}: ${selected?.label ?? "not set"}. Change.`}
-        className="inline-flex max-w-full items-center gap-1 rounded-md border border-hairline bg-surface px-2 py-1 text-[12px] text-ink-800 transition-colors hover:border-brand-700 hover:bg-brand-50 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700"
-      >
-        <span className="truncate">{selected?.label ?? "Select…"}</span>
-        <ChevronDown className="h-3 w-3 shrink-0 text-ink-400" aria-hidden />
-      </button>
-
-      {open && (
-        <>
-          <span
-            className="fixed inset-0 z-30"
-            onClick={(e) => {
-              e.stopPropagation();
-              setOpen(false);
-            }}
-          />
-          <span className="absolute left-0 top-full z-40 mt-1 block w-[280px] overflow-hidden rounded-lg border border-hairline bg-surface shadow-2xl">
-            <span className="block border-b border-hairline px-3 py-1.5 text-[10px] font-semibold uppercase tracking-[0.1em] text-ink-500">
-              {group.label}
-            </span>
-            <span className="block max-h-[260px] overflow-y-auto p-1">
-              {group.options.map((o) => {
-                const active = o.id === group.selectedId;
-                return (
-                  <button
-                    key={o.id}
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      setOpen(false);
-                      onPick(o.id);
-                    }}
-                    className={cn(
-                      "flex w-full items-start gap-1.5 rounded px-2 py-1.5 text-left transition-colors",
-                      "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-brand-700",
-                      active ? "bg-brand-50" : "hover:bg-surface-alt",
-                    )}
-                  >
-                    <Check
-                      className={cn(
-                        "mt-0.5 h-3 w-3 shrink-0 text-brand-700",
-                        !active && "opacity-0",
-                      )}
-                      aria-hidden
-                    />
-                    <span className="min-w-0 flex-1">
-                      <span
-                        className={cn(
-                          "block truncate text-[12px]",
-                          active ? "font-medium text-brand-800" : "text-ink-800",
-                        )}
-                      >
-                        {o.label}
-                      </span>
-                      {o.detail && (
-                        <span className="block truncate text-[10.5px] text-ink-400">
-                          {o.detail}
-                        </span>
-                      )}
-                    </span>
-                    <span className="shrink-0 text-[11px] tabular-nums text-ink-500">
-                      ₹{o.rate.toFixed(2)}
-                    </span>
-                  </button>
-                );
-              })}
-            </span>
-          </span>
-        </>
-      )}
-    </span>
+    </button>
   );
 }

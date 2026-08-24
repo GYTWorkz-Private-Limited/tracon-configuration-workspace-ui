@@ -37,8 +37,11 @@ export function ProductHeader({
   };
 
   return (
-    <header className="shrink-0 border-b border-hairline bg-surface px-6 py-3 lg:px-8">
-      <div className="flex flex-wrap items-center justify-between gap-x-5 gap-y-3">
+    <header className="shrink-0 border-b border-hairline bg-surface px-6 py-2 lg:px-8">
+      {/* One row, not two: the identity block shrinks and its meta line
+          truncates rather than wrapping the actions onto a row of their own —
+          that wrap was costing ~44px of table on every laptop-width screen. */}
+      <div className="flex items-center justify-between gap-x-4">
         <div className="flex min-w-0 items-center gap-3">
           {backTo}
 
@@ -49,7 +52,7 @@ export function ProductHeader({
               onClick={() => inputRef.current?.click()}
               aria-label={image ? "Replace product image" : "Upload product image"}
               className={cn(
-                "flex h-12 w-12 items-center justify-center overflow-hidden rounded-md border bg-surface-alt",
+                "flex h-9 w-9 items-center justify-center overflow-hidden rounded-md border bg-surface-alt",
                 image
                   ? "border-hairline"
                   : "border-dashed border-ink-300 text-ink-400 hover:text-ink-700",
@@ -76,7 +79,7 @@ export function ProductHeader({
 
           <div className="min-w-0">
             <div className="flex items-center gap-2.5">
-              <h1 className="truncate text-[18px] font-semibold tracking-tight text-ink-900">
+              <h1 className="truncate text-[16px] font-semibold tracking-tight text-ink-900">
                 {article.name}
               </h1>
               <span className="inline-flex shrink-0 items-center gap-1.5 rounded-full bg-ink-100 px-2 py-0.5 text-[11px] font-medium text-ink-700">
@@ -84,18 +87,23 @@ export function ProductHeader({
                 {mounted ? ARTICLE_STATUS_LABEL[article.status] : ""}
               </span>
             </div>
-            <div className="mt-1 flex flex-wrap items-center gap-x-2.5 gap-y-1 text-[12px] text-ink-500">
-              <span className="rounded bg-surface-alt px-1.5 py-0.5 text-ink-600">
+            {/* One truncating text flow, not a flex row: the facts are ordered
+                most- to least-load-bearing and the browser ends the line with
+                an ellipsis, so a narrow window never slices a value mid-word. */}
+            <div className="mt-0.5 truncate text-[11.5px] text-ink-500">
+              <span className="mr-1.5 rounded bg-surface-alt px-1.5 py-0.5 text-ink-600">
                 # {article.articleNo ?? article.id}
               </span>
-              <span className="rounded bg-surface-alt px-1.5 py-0.5 text-ink-600"># {pod.id}</span>
+              <span className="mr-1.5 rounded bg-surface-alt px-1.5 py-0.5 text-ink-600">
+                # {pod.id}
+              </span>
               <Meta label="Size" value={article.size || "—"} />
               <Dot />
               <Meta label="MOQ" value={article.moq || "—"} />
               <Dot />
-              <Meta label="Currency" value={article.currency || "—"} />
-              <Dot />
               <Meta label="Buyer" value={pod.buyer} />
+              <Dot />
+              <Meta label="Currency" value={article.currency || "—"} />
               <Dot />
               <span>last updated {article.updatedAt}</span>
             </div>
@@ -105,10 +113,12 @@ export function ProductHeader({
         {/* ml-auto, not just justify-between: the identity line is long enough
             to wrap this group onto its own row, and without it the actions
             land on the LEFT of that row instead of the top right. */}
-        <div className="ml-auto flex items-center gap-5">
+        <div className="ml-auto flex shrink-0 items-center gap-4">
           <div className="text-right">
-            <div className="text-[11px] text-ink-400">Total Cost</div>
-            <div className="text-[17px] font-semibold tabular-nums text-ink-900">{totalCost}</div>
+            <div className="text-[10px] leading-tight text-ink-400">Total Cost</div>
+            <div className="text-[15px] font-semibold leading-tight tabular-nums text-ink-900">
+              {totalCost}
+            </div>
           </div>
           {children}
         </div>
@@ -117,14 +127,22 @@ export function ProductHeader({
   );
 }
 
-function Meta({ label, value }: { label: string; value: string }) {
+function Meta({
+  label,
+  value,
+  className,
+}: {
+  label: string;
+  value: string;
+  className?: string;
+}) {
   return (
-    <span>
+    <span className={className}>
       {label}: <span className="font-medium text-ink-900">{value}</span>
     </span>
   );
 }
 
-function Dot() {
-  return <span className="text-ink-300">·</span>;
+function Dot({ className }: { className?: string }) {
+  return <span className={cn("mx-1.5 text-ink-300", className)}>·</span>;
 }

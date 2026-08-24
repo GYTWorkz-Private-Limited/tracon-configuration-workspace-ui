@@ -1,8 +1,15 @@
 import { createFileRoute, Link, useNavigate } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
-import { Plus, Search, ArrowUpRight, MoreHorizontal } from "lucide-react";
+import { Plus, Search, ArrowUpRight, Trash2 } from "lucide-react";
 import { AppShell } from "@/components/layout/AppShell";
-import { usePods, articleProgress, POD_STATUS_LABEL, type PodStatus } from "@/lib/podsStore";
+import {
+  usePods,
+  articleProgress,
+  deletePod,
+  POD_STATUS_LABEL,
+  type Pod,
+  type PodStatus,
+} from "@/lib/podsStore";
 import { podHasRecostIn, useRecostRequests } from "@/lib/recostingStore";
 import { cn } from "@/lib/utils";
 
@@ -18,6 +25,30 @@ export const Route = createFileRoute("/pods/")({
   }),
   component: PodsDashboard,
 });
+
+/**
+ * Where "Open" on a POD actually lands.
+ *
+ * Any POD that already has an article on it has somewhere real to go —
+ * straight into Configuration & Costing, every article on the POD reachable
+ * from its tabs. The intake/setup screen is for picking a template and
+ * choosing articles for the first time; once that has happened once, Open
+ * never routes back through it — not even for an article still Not Started,
+ * since its tab and its "Start costing" affordance both live inside
+ * Configuration now.
+ *
+ * Only a POD with no articles at all — nothing yet to open — still lands on
+ * the setup page.
+ */
+function openTargetFor(pod: Pod) {
+  const first = pod.articles[0];
+  if (!first) return { to: "/pods/$id" as const, params: { id: pod.id } };
+  return {
+    to: "/config/$podId/$articleId" as const,
+    params: { podId: pod.id, articleId: first.id },
+    search: { sel: pod.articles.map((a) => a.id).join(",") },
+  };
+}
 
 /**
  * The dashboard's status is the ANSWER to "what is this order waiting on",
@@ -133,8 +164,7 @@ function PodsDashboard() {
                   >
                     <td className="px-4 py-3">
                       <Link
-                        to="/pods/$id"
-                        params={{ id: p.id }}
+                        {...openTargetFor(p)}
                         className="font-medium text-ink-900 hover:text-brand-700"
                       >
                         {p.id}
@@ -170,14 +200,28 @@ function PodsDashboard() {
                     </td>
                     <td className="px-4 py-3 text-ink-700">{p.owner}</td>
                     <td className="px-4 py-3 text-ink-500">{p.updatedAt}</td>
-                    <td className="px-4 py-3 text-right">
-                      <Link
-                        to="/pods/$id"
-                        params={{ id: p.id }}
-                        className="inline-flex items-center gap-1 text-brand-700 hover:underline"
-                      >
-                        Open <ArrowUpRight className="h-3 w-3" />
-                      </Link>
+                    <td className="px-4 py-3">
+                      <div className="flex items-center justify-end gap-3">
+                        <Link
+                          {...openTargetFor(p)}
+                          className="inline-flex items-center gap-1 text-brand-700 hover:underline"
+                        >
+                          Open <ArrowUpRight className="h-3 w-3" />
+                        </Link>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            if (confirm(`Delete ${p.id} — ${p.buyer}? This cannot be undone.`)) {
+                              deletePod(p.id);
+                            }
+                          }}
+                          aria-label={`Delete ${p.id}`}
+                          title="Delete POD"
+                          className="rounded p-1 text-ink-400 hover:bg-danger-50 hover:text-danger-600"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
+                      </div>
                     </td>
                   </tr>
                 );
@@ -202,6 +246,3 @@ function PodsDashboard() {
     </AppShell>
   );
 }
-
-// silence unused import warning in older lints
-void MoreHorizontal;
