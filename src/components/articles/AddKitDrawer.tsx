@@ -376,7 +376,6 @@ export function AddKitDrawer({ open, onClose, defaultBuyer, onCreate }: Props) {
                       <th className="px-4 py-2 text-left font-medium">Article</th>
                       <th className="px-3 py-2 text-left font-medium">Size</th>
                       <th className="px-3 py-2 text-left font-medium">Qty / set</th>
-                      <th className="px-3 py-2 text-left font-medium">Optional</th>
                       <th className="px-3 py-2" />
                     </tr>
                   </thead>
@@ -399,14 +398,6 @@ export function AddKitDrawer({ open, onClose, defaultBuyer, onCreate }: Props) {
                               patch(it.id, { qty: Math.max(1, Number(e.target.value) || 1) })
                             }
                             className="w-16 rounded-md border border-hairline bg-surface px-2 py-1 text-[13px] tabular-nums focus:outline-none"
-                          />
-                        </td>
-                        <td className="px-3 py-2">
-                          <input
-                            type="checkbox"
-                            checked={!!it.optional}
-                            onChange={(e) => patch(it.id, { optional: e.target.checked })}
-                            className="h-4 w-4 rounded border-hairline accent-brand-700"
                           />
                         </td>
                         <td className="px-3 py-2">
